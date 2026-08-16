@@ -1,0 +1,45 @@
+services:
+  postgres:
+    image: postgres:16.9
+    environment:
+      POSTGRES_DB: ${DB_NAME:-azzo}
+      POSTGRES_USER: ${DB_USERNAME:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-postgres} -d ${DB_NAME:-azzo}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  api_agenda:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    # Repassa TODAS as variaveis do .env para o container automaticamente — sem isso,
+    # so as chaves listadas abaixo em "environment:" chegariam ao processo, e qualquer
+    # variavel nova (MAIL_*, ASAAS_*, MINIO_*, FISCAL_*, NFSE_*, etc.) ficaria sem efeito
+    # mesmo estando no .env. "environment:" abaixo tem prioridade sobre o env_file para
+    # as poucas chaves computadas/sobrescritas aqui (ex.: DB_URL montado a partir de DB_NAME).
+    env_file:
+      - .env
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      DB_URL: jdbc:postgresql://postgres:5432/${DB_NAME:-azzo}?currentSchema=azzo_app
+      DB_USERNAME: ${DB_USERNAME:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY}
+      JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      LGPD_CONTACT_EMAIL: ${LGPD_CONTACT_EMAIL}
+      META_APP_SECRET: ${META_APP_SECRET}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
+      PUBLIC_BOOKING_BASE_URL: ${PUBLIC_BOOKING_BASE_URL:-http://localhost:5173}
+    depends_on:
+      postgres:
+        condition: service_healthy

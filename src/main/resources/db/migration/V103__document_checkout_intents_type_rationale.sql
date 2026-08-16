@@ -1,0 +1,34 @@
+-- Documentacao: Racional do tipo NUMERIC(19,2) em checkout_intents e products
+--
+-- A V66 alterou as colunas de preco de BIGINT para NUMERIC(19,2) usando prefixo
+-- de schema hardcoded (azzo_app.), que e inconsistente com as demais migrations
+-- que operam sem prefixo de schema.
+--
+-- ANALISE DA ENTITY:
+-- A entity CheckoutIntent.java usa BigDecimal diretamente nas colunas de preco
+-- (unitPriceSnapshot, totalPriceSnapshot, calculatedTotal) SEM o converter
+-- MoneyBigDecimalConverter. Isso significa que o Hibernate mapeia diretamente
+-- BigDecimal <-> NUMERIC, o que torna o tipo NUMERIC(19,2) correto e intencional.
+--
+-- Contraste: entidades como Transacao.java e Servico.java usam MoneyBigDecimalConverter
+-- que converte BigDecimal <-> BIGINT (centavos). Essas tabelas DEVEM manter BIGINT.
+--
+-- CONCLUSAO:
+-- - checkout_intents: NUMERIC(19,2) esta correto. Nao ha inconsistencia de tipo.
+-- - products.price_cents: tambem foi alterado para NUMERIC(19,2) pela V66. A entity
+--   Product.java (domain/entity/Product.java) mapeia priceCents como BigDecimal sem
+--   MoneyBigDecimalConverter, portanto NUMERIC(19,2) esta correto apesar do nome
+--   enganoso do campo (price_cents sugere centavos/BIGINT, mas nao e o caso aqui).
+--
+-- PROBLEMA REAL DA V66:
+-- O uso de azzo_app. como prefixo e inconsistente. Se o search_path do Flyway nao
+-- incluir azzo_app, a migration pode falhar em ambientes onde o schema e diferente.
+-- As demais migrations operam sem prefixo e confiam no search_path configurado.
+-- Como a V66 ja foi executada em producao, nenhuma acao corretiva e necessaria
+-- no schema — apenas documentar para evitar repeticao do padrao.
+--
+-- ACAO RECOMENDADA FUTURA:
+-- Nunca usar prefixo de schema hardcoded em migrations. Confiar no search_path
+-- configurado em quarkus.datasource.jdbc.url ou application.properties.
+
+SELECT 1; -- no-op para satisfazer o parser do Flyway

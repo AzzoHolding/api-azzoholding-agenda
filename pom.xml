@@ -1,0 +1,325 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>4.1.0</version>
+    <relativePath/>
+  </parent>
+
+  <groupId>br.com.phdigitalcode</groupId>
+  <artifactId>api_agenda</artifactId>
+  <version>0.1.0-SNAPSHOT</version>
+  <name>api_agenda</name>
+  <description>
+    Migracao Spring Boot do azzo-agenda-pro (Quarkus). Etapa 3 (esqueleto) + Etapa 4
+    (dominios security/common e auth). Ver MIGRACAO-QUARKUS-SPRING.md na raiz de spring-boot-app.
+  </description>
+
+  <properties>
+    <java.version>25</java.version>
+    <bcrypt.version>0.10.2</bcrypt.version>
+    <bucket4j.version>8.10.1</bucket4j.version>
+    <jjwt.version>0.12.6</jjwt.version>
+    <springdoc.version>2.8.6</springdoc.version>
+    <!-- Mesmas versoes do pom do Quarkus original (importacao em massa de estoque). -->
+    <minio.version>8.5.12</minio.version>
+    <poi.version>5.3.0</poi.version>
+    <openpdf.version>1.3.39</openpdf.version>
+    <spring-dotenv.version>5.0.1</spring-dotenv.version>
+    <!--
+      Spring Boot 4 passou a usar Jackson 3 (tools.jackson.*) por default para o ObjectMapper
+      autoconfigurado. As classes migradas do Quarkus (23 delas) foram escritas contra o Jackson 2
+      classico (com.fasterxml.jackson.databind.ObjectMapper), que continua no classpath so de forma
+      transitiva (via jjwt-jackson/minio/springdoc). Fixamos aqui como dependencia direta + o bean
+      em config/JacksonLegacyConfig.java para nao depender de transitividade fragil.
+    -->
+    <jackson2.version>2.21.4</jackson2.version>
+  </properties>
+
+  <dependencies>
+    <!-- Web (Spring MVC - servlet, NUNCA WebFlux) -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+
+    <!-- Persistencia -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-data-jpa</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.postgresql</groupId>
+      <artifactId>postgresql</artifactId>
+      <scope>runtime</scope>
+    </dependency>
+
+    <!-- Flyway -->
+    <dependency>
+      <groupId>org.flywaydb</groupId>
+      <artifactId>flyway-core</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.flywaydb</groupId>
+      <artifactId>flyway-database-postgresql</artifactId>
+    </dependency>
+
+    <!-- Validacao -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-validation</artifactId>
+    </dependency>
+
+    <!-- Seguranca -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-security</artifactId>
+    </dependency>
+    <!-- Spring Boot 4.x renomeou spring-boot-starter-aop para spring-boot-starter-aspectj -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-aspectj</artifactId>
+    </dependency>
+
+    <!-- JWT RSA (mesmo formato de claims do provedor Quarkus/SmallRye JWT) -->
+    <dependency>
+      <groupId>io.jsonwebtoken</groupId>
+      <artifactId>jjwt-api</artifactId>
+      <version>${jjwt.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>io.jsonwebtoken</groupId>
+      <artifactId>jjwt-impl</artifactId>
+      <version>${jjwt.version}</version>
+      <scope>runtime</scope>
+    </dependency>
+    <dependency>
+      <groupId>io.jsonwebtoken</groupId>
+      <artifactId>jjwt-jackson</artifactId>
+      <version>${jjwt.version}</version>
+      <scope>runtime</scope>
+    </dependency>
+
+    <!-- BCrypt: mesma lib do Quarkus original (compatibilidade de hash existente no banco) -->
+    <dependency>
+      <groupId>at.favre.lib</groupId>
+      <artifactId>bcrypt</artifactId>
+      <version>${bcrypt.version}</version>
+    </dependency>
+
+    <!-- Rate limiting (sem extensao Spring pronta - bucket4j-core puro, ver risco 5 do inventario) -->
+    <dependency>
+      <groupId>com.bucket4j</groupId>
+      <artifactId>bucket4j-core</artifactId>
+      <version>${bucket4j.version}</version>
+    </dependency>
+
+    <!-- Cache (RBAC/menu/CNPJ) -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-cache</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.github.ben-manes.caffeine</groupId>
+      <artifactId>caffeine</artifactId>
+    </dependency>
+
+    <!-- Actuator / Health / Metrics -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-actuator</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.micrometer</groupId>
+      <artifactId>micrometer-registry-prometheus</artifactId>
+    </dependency>
+
+    <!-- OpenAPI -->
+    <dependency>
+      <groupId>org.springdoc</groupId>
+      <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+      <version>${springdoc.version}</version>
+    </dependency>
+
+    <!-- Storage de arquivos de importacao (MinIO) -->
+    <dependency>
+      <groupId>io.minio</groupId>
+      <artifactId>minio</artifactId>
+      <version>${minio.version}</version>
+    </dependency>
+
+    <!-- Planilhas XLSX: modelo de importacao e parse do arquivo enviado -->
+    <dependency>
+      <groupId>org.apache.poi</groupId>
+      <artifactId>poi-ooxml</artifactId>
+      <version>${poi.version}</version>
+    </dependency>
+
+    <!-- PDF: DANFE (fiscal), mesma lib do Quarkus original -->
+    <dependency>
+      <groupId>com.github.librepdf</groupId>
+      <artifactId>openpdf</artifactId>
+      <version>${openpdf.version}</version>
+    </dependency>
+
+    <!-- Envio de email SMTP (modulo email - fila/worker), equivalente ao Jakarta Mail do Quarkus original -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-mail</artifactId>
+    </dependency>
+
+    <!--
+      Jackson 2 classico (com.fasterxml.jackson.databind.ObjectMapper), usado por 23 classes
+      migradas do Quarkus. Spring Boot 4 so autoconfigura Jackson 3 (tools.jackson.databind) —
+      ver bean em config/JacksonLegacyConfig.java e o comentario na property jackson2.version.
+    -->
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+      <version>${jackson2.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>com.fasterxml.jackson.datatype</groupId>
+      <artifactId>jackson-datatype-jsr310</artifactId>
+      <version>${jackson2.version}</version>
+    </dependency>
+
+    <!--
+      Le automaticamente o .env da raiz do projeto e expoe como Spring PropertySource,
+      SO em runs fora de Docker (mvn spring-boot:run / IDE) — quando roda via
+      docker-compose, o Compose ja injeta as variaveis diretamente no container e esta
+      biblioteca fica inerte (variavel de ambiente real sempre tem prioridade sobre .env,
+      por design da lib). Nao precisa de config extra: basta o .env existir na raiz.
+    -->
+    <dependency>
+      <groupId>me.paulschwarz</groupId>
+      <artifactId>springboot4-dotenv</artifactId>
+      <optional>true</optional>
+    </dependency>
+
+    <!-- Lombok -->
+    <dependency>
+      <groupId>org.projectlombok</groupId>
+      <artifactId>lombok</artifactId>
+      <optional>true</optional>
+    </dependency>
+
+    <!-- Testes -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <!-- Spring Boot 4.x moveu o suporte a @AutoConfigureMockMvc/@WebMvcTest para este artefato -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-webmvc-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.security</groupId>
+      <artifactId>spring-security-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <!--
+      Declarado explicitamente (mesmo ja vindo transitivamente do spring-boot-starter-test) para
+      que o surefire consiga resolver ${org.mockito:mockito-core:jar} e carregar o Mockito como
+      java agent. A resolucao dessa propriedade so funciona para dependencias diretas do projeto.
+    -->
+    <dependency>
+      <groupId>org.mockito</groupId>
+      <artifactId>mockito-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>postgresql</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-testcontainers</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>org.testcontainers</groupId>
+        <artifactId>testcontainers-bom</artifactId>
+        <version>1.21.3</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+      <dependency>
+        <groupId>me.paulschwarz</groupId>
+        <artifactId>spring-dotenv-bom</artifactId>
+        <version>${spring-dotenv.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <configuration>
+          <annotationProcessorPaths>
+            <path>
+              <groupId>org.projectlombok</groupId>
+              <artifactId>lombok</artifactId>
+              <version>${lombok.version}</version>
+            </path>
+          </annotationProcessorPaths>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-maven-plugin</artifactId>
+        <configuration>
+          <excludes>
+            <exclude>
+              <groupId>org.projectlombok</groupId>
+              <artifactId>lombok</artifactId>
+            </exclude>
+          </excludes>
+        </configuration>
+      </plugin>
+      <!--
+        A JVM do fork do surefire roda em paralelo com a do proprio Maven. Sem limitar o
+        compilador JIT, as duas juntas estouram o commit limit do Windows em maquinas com
+        muitos apps abertos e o fork morre com "insufficient memory ... Chunk::new" ANTES
+        de rodar qualquer teste — o sintoma engana, porque nao e falta de heap nem de RAM
+        fisica, e sim memoria nativa do JIT. TieredStopAtLevel=1 (so C1) + SerialGC +
+        teto de code cache/metaspace mantem o fork enxuto.
+
+        Sem -javaagent do Mockito de proposito: o placeholder ${org.mockito:mockito-core:jar}
+        nao e resolvido por esta versao do surefire (chega literal na linha de comando e a JVM
+        nao inicializa). A suite passa sem ele; se o Mockito passar a exigir o agent, resolver
+        o caminho do jar por outro meio (ex.: maven-dependency-plugin:properties) em vez de
+        reintroduzir o placeholder.
+      -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <configuration>
+          <argLine>-Xmx384m -Xss512k -XX:TieredStopAtLevel=1 -XX:ReservedCodeCacheSize=64m -XX:MaxMetaspaceSize=256m -XX:CompressedClassSpaceSize=64m -XX:+UseSerialGC</argLine>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>

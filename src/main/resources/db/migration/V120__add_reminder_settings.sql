@@ -1,0 +1,4 @@
+ALTER TABLE tenant_operational_settings
+    ADD COLUMN IF NOT EXISTS d1_reminder_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    ADD COLUMN IF NOT EXISTS d1_reminder_hora VARCHAR(5) NOT NULL DEFAULT '18:00',
+    ADD COLUMN IF NOT EXISTS hours_before_reminder_enabled BOOLEAN NOT NULL DEFAULT FALSE;

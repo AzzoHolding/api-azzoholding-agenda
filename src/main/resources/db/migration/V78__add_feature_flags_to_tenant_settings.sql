@@ -1,0 +1,7 @@
+ALTER TABLE tenant_operational_settings
+  ADD COLUMN IF NOT EXISTS asaas_enabled BOOLEAN NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS minio_enabled BOOLEAN NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS chat_retention_days_completed INTEGER NOT NULL DEFAULT 180,
+  ADD COLUMN IF NOT EXISTS chat_retention_days_canceled INTEGER NOT NULL DEFAULT 90,
+  ADD COLUMN IF NOT EXISTS chat_retention_days_default INTEGER NOT NULL DEFAULT 365,
+  ADD COLUMN IF NOT EXISTS audit_retention_days INTEGER NOT NULL DEFAULT 365;

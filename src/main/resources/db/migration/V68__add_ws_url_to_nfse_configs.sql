@@ -1,0 +1,3 @@
+ALTER TABLE nfse_configs
+  ADD COLUMN IF NOT EXISTS ws_url VARCHAR(512),
+  ADD COLUMN IF NOT EXISTS ws_url_homologacao VARCHAR(512);

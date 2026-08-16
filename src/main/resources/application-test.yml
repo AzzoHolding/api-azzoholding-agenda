@@ -1,0 +1,26 @@
+# Perfil test - usado pelos testes de integracao (Testcontainers injeta datasource dinamicamente
+# via @DynamicPropertySource / @ServiceConnection; valores abaixo sao apenas fallback).
+app:
+  security:
+    jwt:
+      private-key-location: classpath:privateKey.pem
+      public-key-location: classpath:publicKey.pem
+    encryption-key: TestOnlyEncryptionKey1234567890
+  internal:
+    api-key: test-internal-key
+  lgpd:
+    contact:
+      email: lgpd-test@azzo.local
+
+# Variaveis brutas lidas diretamente por LgpdContactStartupValidator (nao pelo app.lgpd.contact.*
+# acima, que tem fallback default e por isso nao serve para satisfazer essa checagem mais estrita).
+# Mesmos valores que o CI do Quarkus original ja injeta (docker-image.yml/pull-request-quality-gate.yml).
+LGPD_CONTACT_EMAIL: lgpd-test@azzo.local
+LGPD_CONTACT_CHANNEL: Canal de privacidade de teste
+LGPD_CONTACT_RESPONSE_SLA: Resposta inicial em ate 15 dias corridos
+
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false

@@ -1,0 +1,293 @@
+# api_agenda - configuracao base (perfis: dev, test, prod)
+# Espelha backend/azzo-agenda-pro/src/main/resources/application.properties (Quarkus original).
+# Mesmos nomes de variavel de ambiente preservados de proposito.
+
+server:
+  port: ${SERVER_PORT:8080}
+  servlet:
+    context-path: ${ROOT_PATH_AGENDA:/}
+
+spring:
+  application:
+    name: api_agenda
+
+  datasource:
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      minimum-idle: 2
+      maximum-pool-size: 10
+      max-lifetime: 240000
+      idle-timeout: 120000
+      connection-timeout: 10000
+
+  servlet:
+    multipart:
+      # Espelha quarkus.http.limits.max-body-size=10M do original (upload de importacao).
+      max-file-size: 10MB
+      max-request-size: 10MB
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: none
+    properties:
+      hibernate:
+        default_schema: azzo_app
+        jdbc:
+          time_zone: UTC
+        format_sql: false
+
+  flyway:
+    enabled: true
+    schemas: azzo_app
+    default-schema: azzo_app
+    out-of-order: true
+    baseline-on-migrate: true
+    baseline-version: 0
+
+  cache:
+    type: simple # gerenciado explicitamente por CacheConfig (Caffeine)
+
+app:
+  security:
+    access-token:
+      ttl-minutes: ${ACCESS_TOKEN_TTL_MINUTES:15}
+    refresh-token:
+      ttl-days: ${REFRESH_TOKEN_TTL_DAYS:30}
+    encryption-key: ${ENCRYPTION_KEY:AzzoAgendaProDefaultKey123456789}
+    mfa:
+      issuer: ${MFA_ISSUER:Azzo Agenda Pro}
+  auth:
+    cookie:
+      secure: ${AUTH_COOKIE_SECURE:true}
+      same-site: ${AUTH_COOKIE_SAME_SITE:STRICT}
+      domain: ${AUTH_COOKIE_DOMAIN:__unset__}
+  internal:
+    api-key: ${INTERNAL_API_KEY:changeme-dev}
+  public:
+    booking:
+      base-url: ${PUBLIC_BOOKING_BASE_URL:http://localhost:5173}
+  # Espelha app.mail.* (envio SMTP de credenciais/alertas) + app.email.* (fila/worker de emails
+  # assincronos, ex.: reset de senha) do application.properties do Quarkus.
+  mail:
+    credentials:
+      enabled: ${MAIL_CREDENTIALS_ENABLED:true}
+      username: ${MAIL_CREDENTIALS_USERNAME:__unset__}
+      password: ${MAIL_CREDENTIALS_PASSWORD:__unset__}
+      # Original: default "false" no perfil base, "true" (env-overridavel) so no %dev, "false"
+      # fixo (NAO env-overridavel) no %prod — ver application-dev.yml/application-prod.yml.
+      console-fallback-enabled: false
+    host: ${MAIL_HOST:__unset__}
+    port: ${MAIL_PORT:587}
+    starttls: ${MAIL_STARTTLS:REQUIRED}
+    ssl: ${MAIL_SSL:false}
+    smtp:
+      auth-mechanisms: ${MAIL_SMTP_AUTH_MECHANISMS:LOGIN PLAIN}
+      timeout-seconds: ${MAIL_SMTP_TIMEOUT_SECONDS:20}
+    from: ${MAIL_FROM:no-reply@azzoholding.com.br}
+  email:
+    product-name: ${EMAIL_PRODUCT_NAME:Azzo Agenda Pro}
+    jobs:
+      batch-size: ${EMAIL_JOBS_BATCH_SIZE:20}
+      scheduler:
+        every: ${EMAIL_JOBS_SCHEDULER_EVERY:PT3M}
+      executor:
+        mode: ${EMAIL_JOBS_EXECUTOR_MODE:virtual}
+        pool-size: ${EMAIL_JOBS_EXECUTOR_POOL_SIZE:4}
+      processing-timeout-seconds: ${EMAIL_JOBS_PROCESSING_TIMEOUT_SECONDS:45}
+  lgpd:
+    contact:
+      email: ${LGPD_CONTACT_EMAIL:__unset__}
+      channel: ${LGPD_CONTACT_CHANNEL:__unset__}
+      response-sla: ${LGPD_CONTACT_RESPONSE_SLA:confirmacao ate 2 dias uteis; resposta inicial ate 15 dias corridos; conclusao ate 30 dias corridos}
+    retention:
+      purge-cron: ${LGPD_PURGE_CRON:0 30 2 * * ?}
+  # Espelha app.audit.* do application.properties do Quarkus (modulo audit).
+  audit:
+    retention:
+      days: ${AUDIT_RETENTION_DAYS:365}
+      policy-version: ${AUDIT_RETENTION_POLICY_VERSION:v1}
+      max-tenants-per-run: ${AUDIT_RETENTION_MAX_TENANTS_PER_RUN:500}
+      purge:
+        cron: ${AUDIT_RETENTION_PURGE_CRON:0 30 3 * * ?}
+  # app.public-base-url: sem entry proprio aqui de proposito (mesmo padrao ja usado por
+  # ServicoTenantPayments) — o default do @Value cobre dev/test; producao sobrescreve via env var
+  # APP_PUBLIC_BASE_URL, espelhando o %prod.app.public-base-url do Quarkus original.
+  public-base-url: ${APP_PUBLIC_BASE_URL:https://localhost:8443}
+  meta:
+    app-id: ${META_APP_ID:__unset__}
+    app-secret: ${META_APP_SECRET:__unset__}
+    graph-api-version: ${META_GRAPH_API_VERSION:v18.0}
+  # Espelha app.chat.* do application.properties do Quarkus. app.chat.manual-mode.duration-hours
+  # nao existe no original (so o default "24" do @ConfigProperty) — mantido sem entry no yml de
+  # proposito, mesmo comportamento.
+  chat:
+    retention:
+      days:
+        completed: ${CHAT_RETENTION_DAYS_COMPLETED:1}
+        canceled: ${CHAT_RETENTION_DAYS_CANCELED:2}
+        default: ${CHAT_RETENTION_DAYS_DEFAULT:5}
+    reactivation:
+      abandonment-delay-minutes: ${CHAT_REACTIVATION_ABANDONMENT_DELAY_MINUTES:30}
+  # Espelha app.asaas.* + quarkus.rest-client.asaas-api.* do application.properties do Quarkus.
+  # Os timeouts eram propriedades do rest-client la; aqui viram config do bean AsaasClient.
+  asaas:
+    base-url: ${ASAAS_BASE_URL:https://sandbox.asaas.com}
+    connect-timeout-ms: ${ASAAS_CONNECT_TIMEOUT_MS:10000}
+    read-timeout-ms: ${ASAAS_READ_TIMEOUT_MS:20000}
+    api-key: ${ASAAS_API_KEY:__unset__}
+    enabled: ${ASAAS_ENABLED:false}
+    webhook:
+      token: ${ASAAS_WEBHOOK_TOKEN:__unset__}
+    tenant:
+      sandbox-base-url: ${ASAAS_TENANT_SANDBOX_BASE_URL:https://sandbox.asaas.com}
+      production-base-url: ${ASAAS_TENANT_PRODUCTION_BASE_URL:https://api.asaas.com}
+  # Espelha app.storage.minio.* do application.properties do Quarkus.
+  storage:
+    minio:
+      enabled: ${MINIO_ENABLED:false}
+      endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
+      access-key: ${MINIO_ACCESS_KEY:${MINIO_ROOT_USER:minioadmin}}
+      secret-key: ${MINIO_SECRET_KEY:${MINIO_ROOT_PASSWORD:minioadmin123}}
+      bucket: ${MINIO_BUCKET:azzo-importacoes}
+      presign-expiration-minutes: ${MINIO_PRESIGN_EXPIRATION_MINUTES:10}
+      proxy-base-url: ${STORAGE_PROXY_BASE_URL:http://localhost:8080}
+  # Espelha app.salon.logo.max-bytes do application.properties do Quarkus.
+  salon:
+    logo:
+      max-bytes: ${SALON_LOGO_MAX_BYTES:10485760}
+  # Espelha app.estoque.importacao.* do application.properties do Quarkus.
+  estoque:
+    importacao:
+      limite-por-rodada: ${ESTOQUE_IMPORTACAO_LIMITE_POR_RODADA:100}
+      ttl-sucesso-minutos: ${ESTOQUE_IMPORTACAO_TTL_SUCESSO_MINUTOS:60}
+  # Espelha app.fiscal.* do application.properties do Quarkus.
+  fiscal:
+    provider: ${FISCAL_PROVIDER:mock}
+    provider-api:
+      url: ${FISCAL_PROVIDER_BASE_URL:http://localhost:9088/api/v1/fiscal}
+    danfe:
+      worker:
+        batch-size: ${FISCAL_DANFE_WORKER_BATCH_SIZE:20}
+      download-expiration-hours: ${FISCAL_DANFE_DOWNLOAD_EXPIRATION_HOURS:24}
+      ttl-falha-minutos: ${ESTOQUE_IMPORTACAO_TTL_FALHA_MINUTOS:1440}
+      cpu-multiplier: ${ESTOQUE_IMPORTACAO_CPU_MULTIPLIER:2}
+      parallelism-max: ${ESTOQUE_IMPORTACAO_PARALLELISM_MAX:16}
+      virtual-threads-enabled: ${ESTOQUE_IMPORTACAO_VIRTUAL_THREADS_ENABLED:false}
+  # Espelha app.nfse.* do application.properties do Quarkus.
+  nfse:
+    tomador:
+      cnpj-lookup:
+        enabled: ${NFSE_TOMADOR_CNPJ_LOOKUP_ENABLED:true}
+    test-providers:
+      enabled: ${NFSE_TEST_PROVIDERS_ENABLED:false}
+    certificate-unlock:
+      ttl-minutes: ${NFSE_CERTIFICATE_UNLOCK_TTL_MINUTES:15}
+    pdf:
+      worker:
+        batch-size: ${NFSE_PDF_WORKER_BATCH_SIZE:20}
+      download-expiration-hours: ${NFSE_PDF_DOWNLOAD_EXPIRATION_HOURS:24}
+    alerts:
+      certificate-expire-days: ${NFSE_ALERTS_CERTIFICATE_EXPIRE_DAYS:30}
+      window-hours: ${NFSE_ALERTS_WINDOW_HOURS:24}
+    status-polling:
+      every: ${NFSE_STATUS_POLLING_EVERY:PT30S}
+      delayed: ${NFSE_STATUS_POLLING_DELAYED:PT45S}
+      batch-size: ${NFSE_STATUS_POLLING_BATCH_SIZE:20}
+    provider:
+      abrasf:
+        default:
+          ws-url: ${NFSE_PROVIDER_ABRASF_DEFAULT_WS_URL:__unset__}
+          ws-url-homologacao: ${NFSE_PROVIDER_ABRASF_DEFAULT_WS_URL_HOMOLOGACAO:__unset__}
+        connect-timeout-ms: ${NFSE_PROVIDER_ABRASF_CONNECT_TIMEOUT_MS:30000}
+        read-timeout-ms: ${NFSE_PROVIDER_ABRASF_READ_TIMEOUT_MS:60000}
+      sefin-nacional:
+        base-url: ${NFSE_PROVIDER_SEFIN_NACIONAL_BASE_URL:https://sefin.nfse.gov.br/SefinNacional}
+        base-url-homologacao: ${NFSE_PROVIDER_SEFIN_NACIONAL_BASE_URL_HOMOLOGACAO:https://sefin.producaorestrita.nfse.gov.br/SefinNacional}
+        production-enabled: ${NFSE_PROVIDER_SEFIN_NACIONAL_PRODUCTION_ENABLED:false}
+        authorize-path: ${NFSE_PROVIDER_SEFIN_NACIONAL_AUTHORIZE_PATH:__unset__}
+        authorize-path-homologacao: ${NFSE_PROVIDER_SEFIN_NACIONAL_AUTHORIZE_PATH_HOMOLOGACAO:__unset__}
+        cancel-path: ${NFSE_PROVIDER_SEFIN_NACIONAL_CANCEL_PATH:/nfse/{chaveAcesso}/eventos}
+        cancel-path-homologacao: ${NFSE_PROVIDER_SEFIN_NACIONAL_CANCEL_PATH_HOMOLOGACAO:/nfse/{chaveAcesso}/eventos}
+        query-path: ${NFSE_PROVIDER_SEFIN_NACIONAL_QUERY_PATH:/nfse/{chaveAcesso}}
+        query-path-homologacao: ${NFSE_PROVIDER_SEFIN_NACIONAL_QUERY_PATH_HOMOLOGACAO:/nfse/{chaveAcesso}}
+        cancel-reason-code-default: ${NFSE_PROVIDER_SEFIN_NACIONAL_CANCEL_REASON_CODE_DEFAULT:9}
+        query-http-method: ${NFSE_PROVIDER_SEFIN_NACIONAL_QUERY_HTTP_METHOD:GET}
+        query-access-key-param: ${NFSE_PROVIDER_SEFIN_NACIONAL_QUERY_ACCESS_KEY_PARAM:chNFSe}
+        query-protocol-param: ${NFSE_PROVIDER_SEFIN_NACIONAL_QUERY_PROTOCOL_PARAM:protocolo}
+        query-include-protocol: ${NFSE_PROVIDER_SEFIN_NACIONAL_QUERY_INCLUDE_PROTOCOL:true}
+        query-mtls-enabled: ${NFSE_PROVIDER_SEFIN_NACIONAL_QUERY_MTLS_ENABLED:false}
+  whatsapp:
+    embedded-signup:
+      enabled: ${WHATSAPP_EMBEDDED_SIGNUP_ENABLED:false}
+  agenda:
+    debug: ${APP_AGENDA_DEBUG:false}
+  cors:
+    origins: ${CORS_ORIGINS:http://localhost:5173,http://127.0.0.1:5173,https://localhost:5173,https://127.0.0.1:5173}
+  integration:
+    cnpjws:
+      base-url: ${CNPJWS_BASE_URL:https://publica.cnpj.ws}
+      connect-timeout-ms: ${CNPJWS_CONNECT_TIMEOUT_MS:3000}
+      read-timeout-ms: ${CNPJWS_READ_TIMEOUT_MS:5000}
+    brasilapi-cnpj:
+      base-url: ${BRASILAPI_CNPJ_BASE_URL:https://brasilapi.com.br}
+      connect-timeout-ms: ${BRASILAPI_CNPJ_CONNECT_TIMEOUT_MS:5000}
+      read-timeout-ms: ${BRASILAPI_CNPJ_READ_TIMEOUT_MS:8000}
+    # Espelha quarkus.rest-client.assistant-api.* do application.properties do Quarkus.
+    assistant-api:
+      base-url: ${ASSISTANT_API_URL:http://localhost:8081}
+      connect-timeout-ms: ${ASSISTANT_API_CONNECT_TIMEOUT:5000}
+      read-timeout-ms: ${ASSISTANT_API_READ_TIMEOUT:15000}
+    # WhatsApp/Telegram nao tinham timeout dedicado no original (java.net.http.HttpClient com
+    # Duration fixo no codigo — 10s connect, 20s read para ambos) — expostos aqui como properties
+    # configuraveis mantendo o mesmo default.
+    whatsapp:
+      connect-timeout-ms: ${WHATSAPP_CLIENT_CONNECT_TIMEOUT_MS:10000}
+      read-timeout-ms: ${WHATSAPP_CLIENT_READ_TIMEOUT_MS:20000}
+    telegram:
+      connect-timeout-ms: ${TELEGRAM_CLIENT_CONNECT_TIMEOUT_MS:10000}
+      read-timeout-ms: ${TELEGRAM_CLIENT_READ_TIMEOUT_MS:20000}
+  rate-limit:
+    auth-login:
+      max-attempts: ${LOGIN_RATE_LIMIT_MAX_ATTEMPTS:5}
+      window-minutes: ${LOGIN_RATE_LIMIT_WINDOW_MINUTES:3}
+    auth-register:
+      max-attempts: ${REGISTER_RATE_LIMIT_MAX_ATTEMPTS:3}
+      window-minutes: ${REGISTER_RATE_LIMIT_WINDOW_MINUTES:10}
+    auth-forgot-password:
+      max-attempts: ${FORGOT_PASSWORD_RATE_LIMIT_MAX_ATTEMPTS:5}
+      window-minutes: ${FORGOT_PASSWORD_RATE_LIMIT_WINDOW_MINUTES:10}
+    auth-reset-password:
+      max-attempts: ${RESET_PASSWORD_RATE_LIMIT_MAX_ATTEMPTS:5}
+      window-minutes: ${RESET_PASSWORD_RATE_LIMIT_WINDOW_MINUTES:10}
+    fiscal-api:
+      max-requests: ${FISCAL_RATE_LIMIT_MAX_REQUESTS:120}
+      window-minutes: ${FISCAL_RATE_LIMIT_WINDOW_MINUTES:1}
+
+management:
+  endpoints:
+    web:
+      base-path: /actuator
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: when-authorized
+      group:
+        # O original marca EstoqueImportacaoReadinessHealthCheck com @Readiness; em Spring o
+        # indicador so entra na sonda de readiness se listado neste grupo.
+        readiness:
+          include: readinessState,db,estoqueImportacaoReadiness
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+
+logging:
+  level:
+    root: INFO
+    br.com.phdigitalcode: INFO

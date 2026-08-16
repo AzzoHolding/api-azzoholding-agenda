@@ -1,0 +1,179 @@
+name: Build and Push Spring Boot Image
+
+# Espelha backend/azzo-agenda-pro/.github/workflows/docker-image.yml (Quarkus original),
+# adaptado para Maven/Spring Boot. So dispara quando este repositorio existir de fato no
+# GitHub e o codigo for enviado para uma das branches/tags abaixo — nao roda so por estar
+# no disco local.
+
+on:
+  push:
+    branches:
+      - develop
+      - master
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  packages: write
+  actions: read
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: azzo
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d azzo"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # Mesmos nomes de variavel do original Quarkus (preservados de proposito na migracao).
+      DB_URL: jdbc:postgresql://localhost:5432/azzo?currentSchema=azzo_app
+      DB_USERNAME: postgres
+      DB_PASSWORD: postgres
+      ENCRYPTION_KEY: AzzoAgendaProDefaultKey123456789
+      LGPD_CONTACT_EMAIL: privacidade@azzoholding.com.br
+      LGPD_CONTACT_CHANNEL: Canal de privacidade oficial
+      LGPD_CONTACT_RESPONSE_SLA: Resposta inicial em ate 15 dias corridos
+
+    steps:
+      - name: Checkout do codigo
+        uses: actions/checkout@v4
+
+      - name: Configurar Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: maven
+
+      - name: Preparar banco de teste
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+          PGPASSWORD=postgres psql \
+            -h localhost \
+            -U postgres \
+            -d azzo \
+            -c 'CREATE SCHEMA IF NOT EXISTS azzo_app;'
+
+          PGPASSWORD=postgres psql \
+            -h localhost \
+            -U postgres \
+            -d azzo \
+            -c 'CREATE EXTENSION IF NOT EXISTS "uuid-ossp";'
+
+      # O runner ubuntu-latest ja tem Docker instalado e o daemon acessivel via socket —
+      # ao contrario do ambiente sandboxed local usado durante a migracao, aqui os testes
+      # de integracao com Testcontainers (que ficam "Skipped" localmente por falta de
+      # Docker) rodam de verdade.
+      - name: Rodar suite completa (mvn clean verify)
+        run: mvn -B clean verify
+
+      - name: Login no GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Gerar metadados da imagem
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix=sha-,format=short
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+
+      - name: Build e Push da imagem Docker
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Limpar imagens antigas do GHCR
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const [owner, repo] = process.env.GITHUB_REPOSITORY.split('/');
+            const packageName = repo;
+
+            const { data: versions } = await github.rest.packages.getAllPackageVersionsForPackageOwnedByUser({
+              package_type: 'container',
+              package_name: packageName,
+              username: owner,
+              per_page: 100,
+            }).catch(() =>
+              github.rest.packages.getAllPackageVersionsForPackageOwnedByOrg({
+                package_type: 'container',
+                package_name: packageName,
+                org: owner,
+                per_page: 100,
+              })
+            );
+
+            const currentTags = (process.env.DOCKER_METADATA_OUTPUT_TAG_NAMES || '')
+              .split(/\s+/)
+              .map(t => t.trim())
+              .filter(Boolean);
+            const currentVersions = versions.filter(v =>
+              v.metadata?.container?.tags?.some(t => currentTags.includes(t))
+            );
+            const developVersions = versions.filter(v =>
+              v.metadata?.container?.tags?.includes('develop')
+            );
+            const masterVersions = versions.filter(v =>
+              v.metadata?.container?.tags?.includes('master')
+            );
+            const taggedVersions = versions
+              .filter(v => v.metadata?.container?.tags?.some(t => /^v\d/.test(t)))
+              .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+            // Mantem: imagem atual + develop + master + 2 tags semanticas mais recentes
+            const keepIds = new Set([
+              ...currentVersions.map(v => v.id),
+              ...developVersions.map(v => v.id),
+              ...masterVersions.map(v => v.id),
+              ...taggedVersions.slice(0, 2).map(v => v.id),
+            ]);
+
+            const toDelete = versions.filter(v => !keepIds.has(v.id));
+            for (const version of toDelete) {
+              const tags = version.metadata?.container?.tags?.join(', ') || '(sem tag)';
+              console.log(`Deletando versao ${version.id} [${tags}]`);
+              await github.rest.packages.deletePackageVersionForUser({
+                package_type: 'container',
+                package_name: packageName,
+                username: owner,
+                package_version_id: version.id,
+              }).catch(() =>
+                github.rest.packages.deletePackageVersionForOrg({
+                  package_type: 'container',
+                  package_name: packageName,
+                  org: owner,
+                  package_version_id: version.id,
+                })
+              );
+            }
+            console.log(`Limpeza concluida. Mantidas: ${keepIds.size} | Deletadas: ${toDelete.length}`);

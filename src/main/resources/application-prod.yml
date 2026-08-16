@@ -1,0 +1,33 @@
+# Perfil prod - espelha %prod.* do application.properties do Quarkus original.
+spring:
+  datasource:
+    driver-class-name: org.postgresql.Driver
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    url: ${DB_URL}
+
+app:
+  security:
+    jwt:
+      private-key-location: ${JWT_PRIVATE_KEY}
+      public-key-location: ${JWT_PUBLIC_KEY}
+  mail:
+    credentials:
+      # Fixo em false, sem override de env var — mesmo comportamento do %prod original.
+      console-fallback-enabled: false
+  public:
+    booking:
+      # Espelha %prod.app.public.booking.base-url=${PUBLIC_BOOKING_BASE_URL:__unset__} do original:
+      # sem a env var, PublicBookingUrlService falha explicitamente em vez de apontar pra localhost.
+      base-url: ${PUBLIC_BOOKING_BASE_URL:__unset__}
+
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
+
+logging:
+  level:
+    root: INFO
+    br.com.phdigitalcode: INFO
