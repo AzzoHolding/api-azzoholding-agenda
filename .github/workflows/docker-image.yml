@@ -77,11 +77,15 @@ jobs:
             -d azzo \
             -c 'CREATE EXTENSION IF NOT EXISTS "uuid-ossp";'
 
-      # O runner ubuntu-latest ja tem Docker instalado e o daemon acessivel via socket —
-      # ao contrario do ambiente sandboxed local usado durante a migracao, aqui os testes
-      # de integracao com Testcontainers (que ficam "Skipped" localmente por falta de
-      # Docker) rodam de verdade.
-      - name: Rodar suite completa (mvn clean verify)
+      # Push para develop: só testes unitarios (mais rapido, sem depender de Testcontainers).
+      # Os testes de integracao (*IntegrationTest, usam Testcontainers) ficam reservados para
+      # master/tags, onde o runner ubuntu-latest tem Docker com socket acessivel de verdade.
+      - name: Rodar testes unitarios (develop)
+        if: github.ref == 'refs/heads/develop'
+        run: mvn -B clean verify -Dtest='!*IntegrationTest' -DfailIfNoTests=false
+
+      - name: Rodar suite completa com testes de integracao (master/tags)
+        if: github.ref != 'refs/heads/develop'
         run: mvn -B clean verify
 
       - name: Login no GitHub Container Registry

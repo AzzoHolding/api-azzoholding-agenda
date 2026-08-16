@@ -24,3 +24,12 @@ springdoc:
     enabled: false
   swagger-ui:
     enabled: false
+
+# Diagnostico temporario: Flyway nao aparece em nenhum log de boot dos testes de integracao
+# (nem sucesso nem erro), embora spring.flyway.enabled=true esteja configurado globalmente e
+# as tabelas de fato nao existam no schema quando os testes rodam. Remover assim que a causa
+# for confirmada via este log.
+logging:
+  level:
+    org.flywaydb: DEBUG
+    org.springframework.boot.autoconfigure.flyway: DEBUG
