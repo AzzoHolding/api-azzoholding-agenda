@@ -5,7 +5,7 @@ app:
     jwt:
       private-key-location: classpath:privateKey.pem
       public-key-location: classpath:publicKey.pem
-    encryption-key: TestOnlyEncryptionKey1234567890
+    encryption-key: TestOnlyEncryptionKey1234567890A
   internal:
     api-key: test-internal-key
   lgpd:
