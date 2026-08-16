@@ -51,7 +51,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.WhatsAppBookingReactiva
  * V90, V112, V113 — os ajustes de reativacao WhatsApp aplicados ao longo do tempo no original,
  * copiados sem alteracao).
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.MOCK)
 @ActiveProfiles("test")
 @Testcontainers(disabledWithoutDocker = true)
 class ChatFoundationRepositoryIntegrationTest {

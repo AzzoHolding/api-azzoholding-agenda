@@ -6,7 +6,7 @@
 # security/common e auth; ver MIGRACAO-QUARKUS-SPRING.md.
 
 # Stage 1: build
-FROM maven:3.9.9-eclipse-temurin-25 AS build
+FROM maven:3.9.16-eclipse-temurin-25 AS build
 WORKDIR /workspace
 COPY pom.xml .
 RUN mvn -B -q dependency:go-offline
