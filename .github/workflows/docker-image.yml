@@ -77,6 +77,18 @@ jobs:
             -d azzo \
             -c 'CREATE EXTENSION IF NOT EXISTS "uuid-ossp";'
 
+          # NOTA: este Flyway migrate roda contra o servico Postgres compartilhado do job
+          # (localhost:5432/azzo), usado pelos profiles dev/prod. Os testes de integracao
+          # (*IntegrationTest, profile "test") usam Testcontainers com um Postgres efemero
+          # proprio via @DynamicPropertySource — nao leem DB_URL e nao sao afetados por este
+          # passo. Mantido mesmo assim para o cenario de rodar a app com profile dev/prod
+          # contra esse banco compartilhado.
+          mvn -B flyway:migrate \
+            -Dflyway.url="jdbc:postgresql://localhost:5432/azzo?currentSchema=azzo_app" \
+            -Dflyway.user=postgres \
+            -Dflyway.password=postgres \
+            -Dflyway.schemas=azzo_app
+
       # Push para develop: só testes unitarios (mais rapido, sem depender de Testcontainers).
       # Os testes de integracao (*IntegrationTest, usam Testcontainers) ficam reservados para
       # master/tags, onde o runner ubuntu-latest tem Docker com socket acessivel de verdade.
