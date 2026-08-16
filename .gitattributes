@@ -1,0 +1,9 @@
+# O mvnw e executado por /bin/sh no runner Linux do CI. Se o arquivo for gravado com
+# CRLF (padrao do Windows), o shell falha com "bad interpreter: /bin/sh^M" — erro que
+# aparece so no CI e confunde bastante. Forcar LF evita isso independentemente da
+# configuracao core.autocrlf de quem commitar.
+mvnw text eol=lf
+.mvn/wrapper/maven-wrapper.properties text eol=lf
+
+# Scripts .cmd sao do Windows e devem manter CRLF.
+mvnw.cmd text eol=crlf
