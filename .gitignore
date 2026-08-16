@@ -1,0 +1,15 @@
+target/
+*.class
+
+.env
+.env.*
+!.env.example
+
+# Certificado autoassinado de HTTPS local (dev), mesmo padrao do azzo-agenda-pro:
+# nao versionado, cada dev copia/gera o proprio.
+cert.pem
+key.pem
+
+.idea/
+*.iml
+.vscode/
