@@ -25,25 +25,23 @@ env:
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_DB: azzo
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres -d azzo"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
+
+    # SEM "services: postgres" e SEM o passo "Preparar banco de teste".
+    #
+    # Motivo: os testes de integracao (*IntegrationTest) estao desabilitados abaixo, e a
+    # suite que realmente roda (unitaria) nao abre conexao com banco nenhum. O Postgres do
+    # job so servia ao passo de Flyway migrate, que migrava um banco que NADA no CI usava —
+    # os *IntegrationTest, quando reativados, sobem seu proprio Postgres efemero via
+    # Testcontainers (@DynamicPropertySource) e ignoram DB_URL.
+    #
+    # Alem de inutil, aquele passo quebrava em runner self-hosted (Gitea Actions): dependia
+    # de "sudo apt-get install postgresql-client", e a imagem de job (node:22-bookworm) nao
+    # tem sudo nem psql — erro "sudo: command not found" / exit 127.
+    #
+    # Ao reativar os testes de integracao, NAO reintroduza este passo: o que eles precisam e
+    # de um Docker acessivel ao runner (Testcontainers), nao de um Postgres de servico.
+
     env:
-      # Mesmos nomes de variavel do original Quarkus (preservados de proposito na migracao).
-      DB_URL: jdbc:postgresql://localhost:5432/azzo?currentSchema=azzo_app
-      DB_USERNAME: postgres
-      DB_PASSWORD: postgres
       ENCRYPTION_KEY: AzzoAgendaProDefaultKey123456789
       LGPD_CONTACT_EMAIL: privacidade@azzoholding.com.br
       LGPD_CONTACT_CHANNEL: Canal de privacidade oficial
@@ -60,42 +58,16 @@ jobs:
           java-version: "25"
           cache: maven
 
-      - name: Preparar banco de teste
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y postgresql-client
-
-          PGPASSWORD=postgres psql \
-            -h localhost \
-            -U postgres \
-            -d azzo \
-            -c 'CREATE SCHEMA IF NOT EXISTS azzo_app;'
-
-          PGPASSWORD=postgres psql \
-            -h localhost \
-            -U postgres \
-            -d azzo \
-            -c 'CREATE EXTENSION IF NOT EXISTS "uuid-ossp";'
-
-          # NOTA: este Flyway migrate roda contra o servico Postgres compartilhado do job
-          # (localhost:5432/azzo), usado pelos profiles dev/prod. Os testes de integracao
-          # (*IntegrationTest, profile "test") usam Testcontainers com um Postgres efemero
-          # proprio via @DynamicPropertySource — nao leem DB_URL e nao sao afetados por este
-          # passo. Mantido mesmo assim para o cenario de rodar a app com profile dev/prod
-          # contra esse banco compartilhado.
-          mvn -B flyway:migrate \
-            -Dflyway.url="jdbc:postgresql://localhost:5432/azzo?currentSchema=azzo_app" \
-            -Dflyway.user=postgres \
-            -Dflyway.password=postgres \
-            -Dflyway.schemas=azzo_app
-
+      # Usa o Maven Wrapper (./mvnw) em vez do "mvn" do sistema: o runner do GitHub tem
+      # Maven pre-instalado, mas as imagens de job usadas por runners self-hosted
+      # (node:22-bookworm, catthehacker/ubuntu:act-latest) NAO tem — verificado. O wrapper
+      # baixa a propria versao do Maven e deixa o workflow portavel entre GitHub e Gitea.
+      #
       # Testes de integracao (*IntegrationTest, usam Testcontainers) temporariamente
-      # desabilitados em todas as branches — causa raiz do Flyway nao rodando contra o
-      # Postgres efemero do Testcontainers ainda em investigacao (ver DEBUG logging em
-      # application-test.yml). Reabilitar removendo o -Dtest e voltando a rodar
-      # "mvn -B clean verify" puro quando a causa for confirmada e corrigida.
+      # desabilitados. Reabilitar removendo o -Dtest e voltando a rodar
+      # "./mvnw -B clean verify" puro quando houver Docker disponivel ao runner.
       - name: Rodar testes unitarios (integracao desabilitada temporariamente)
-        run: mvn -B clean verify -Dtest='!*IntegrationTest' -DfailIfNoTests=false
+        run: ./mvnw -B clean verify -Dtest='!*IntegrationTest' -DfailIfNoTests=false
 
       - name: Login no GitHub Container Registry
         uses: docker/login-action@v3
