@@ -30,7 +30,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.entity.FiscalStateEntity;
  * quebra no PostgreSQL) — validando que ambas realmente compilam e retornam dados corretos contra
  * o schema real, nao so contra um mock.
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.MOCK)
 @ActiveProfiles("test")
 @Testcontainers(disabledWithoutDocker = true)
 class FiscalMunicipalityRepositoryIntegrationTest {
@@ -40,7 +40,7 @@ class FiscalMunicipalityRepositoryIntegrationTest {
 
   @DynamicPropertySource
   static void datasourceProperties(DynamicPropertyRegistry registry) {
-    registry.add("spring.datasource.url", () -> POSTGRES.getJdbcUrl() + "?currentSchema=azzo_app");
+    registry.add("spring.datasource.url", () -> POSTGRES.getJdbcUrl() + "&currentSchema=azzo_app");
     registry.add("spring.datasource.username", POSTGRES::getUsername);
     registry.add("spring.datasource.password", POSTGRES::getPassword);
   }
