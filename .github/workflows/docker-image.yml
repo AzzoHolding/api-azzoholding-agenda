@@ -69,18 +69,57 @@ jobs:
       - name: Rodar testes unitarios (integracao desabilitada temporariamente)
         run: ./mvnw -B clean verify -Dtest='!*IntegrationTest' -DfailIfNoTests=false
 
-      - name: Login no GitHub Container Registry
+      # ─── Publicacao da imagem: portavel entre GitHub e Gitea ────────────────
+      #
+      # O mesmo workflow roda nos dois lugares e publica no registry de cada um:
+      #   • GitHub Actions  → ghcr.io
+      #   • Gitea Actions   → registry de containers do proprio Gitea
+      #
+      # A deteccao usa github.server_url, que o Gitea tambem preenche (com a URL da
+      # instancia). Nao ha duplicacao de workflow nem branch separada.
+      #
+      # DETALHE QUE NAO E OBVIO (e que causa erro dificil de diagnosticar):
+      # o endereco do registry no Gitea NAO e "gitea:3000". O push nao e feito pelo
+      # container do job, e sim pelo daemon do host (o runner monta /var/run/docker.sock).
+      # O container do job resolve "gitea" — o host NAO. Do ponto de vista do daemon, o
+      # Gitea esta em localhost:3000 (porta publicada no docker-compose). Por isso o
+      # default abaixo e localhost:3000. Como o Docker trata registries em localhost como
+      # inseguros por padrao, o push por HTTP funciona sem mexer em insecure-registries.
+      #
+      # Para outro host/porta, defina a variavel GITEA_REGISTRY no repositorio Gitea.
+      - name: Resolver registry de destino
+        id: reg
+        shell: bash
+        run: |
+          if [ "${{ github.server_url }}" = "https://github.com" ]; then
+            echo "registry=ghcr.io"                         >> "$GITHUB_OUTPUT"
+            echo "is_github=true"                           >> "$GITHUB_OUTPUT"
+          else
+            echo "registry=${GITEA_REGISTRY:-localhost:3000}" >> "$GITHUB_OUTPUT"
+            echo "is_github=false"                          >> "$GITHUB_OUTPUT"
+          fi
+          # Nome da imagem sempre em minusculas — exigencia do Docker, e no GitHub o
+          # github.repository pode vir com maiusculas (ex.: AzzoHolding/...).
+          echo "image=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+        env:
+          GITEA_REGISTRY: ${{ vars.GITEA_REGISTRY }}
+
+      # Credenciais: por padrao usa o token automatico da plataforma. Se o token do Gitea
+      # nao tiver permissao de escrita em pacotes, crie no Gitea um token de acesso com
+      # escopo "write:package" e cadastre os secrets REGISTRY_USERNAME / REGISTRY_PASSWORD —
+      # eles tem precedencia quando existem.
+      - name: Login no registry
         uses: docker/login-action@v3
         with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          registry: ${{ steps.reg.outputs.registry }}
+          username: ${{ secrets.REGISTRY_USERNAME != '' && secrets.REGISTRY_USERNAME || github.actor }}
+          password: ${{ secrets.REGISTRY_PASSWORD != '' && secrets.REGISTRY_PASSWORD || secrets.GITHUB_TOKEN }}
 
       - name: Gerar metadados da imagem
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: ${{ steps.reg.outputs.registry }}/${{ steps.reg.outputs.image }}
           tags: |
             type=ref,event=branch
             type=sha,prefix=sha-,format=short
@@ -96,7 +135,11 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
+      # Limpeza so existe no GitHub: usa a API de packages do GitHub, que o Gitea nao
+      # implementa. Sem este "if", o job falharia no Gitea depois de ja ter publicado a
+      # imagem com sucesso.
       - name: Limpar imagens antigas do GHCR
+        if: steps.reg.outputs.is_github == 'true'
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
