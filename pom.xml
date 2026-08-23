@@ -60,9 +60,15 @@
     </dependency>
 
     <!-- Flyway -->
+    <!-- ATENCAO: usar o STARTER, nao apenas org.flywaydb:flyway-core. No Spring Boot 4 a
+         autoconfiguracao do Flyway foi movida para o modulo dedicado spring-boot-flyway
+         (org.springframework.boot.flyway.autoconfigure.FlywayAutoConfiguration). Declarar so a
+         lib crua faz o Flyway simplesmente NUNCA rodar no boot — sem erro, sem log, sem aviso.
+         Com ddl-auto=none e 124 migrations, isso significa schema nunca criado nem atualizado.
+         Diagnosticado em 2026-08-19 comparando com o api_assistant, que ja usava o starter. -->
     <dependency>
-      <groupId>org.flywaydb</groupId>
-      <artifactId>flyway-core</artifactId>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-flyway</artifactId>
     </dependency>
     <dependency>
       <groupId>org.flywaydb</groupId>
