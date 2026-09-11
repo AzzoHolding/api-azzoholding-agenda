@@ -1,5 +1,6 @@
 package br.com.phdigitalcode.azzo.agenda.pro.service.impl;
 
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -25,12 +26,19 @@ import br.com.phdigitalcode.azzo.agenda.pro.dto.request.RegisterRequest;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.request.ResetPasswordRequest;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.response.AuthResponse;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.response.GenericMessageResponse;
+import br.com.phdigitalcode.azzo.agenda.pro.entity.CheckoutIntent;
+import br.com.phdigitalcode.azzo.agenda.pro.entity.CheckoutOrder;
+import br.com.phdigitalcode.azzo.agenda.pro.entity.LicenseEvent;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.PasswordResetToken;
+import br.com.phdigitalcode.azzo.agenda.pro.entity.Product;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.RbacRole;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.RbacUserRole;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.Tenant;
+import br.com.phdigitalcode.azzo.agenda.pro.entity.TermsVersion;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.Usuario;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.PapelUsuario;
+import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.PlanStatus;
+import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.StatusCheckout;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.id.RbacUserRoleId;
 import br.com.phdigitalcode.azzo.agenda.pro.exception.ApiClientErrorException;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditConstants;
@@ -38,7 +46,11 @@ import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditEventCommand;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditService;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.EmailJobService;
 import br.com.phdigitalcode.azzo.agenda.pro.mapper.UsuarioMapper;
+import br.com.phdigitalcode.azzo.agenda.pro.repository.CheckoutIntentRepository;
+import br.com.phdigitalcode.azzo.agenda.pro.repository.CheckoutOrderRepository;
+import br.com.phdigitalcode.azzo.agenda.pro.repository.LicenseEventRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.PasswordResetTokenRepository;
+import br.com.phdigitalcode.azzo.agenda.pro.repository.ProductRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.RbacAuthorizationRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.RbacRoleRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.RbacUserRoleRepository;
@@ -50,6 +62,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.security.PasswordPolicyValidator;
 import br.com.phdigitalcode.azzo.agenda.pro.security.RefreshTokenService;
 import br.com.phdigitalcode.azzo.agenda.pro.security.TotpService;
 import br.com.phdigitalcode.azzo.agenda.pro.service.AuthService;
+import br.com.phdigitalcode.azzo.agenda.pro.service.TermsService;
 import br.com.phdigitalcode.azzo.agenda.pro.util.CorrelatedLogging;
 import br.com.phdigitalcode.azzo.agenda.pro.util.SlugUtil;
 
@@ -61,18 +74,22 @@ import br.com.phdigitalcode.azzo.agenda.pro.util.SlugUtil;
  * fidelidade total ao original — dependem apenas de entidades fundacionais ja migradas
  * (Usuario, RefreshToken, PasswordResetToken, RBAC).
  *
- * <p>{@code registrar} (register) e uma versao SIMPLIFICADA e DELIBERADAMENTE REDUZIDA do
- * original: o Quarkus original tambem (a) valida e persiste aceite de Termos de Uso/Privacidade
- * via {@code TermsService} (modulo {@code audit}), (b) ativa um plano trial completo via
- * {@code CheckoutIntent}/{@code CheckoutOrder}/{@code Product} (modulo {@code billing}), e
- * (c) verifica duplicidade de CPF/CNPJ de trial via {@code Tenant.trialDocumentHash}. Nenhum
- * desses modulos foi migrado ainda nesta etapa (auth e security/common sao fundacionais; billing,
- * audit/terms e professionals sao dominios de negocio que dependem de auth, nao o contrario).
- * Portanto esta implementacao: cria o {@code Tenant} (projecao minima, ver entidade
- * {@link Tenant}) e o {@code Usuario} OWNER, concede a role/permissoes de owner (RBAC), mas NAO
- * persiste aceite de termos, NAO ativa trial e NAO verifica duplicidade de documento. Isso deve
- * ser resolvido quando os modulos {@code billing}/{@code audit}/{@code tenant} forem portados —
- * ver pendencias registradas no documento de migracao.
+ * <p>{@code registrar} (register) agora e o do original, completo. Ate 2026-09-11 era uma versao
+ * REDUZIDA que nao gravava o {@code plan_status_id} — coluna NOT NULL, e por isso o cadastro
+ * FALHAVA em banco novo —, nao ativava o trial, nao gravava o aceite dos termos e nao barrava o
+ * segundo trial do mesmo documento. Os quatro voltaram:
+ * <ul>
+ *   <li><b>status do plano</b> ACTIVE na criacao; o {@code LicenseStatusService} o recalcula a
+ *       partir dos pedidos vigentes, e o pedido de trial abaixo e o que o mantem ACTIVE;
+ *   <li><b>trial</b>: um {@code CheckoutIntent} + {@code CheckoutOrder} CONFIRMADOS do produto
+ *       marcado {@code is_trial} (semeado na V13, 7 dias), com {@code valid_until} no fim do
+ *       periodo — e exatamente o que {@code possuiPlanoVigente} procura — e o evento
+ *       {@code TRIAL_ACTIVATED} no historico da licenca;
+ *   <li><b>aceite dos termos</b> gravado pelo {@code TermsService} (versao, requestId, IP e hash):
+ *       e a PROVA do consentimento que a LGPD exige, e nao so a checagem de que o campo veio;
+ *   <li><b>um trial por CPF/CNPJ</b>, comparando o SHA-256 do documento
+ *       ({@code Tenant.trialDocumentHash}). O documento nunca vai para o log.
+ * </ul>
  */
 @Service
 public class AuthServiceImpl implements AuthService {
@@ -82,6 +99,8 @@ public class AuthServiceImpl implements AuthService {
   private static final Duration PASSWORD_RESET_TOKEN_TTL = Duration.ofMinutes(30);
   private static final String RESET_PASSWORD_MESSAGE =
       "Se o e-mail existir, voce recebera instrucoes para redefinir a senha.";
+  /** Quando o produto de trial nao diz a validade, vale a do original. */
+  private static final int DEFAULT_TRIAL_DAYS = 7;
 
   private static final int EMAIL_LOCKOUT_MAX_ATTEMPTS = 5;
   private static final Duration EMAIL_LOCKOUT_WINDOW = Duration.ofMinutes(15);
@@ -104,6 +123,11 @@ public class AuthServiceImpl implements AuthService {
   private final PasswordPolicyValidator passwordPolicyValidator;
   private final EmailJobService emailJobService;
   private final UsuarioMapper usuarioMapper;
+  private final TermsService termsService;
+  private final ProductRepository productRepository;
+  private final CheckoutIntentRepository checkoutIntentRepository;
+  private final CheckoutOrderRepository checkoutOrderRepository;
+  private final LicenseEventRepository licenseEventRepository;
 
   @Value("${app.public.booking.base-url:http://localhost:5173}")
   private String publicFrontendBaseUrl;
@@ -122,7 +146,12 @@ public class AuthServiceImpl implements AuthService {
       AuditService auditService,
       PasswordPolicyValidator passwordPolicyValidator,
       EmailJobService emailJobService,
-      UsuarioMapper usuarioMapper) {
+      UsuarioMapper usuarioMapper,
+      TermsService termsService,
+      ProductRepository productRepository,
+      CheckoutIntentRepository checkoutIntentRepository,
+      CheckoutOrderRepository checkoutOrderRepository,
+      LicenseEventRepository licenseEventRepository) {
     this.tenantRepository = tenantRepository;
     this.usuarioRepository = usuarioRepository;
     this.rbacRoleRepository = rbacRoleRepository;
@@ -137,6 +166,11 @@ public class AuthServiceImpl implements AuthService {
     this.passwordPolicyValidator = passwordPolicyValidator;
     this.emailJobService = emailJobService;
     this.usuarioMapper = usuarioMapper;
+    this.termsService = termsService;
+    this.productRepository = productRepository;
+    this.checkoutIntentRepository = checkoutIntentRepository;
+    this.checkoutOrderRepository = checkoutOrderRepository;
+    this.licenseEventRepository = licenseEventRepository;
   }
 
   @Override
@@ -144,11 +178,23 @@ public class AuthServiceImpl implements AuthService {
   public AuthResponse registrar(RegisterRequest request, String requestId, String ipAddress) {
     validarAceiteObrigatorio(request);
     String email = normalizeEmail(request.email);
-    normalizeCpfCnpj(request.cpfCnpj); // valida formato; dedup de trial fica pendente (ver javadoc da classe)
+    String documento = normalizeCpfCnpj(request.cpfCnpj);
+    // O trial e UM por documento, e o que se compara e o hash — como no original.
+    String hashDoDocumento = sha256Hex(documento);
+    // A versao aceita tem que existir e estar ATIVA: e ela que o aceite gravado vai provar.
+    TermsVersion termosDeUso = termsService.requireActiveVersion(
+        AuditConstants.TermsDocumentType.TERMS_OF_USE, request.termsOfUseVersion);
+    TermsVersion politicaDePrivacidade = termsService.requireActiveVersion(
+        AuditConstants.TermsDocumentType.PRIVACY_POLICY, request.privacyPolicyVersion);
 
     if (usuarioRepository.findByEmail(email).isPresent()) {
       LOG.warn(CorrelatedLogging.context("Registro recusado", "email", email, "reason", "duplicate_email"));
       throw new IllegalArgumentException("Ja existe usuario com este email");
+    }
+    if (tenantRepository.existsByTrialDocumentHash(hashDoDocumento)) {
+      // O documento NAO vai para o log (o original o gravava): e dado pessoal, e o motivo basta.
+      LOG.warn(CorrelatedLogging.context("Registro recusado", "email", email, "reason", "trial_already_used"));
+      throw new IllegalArgumentException("CPF/CNPJ ja utilizou o plano gratuito");
     }
 
     Tenant tenant = new Tenant();
@@ -156,6 +202,11 @@ public class AuthServiceImpl implements AuthService {
     tenant.setSlug(SlugUtil.gerarSlug(tenant.getName()) + "-" + UUID.randomUUID().toString().substring(0, 6));
     tenant.setPhone(request.phone);
     tenant.setEmail(email);
+    tenant.setDocument(documento);
+    tenant.setTrialDocumentHash(hashDoDocumento);
+    // plan_status_id e NOT NULL: sem isto o cadastro falhava em banco novo.
+    tenant.setPlanStatusId(tenantRepository.buscarPlanStatusIdPorCodigo(PlanStatus.ACTIVE.name())
+        .orElseThrow(() -> new IllegalStateException("Status de plano ACTIVE nao encontrado")));
     tenantRepository.save(tenant);
 
     Usuario usuario = new Usuario();
@@ -169,7 +220,9 @@ public class AuthServiceImpl implements AuthService {
     usuario.setPasswordHash(BCrypt.withDefaults().hashToString(12, request.password.toCharArray()));
 
     usuarioRepository.save(usuario);
+    registrarAceitesTermos(usuario, termosDeUso, politicaDePrivacidade, requestId, ipAddress);
     garantirAcessoOwner(usuario.getId());
+    ativarTrialTenant(tenant, usuario);
 
     AuthResponse response = montarResposta(usuario);
     registrarAuditoriaAuth(
@@ -482,6 +535,75 @@ public class AuthServiceImpl implements AuthService {
     } catch (NoSuchAlgorithmException e) {
       throw new IllegalStateException("SHA-256 nao disponivel", e);
     }
+  }
+
+  /**
+   * Grava a PROVA do aceite dos dois documentos (versao, requestId, IP e hash, pelo
+   * {@code TermsService}). O mesmo requestId nos dois registros mostra que foram aceitos no mesmo
+   * envio do formulario.
+   */
+  private void registrarAceitesTermos(
+      Usuario usuario,
+      TermsVersion termosDeUso,
+      TermsVersion politicaDePrivacidade,
+      String requestId,
+      String ipAddress) {
+    String rid = requestId == null || requestId.isBlank() ? UUID.randomUUID().toString() : requestId.trim();
+    termsService.accept(usuario.getTenantId(), usuario.getId(), termosDeUso.getId(), rid, ipAddress);
+    termsService.accept(usuario.getTenantId(), usuario.getId(), politicaDePrivacidade.getId(), rid, ipAddress);
+  }
+
+  /**
+   * Ativa o trial: um pedido CONFIRMADO, de valor zero, do produto de trial, valido ate o fim do
+   * periodo. E o que {@code CheckoutOrderRepository.possuiPlanoVigente} procura — sem ele, o
+   * {@code LicenseStatusService} marca o salao recem-criado como EXPIRED e a licenca bloqueia.
+   */
+  private void ativarTrialTenant(Tenant tenant, Usuario usuario) {
+    Product produtoDeTrial = productRepository.findLatestActiveTrial()
+        .orElseThrow(() -> new IllegalStateException("Nenhum plano trial ativo configurado"));
+
+    Instant agora = Instant.now();
+    Instant fimDoTrial = agora.plusSeconds(resolverDiasDeValidade(produtoDeTrial) * 24L * 60L * 60L);
+
+    CheckoutIntent intencao = new CheckoutIntent();
+    intencao.setTenantId(tenant.getId());
+    intencao.setUserId(usuario.getId());
+    intencao.setProductId(produtoDeTrial.getId());
+    intencao.setProductNameSnapshot(produtoDeTrial.getName());
+    intencao.setCurrencySnapshot(produtoDeTrial.getCurrency());
+    intencao.setCurrency(produtoDeTrial.getCurrency());
+    intencao.setUnitPriceSnapshot(BigDecimal.ZERO);
+    intencao.setQuantity(1);
+    intencao.setTotalPriceSnapshot(BigDecimal.ZERO);
+    intencao.setCalculatedTotal(BigDecimal.ZERO);
+    intencao.setStatus(StatusCheckout.CONFIRMED);
+    intencao.setExpiresAt(fimDoTrial);
+    intencao.setPaymentReference("trial-tenant-" + tenant.getId());
+    intencao.setConfirmedAt(agora);
+    checkoutIntentRepository.save(intencao);
+
+    CheckoutOrder pedido = new CheckoutOrder();
+    pedido.setIntentId(intencao.getId());
+    pedido.setProductId(produtoDeTrial.getId());
+    pedido.setTenantId(tenant.getId());
+    pedido.setUserId(usuario.getId());
+    pedido.setTotal(0L);
+    pedido.setStatus(StatusCheckout.CONFIRMED);
+    pedido.setValidUntil(fimDoTrial);
+    checkoutOrderRepository.save(pedido);
+
+    licenseEventRepository.save(
+        LicenseEvent.of(tenant.getId(), "TRIAL_ACTIVATED", usuario.getId(), produtoDeTrial.getId(), fimDoTrial));
+  }
+
+  private int resolverDiasDeValidade(Product produto) {
+    if (produto.getValidityDays() != null && produto.getValidityDays() > 0) {
+      return produto.getValidityDays();
+    }
+    if (produto.getValidityMonths() > 0) {
+      return produto.getValidityMonths() * 30;
+    }
+    return DEFAULT_TRIAL_DAYS;
   }
 
   private void garantirAcessoOwner(UUID userId) {
