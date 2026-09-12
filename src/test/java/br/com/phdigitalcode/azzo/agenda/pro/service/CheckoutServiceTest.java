@@ -83,15 +83,20 @@ class CheckoutServiceTest {
               return o;
             });
 
-    service =
-        new CheckoutService(
-            productRepository,
-            productCapabilityRepository,
-            checkoutIntentRepository,
-            checkoutOrderRepository,
-            authenticatedUser,
-            new JsonUtil(new ObjectMapper()),
-            contextoTenant);
+    // Os testes de comportamento do stub rodam com ele LIGADO; a trava tem os seus, no fim.
+    service = novoServico(true);
+  }
+
+  private CheckoutService novoServico(boolean stubHabilitado) {
+    return new CheckoutService(
+        productRepository,
+        productCapabilityRepository,
+        checkoutIntentRepository,
+        checkoutOrderRepository,
+        authenticatedUser,
+        new JsonUtil(new ObjectMapper()),
+        contextoTenant,
+        stubHabilitado);
   }
 
   private Product produto(boolean ativo, boolean trial, boolean exclusivoVendaInterna) {
@@ -369,5 +374,51 @@ class CheckoutServiceTest {
         .hasMessage("Intent nao encontrada")
         .extracting(e -> ((ApiClientErrorException) e).getStatus())
         .isEqualTo(404);
+  }
+
+  // ---------------------------------------------------------------- stub desligado (o padrao)
+
+  /**
+   * O motivo da trava: ligado, a confirmacao grava um pedido CONFIRMADO com validade — licenca
+   * paga — sem cobrar nada. Desligado, nem chega a ler a intent.
+   */
+  @Test
+  void comStubDesligadoConfirmarRespondeComoRotaInexistenteENaoGravaPedido() {
+    CheckoutService producao = novoServico(false);
+    CheckoutIntent intent = intentPendente();
+    produto(true, false, false);
+
+    assertThatThrownBy(() -> producao.confirmarIntent(intent.getId()))
+        .isInstanceOf(ApiClientErrorException.class)
+        .extracting(e -> ((ApiClientErrorException) e).getStatus())
+        .isEqualTo(404);
+
+    verify(checkoutIntentRepository, never()).findByIdForUpdate(any());
+    verify(checkoutOrderRepository, never()).save(any());
+    assertThat(intent.getStatus()).isEqualTo(StatusCheckout.PENDING);
+    assertThat(intent.getPaymentReference()).isNull();
+  }
+
+  @Test
+  void comStubDesligadoCriarIntentTambemRecusa() {
+    CheckoutService producao = novoServico(false);
+    produto(true, false, false);
+
+    assertThatThrownBy(() -> producao.criarIntent(intentRequest(1)))
+        .isInstanceOf(ApiClientErrorException.class)
+        .extracting(e -> ((ApiClientErrorException) e).getStatus())
+        .isEqualTo(404);
+
+    verify(checkoutIntentRepository, never()).save(any());
+  }
+
+  /** A tela de licenca tira os planos daqui: a trava nao pode fechar o catalogo. */
+  @Test
+  void comStubDesligadoOCatalogoContinuaAberto() {
+    CheckoutService producao = novoServico(false);
+    Product product = produto(true, false, false);
+    when(productRepository.listarContrataveisPublicamente()).thenReturn(List.of(product));
+
+    assertThat(producao.listarProdutos()).hasSize(1);
   }
 }

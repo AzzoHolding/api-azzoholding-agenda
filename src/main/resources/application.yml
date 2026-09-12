@@ -217,6 +217,11 @@ app:
         query-protocol-param: ${NFSE_PROVIDER_SEFIN_NACIONAL_QUERY_PROTOCOL_PARAM:protocolo}
         query-include-protocol: ${NFSE_PROVIDER_SEFIN_NACIONAL_QUERY_INCLUDE_PROTOCOL:true}
         query-mtls-enabled: ${NFSE_PROVIDER_SEFIN_NACIONAL_QUERY_MTLS_ENABLED:false}
+  checkout:
+    # POST /checkout/intents + /confirm confirmam a compra com pagamento FALSO (stub) e liberam
+    # licenca paga sem cobrar. So para desenvolvimento; o pagamento de verdade e o
+    # POST /billing/subscriptions (Asaas). NUNCA ligar em producao.
+    stub-enabled: ${CHECKOUT_STUB_ENABLED:false}
   whatsapp:
     embedded-signup:
       enabled: ${WHATSAPP_EMBEDDED_SIGNUP_ENABLED:false}
