@@ -9,6 +9,7 @@ import java.util.UUID;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -57,6 +58,7 @@ public class CheckoutService {
   private final AuthenticatedUser authenticatedUser;
   private final JsonUtil jsonUtil;
   private final ContextoTenant contextoTenant;
+  private final boolean stubHabilitado;
 
   public CheckoutService(
       ProductRepository productRepository,
@@ -65,7 +67,8 @@ public class CheckoutService {
       CheckoutOrderRepository checkoutOrderRepository,
       AuthenticatedUser authenticatedUser,
       JsonUtil jsonUtil,
-      ContextoTenant contextoTenant) {
+      ContextoTenant contextoTenant,
+      @Value("${app.checkout.stub-enabled:false}") boolean stubHabilitado) {
     this.productRepository = productRepository;
     this.productCapabilityRepository = productCapabilityRepository;
     this.checkoutIntentRepository = checkoutIntentRepository;
@@ -73,6 +76,25 @@ public class CheckoutService {
     this.authenticatedUser = authenticatedUser;
     this.jsonUtil = jsonUtil;
     this.contextoTenant = contextoTenant;
+    this.stubHabilitado = stubHabilitado;
+  }
+
+  /**
+   * {@code POST /checkout/intents} e {@code /confirm} confirmam a compra com
+   * {@link #processarPagamentoStub} — um pagamento de mentira — e gravam um {@code CheckoutOrder}
+   * CONFIRMADO, que o {@code LicenseStatusService} trata como plano pago valendo. Ligado, qualquer
+   * OWNER ativa um plano sem pagar nada.
+   *
+   * <p>Por isso nasce DESLIGADO ({@code app.checkout.stub-enabled}): o pagamento de verdade e o
+   * {@code POST /billing/subscriptions}, que cobra pelo Asaas. Desligado, responde 404 como rota
+   * que nao existe — antes de ler ou gravar qualquer coisa. O catalogo ({@link #listarProdutos})
+   * continua aberto: e dele que a tela de licenca tira os planos.
+   */
+  private void exigirStubHabilitado() {
+    if (!stubHabilitado) {
+      LOG.warn(CorrelatedLogging.context("Checkout direto recusado", "reason", "stub_desabilitado"));
+      throw new ApiClientErrorException("Recurso nao encontrado", 404);
+    }
   }
 
   /** Planos exclusivos de venda interna nao aparecem na contratacao publica. */
@@ -118,6 +140,7 @@ public class CheckoutService {
 
   @Transactional
   public CheckoutDtos.CreateIntentResponse criarIntent(CheckoutDtos.CreateIntentRequest request) {
+    exigirStubHabilitado();
     validateQuantity(request.quantity);
     UUID tenantId = obterTenantIdClaim();
     UUID userId = obterUserIdClaim();
@@ -162,6 +185,7 @@ public class CheckoutService {
 
   @Transactional
   public CheckoutDtos.ConfirmIntentResponse confirmarIntent(UUID intentId) {
+    exigirStubHabilitado();
     CheckoutIntent intent =
         checkoutIntentRepository
             .findByIdForUpdate(intentId)
