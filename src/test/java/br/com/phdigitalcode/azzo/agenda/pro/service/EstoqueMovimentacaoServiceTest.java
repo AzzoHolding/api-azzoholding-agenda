@@ -3,6 +3,7 @@ package br.com.phdigitalcode.azzo.agenda.pro.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -26,6 +27,9 @@ import org.mockito.quality.Strictness;
 
 import br.com.phdigitalcode.azzo.agenda.pro.dto.EstoqueDtos.MovimentacaoEstoqueRequest;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.EstoqueDtos.MovimentacaoEstoqueResponse;
+import br.com.phdigitalcode.azzo.agenda.pro.dto.request.TransacaoRequest;
+import br.com.phdigitalcode.azzo.agenda.pro.dto.response.TransacaoResponse;
+import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.StatusNotification;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.EstoqueConfiguracao;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.ItemEstoque;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.MovimentacaoEstoque;
@@ -57,6 +61,7 @@ class EstoqueMovimentacaoServiceTest {
   private static final UUID APPOINTMENT_ID = UUID.randomUUID();
   private static final UUID COMANDA_ITEM_ID = UUID.randomUUID();
   private static final UUID USUARIO_ID = UUID.randomUUID();
+  private static final UUID TRANSACAO_ID = UUID.randomUUID();
 
   @Mock private ItemEstoqueRepository itemEstoqueRepository;
   @Mock private MovimentacaoEstoqueRepository movimentacaoEstoqueRepository;
@@ -65,6 +70,8 @@ class EstoqueMovimentacaoServiceTest {
   @Mock private ContextoTenant contextoTenant;
   @Mock private AuthenticatedUser authenticatedUser;
   @Mock private AuditService auditService;
+  @Mock private ServicoFinanceiro servicoFinanceiro;
+  @Mock private NotificationPublisher notificationPublisher;
 
   private EstoqueMovimentacaoService service;
 
@@ -78,7 +85,12 @@ class EstoqueMovimentacaoServiceTest {
             servicoInsumoRepository,
             contextoTenant,
             authenticatedUser,
-            auditService);
+            auditService,
+            servicoFinanceiro,
+            notificationPublisher);
+    TransacaoResponse transacao = new TransacaoResponse();
+    transacao.id = TRANSACAO_ID.toString();
+    when(servicoFinanceiro.criar(any())).thenReturn(transacao);
     when(contextoTenant.obterTenantIdOuFalhar()).thenReturn(TENANT_ID);
     when(authenticatedUser.idOuNulo()).thenReturn(USUARIO_ID);
     when(authenticatedUser.roleOuNulo()).thenReturn("OWNER");
@@ -137,7 +149,7 @@ class EstoqueMovimentacaoServiceTest {
   void entradaComValorUnitarioSobrescreveOCustoMedioDoItem() {
     ItemEstoque item = item("10");
     item.setCustoMedioUnitario(new BigDecimal("4.00"));
-    when(itemEstoqueRepository.findByIdAndTenantId(ITEM_ID, TENANT_ID))
+    when(itemEstoqueRepository.travarPorIdETenant(ITEM_ID, TENANT_ID))
         .thenReturn(Optional.of(item));
 
     MovimentacaoEstoqueRequest request = request("ENTRADA", "5", "Compra de fornecedor");
@@ -147,8 +159,17 @@ class EstoqueMovimentacaoServiceTest {
 
     MovimentacaoEstoqueResponse response = service.criarMovimentacao(request);
 
-    assertThat(item.getCustoMedioUnitario()).isEqualByComparingTo("6.50");
+    // Medio ponderado, e nao o ultimo preco: (10 x 4,00 + 5 x 6,50) / 15 = 4,8333.
+    assertThat(item.getCustoMedioUnitario()).isEqualByComparingTo("4.8333");
     assertThat(item.getSaldoAtual()).isEqualByComparingTo("15");
+    // O lancamento financeiro vira despesa de verdade, com o total da compra.
+    ArgumentCaptor<TransacaoRequest> despesa = ArgumentCaptor.forClass(TransacaoRequest.class);
+    verify(servicoFinanceiro).criar(despesa.capture());
+    assertThat(despesa.getValue().type).isEqualTo("EXPENSE");
+    assertThat(despesa.getValue().amount).isEqualByComparingTo("32.50");
+    assertThat(despesa.getValue().category).isEqualTo("Compra de estoque");
+    assertThat(despesa.getValue().paymentMethod).isEqualTo("OTHER");
+    assertThat(response.transacaoFinanceiraId).isEqualTo(TRANSACAO_ID.toString());
     MovimentacaoEstoque persistida = movimentacaoPersistida();
     assertThat(persistida.getValorUnitarioPago()).isEqualByComparingTo("6.50");
     // 5 x 6,50
@@ -162,7 +183,7 @@ class EstoqueMovimentacaoServiceTest {
   void saidaComValorUnitarioNaoMexeNoCustoMedio() {
     ItemEstoque item = item("10");
     item.setCustoMedioUnitario(new BigDecimal("4.00"));
-    when(itemEstoqueRepository.findByIdAndTenantId(ITEM_ID, TENANT_ID))
+    when(itemEstoqueRepository.travarPorIdETenant(ITEM_ID, TENANT_ID))
         .thenReturn(Optional.of(item));
     when(estoqueConfiguracaoRepository.findByTenantId(TENANT_ID)).thenReturn(Optional.empty());
 
@@ -177,7 +198,7 @@ class EstoqueMovimentacaoServiceTest {
 
   @Test
   void requestSemOrigemNemFlagFinanceiroCaiNosDefaults() {
-    when(itemEstoqueRepository.findByIdAndTenantId(ITEM_ID, TENANT_ID))
+    when(itemEstoqueRepository.travarPorIdETenant(ITEM_ID, TENANT_ID))
         .thenReturn(Optional.of(item("10")));
 
     service.criarMovimentacao(request("ENTRADA", "1", "Ajuste"));
@@ -191,7 +212,7 @@ class EstoqueMovimentacaoServiceTest {
 
   @Test
   void origemDesconhecidaFalhaCom400() {
-    when(itemEstoqueRepository.findByIdAndTenantId(ITEM_ID, TENANT_ID))
+    when(itemEstoqueRepository.travarPorIdETenant(ITEM_ID, TENANT_ID))
         .thenReturn(Optional.of(item("10")));
 
     MovimentacaoEstoqueRequest request = request("ENTRADA", "1", "Ajuste");
@@ -218,7 +239,7 @@ class EstoqueMovimentacaoServiceTest {
   @Test
   void saidaBaixaOSaldoERegistraAMovimentacao() {
     ItemEstoque item = item("10");
-    when(itemEstoqueRepository.findByIdAndTenantId(ITEM_ID, TENANT_ID))
+    when(itemEstoqueRepository.travarPorIdETenant(ITEM_ID, TENANT_ID))
         .thenReturn(Optional.of(item));
     when(estoqueConfiguracaoRepository.findByTenantId(TENANT_ID)).thenReturn(Optional.empty());
 
@@ -230,7 +251,8 @@ class EstoqueMovimentacaoServiceTest {
     assertThat(persistida.getTipo()).isEqualTo(TipoMovimentacaoEstoque.SAIDA);
     assertThat(persistida.getSaldoAnterior()).isEqualByComparingTo("10");
     assertThat(persistida.getSaldoPosterior()).isEqualByComparingTo("7");
-    assertThat(persistida.getOrigem()).isEqualTo(OrigemMovimentacaoEstoque.MANUAL);
+    // A forma de 4 argumentos e a da comanda: venda, e nao baixa manual — nao conta como perda.
+    assertThat(persistida.getOrigem()).isEqualTo(OrigemMovimentacaoEstoque.VENDA);
     assertThat(persistida.getGerarLancamentoFinanceiro()).isFalse();
     assertThat(persistida.getUsuarioId()).isEqualTo(USUARIO_ID);
     assertThat(persistida.getValorTotalMovimentacao()).isNull();
@@ -243,7 +265,7 @@ class EstoqueMovimentacaoServiceTest {
   @Test
   void entradaDevolveOSaldo() {
     ItemEstoque item = item("4");
-    when(itemEstoqueRepository.findByIdAndTenantId(ITEM_ID, TENANT_ID))
+    when(itemEstoqueRepository.travarPorIdETenant(ITEM_ID, TENANT_ID))
         .thenReturn(Optional.of(item));
 
     service.criarMovimentacao(ITEM_ID, "ENTRADA", new BigDecimal("3"), "Estorno de comanda: erro");
@@ -256,7 +278,7 @@ class EstoqueMovimentacaoServiceTest {
 
   @Test
   void saidaSemSaldoEBloqueadaComConflito() {
-    when(itemEstoqueRepository.findByIdAndTenantId(ITEM_ID, TENANT_ID))
+    when(itemEstoqueRepository.travarPorIdETenant(ITEM_ID, TENANT_ID))
         .thenReturn(Optional.of(item("1")));
     when(estoqueConfiguracaoRepository.findByTenantId(TENANT_ID))
         .thenReturn(Optional.of(configuracao(true, false)));
@@ -274,7 +296,7 @@ class EstoqueMovimentacaoServiceTest {
   /** Sem linha de configuracao o bloqueio conta como ativo — comportamento do original. */
   @Test
   void semConfiguracaoOBloqueioValeComoAtivo() {
-    when(itemEstoqueRepository.findByIdAndTenantId(ITEM_ID, TENANT_ID))
+    when(itemEstoqueRepository.travarPorIdETenant(ITEM_ID, TENANT_ID))
         .thenReturn(Optional.of(item("1")));
     when(estoqueConfiguracaoRepository.findByTenantId(TENANT_ID)).thenReturn(Optional.empty());
 
@@ -286,7 +308,7 @@ class EstoqueMovimentacaoServiceTest {
   @Test
   void saldoNegativoEPermitidoQuandoOBloqueioEstaDesligado() {
     ItemEstoque item = item("1");
-    when(itemEstoqueRepository.findByIdAndTenantId(ITEM_ID, TENANT_ID))
+    when(itemEstoqueRepository.travarPorIdETenant(ITEM_ID, TENANT_ID))
         .thenReturn(Optional.of(item));
     when(estoqueConfiguracaoRepository.findByTenantId(TENANT_ID))
         .thenReturn(Optional.of(configuracao(false, false)));
@@ -298,7 +320,7 @@ class EstoqueMovimentacaoServiceTest {
 
   @Test
   void itemDeOutroTenantDa404() {
-    when(itemEstoqueRepository.findByIdAndTenantId(ITEM_ID, TENANT_ID)).thenReturn(Optional.empty());
+    when(itemEstoqueRepository.travarPorIdETenant(ITEM_ID, TENANT_ID)).thenReturn(Optional.empty());
 
     assertThatThrownBy(
             () -> service.criarMovimentacao(ITEM_ID, "SAIDA", new BigDecimal("1"), "Venda"))
@@ -309,7 +331,7 @@ class EstoqueMovimentacaoServiceTest {
 
   @Test
   void tipoEmBrancoDa400() {
-    when(itemEstoqueRepository.findByIdAndTenantId(ITEM_ID, TENANT_ID))
+    when(itemEstoqueRepository.travarPorIdETenant(ITEM_ID, TENANT_ID))
         .thenReturn(Optional.of(item("10")));
 
     assertThatThrownBy(() -> service.criarMovimentacao(ITEM_ID, "  ", new BigDecimal("1"), "Venda"))
@@ -321,7 +343,7 @@ class EstoqueMovimentacaoServiceTest {
 
   @Test
   void tipoDesconhecidoDa400() {
-    when(itemEstoqueRepository.findByIdAndTenantId(ITEM_ID, TENANT_ID))
+    when(itemEstoqueRepository.travarPorIdETenant(ITEM_ID, TENANT_ID))
         .thenReturn(Optional.of(item("10")));
 
     assertThatThrownBy(
@@ -334,7 +356,7 @@ class EstoqueMovimentacaoServiceTest {
   @Test
   void tipoEmMinusculoComEspacoEAceito() {
     ItemEstoque item = item("10");
-    when(itemEstoqueRepository.findByIdAndTenantId(ITEM_ID, TENANT_ID))
+    when(itemEstoqueRepository.travarPorIdETenant(ITEM_ID, TENANT_ID))
         .thenReturn(Optional.of(item));
 
     service.criarMovimentacao(ITEM_ID, "  saida ", new BigDecimal("1"), "Venda");
@@ -344,7 +366,7 @@ class EstoqueMovimentacaoServiceTest {
 
   @Test
   void motivoEmBrancoDa400() {
-    when(itemEstoqueRepository.findByIdAndTenantId(ITEM_ID, TENANT_ID))
+    when(itemEstoqueRepository.travarPorIdETenant(ITEM_ID, TENANT_ID))
         .thenReturn(Optional.of(item("10")));
 
     assertThatThrownBy(
@@ -355,7 +377,7 @@ class EstoqueMovimentacaoServiceTest {
 
   @Test
   void motivoEColapsadoEmEspacoSimples() {
-    when(itemEstoqueRepository.findByIdAndTenantId(ITEM_ID, TENANT_ID))
+    when(itemEstoqueRepository.travarPorIdETenant(ITEM_ID, TENANT_ID))
         .thenReturn(Optional.of(item("10")));
 
     service.criarMovimentacao(ITEM_ID, "ENTRADA", new BigDecimal("1"), "  Venda   em   comanda  ");
@@ -366,7 +388,7 @@ class EstoqueMovimentacaoServiceTest {
   @Test
   void auditaCriacaoComEstadoAntesEDepoisDoItem() {
     ItemEstoque item = item("10");
-    when(itemEstoqueRepository.findByIdAndTenantId(ITEM_ID, TENANT_ID))
+    when(itemEstoqueRepository.travarPorIdETenant(ITEM_ID, TENANT_ID))
         .thenReturn(Optional.of(item));
 
     service.criarMovimentacao(ITEM_ID, "SAIDA", new BigDecimal("3"), "Venda");
@@ -385,7 +407,7 @@ class EstoqueMovimentacaoServiceTest {
   @Test
   void falhaDaAuditoriaNaoDerrubaAMovimentacao() {
     ItemEstoque item = item("10");
-    when(itemEstoqueRepository.findByIdAndTenantId(ITEM_ID, TENANT_ID))
+    when(itemEstoqueRepository.travarPorIdETenant(ITEM_ID, TENANT_ID))
         .thenReturn(Optional.of(item));
     doThrow(new IllegalStateException("audit fora")).when(auditService).recordSuccess(any());
 
@@ -401,7 +423,7 @@ class EstoqueMovimentacaoServiceTest {
     ItemEstoque item = item("10");
     when(servicoInsumoRepository.findByTenantAndService(TENANT_ID, SERVICE_ID))
         .thenReturn(List.of(insumo("2", "10")));
-    when(itemEstoqueRepository.findById(ITEM_ID)).thenReturn(Optional.of(item));
+    when(itemEstoqueRepository.travarPorIdETenant(ITEM_ID, TENANT_ID)).thenReturn(Optional.of(item));
     when(estoqueConfiguracaoRepository.findByTenantId(TENANT_ID)).thenReturn(Optional.empty());
     when(movimentacaoEstoqueRepository.countByTenantIdAndAppointmentIdAndItemEstoqueId(
             TENANT_ID, APPOINTMENT_ID, ITEM_ID))
@@ -429,7 +451,7 @@ class EstoqueMovimentacaoServiceTest {
     service.consumirInsumosPorAgendamento(TENANT_ID, APPOINTMENT_ID, List.of(SERVICE_ID));
 
     verify(movimentacaoEstoqueRepository, never()).saveAndFlush(any());
-    verify(itemEstoqueRepository, never()).findById(any());
+    verify(itemEstoqueRepository, never()).save(any());
   }
 
   @Test
@@ -437,7 +459,7 @@ class EstoqueMovimentacaoServiceTest {
     ItemEstoque item = item("10");
     when(servicoInsumoRepository.findByTenantAndService(TENANT_ID, SERVICE_ID))
         .thenReturn(List.of(insumo("1", "0")));
-    when(itemEstoqueRepository.findById(ITEM_ID)).thenReturn(Optional.of(item));
+    when(itemEstoqueRepository.travarPorIdETenant(ITEM_ID, TENANT_ID)).thenReturn(Optional.of(item));
     when(movimentacaoEstoqueRepository.countByTenantIdAndComandaItemIdAndItemEstoqueId(
             TENANT_ID, COMANDA_ITEM_ID, ITEM_ID))
         .thenReturn(0L);
@@ -468,18 +490,34 @@ class EstoqueMovimentacaoServiceTest {
     verifyNoInteractions(servicoInsumoRepository);
   }
 
+  /** Pulado, mas nao em silencio: fica na auditoria e vira aviso no sino. */
   @Test
-  void itemInativoEPuladoEmSilencio() {
+  void itemInativoEPuladoEAvisado() {
     ItemEstoque item = item("10");
     item.setAtivo(false);
     when(servicoInsumoRepository.findByTenantAndService(TENANT_ID, SERVICE_ID))
         .thenReturn(List.of(insumo("1", "0")));
-    when(itemEstoqueRepository.findById(ITEM_ID)).thenReturn(Optional.of(item));
+    when(itemEstoqueRepository.travarPorIdETenant(ITEM_ID, TENANT_ID)).thenReturn(Optional.of(item));
 
     service.consumirInsumosPorAgendamento(TENANT_ID, APPOINTMENT_ID, List.of(SERVICE_ID));
 
     verify(movimentacaoEstoqueRepository, never()).saveAndFlush(any());
     assertThat(item.getSaldoAtual()).isEqualByComparingTo("10");
+    ArgumentCaptor<AuditEventCommand> auditoria = ArgumentCaptor.forClass(AuditEventCommand.class);
+    verify(auditService).recordSuccess(auditoria.capture());
+    assertThat(auditoria.getValue().action).isEqualTo("STOCK_CONSUMPTION_SKIPPED");
+    verify(notificationPublisher)
+        .publish(
+            eq(TENANT_ID),
+            any(),
+            any(),
+            eq("STOCK_ALERT"),
+            eq("estoque:" + ITEM_ID),
+            org.mockito.ArgumentMatchers.contains("item esta inativo"),
+            eq(StatusNotification.SENT),
+            any(),
+            any(),
+            any());
   }
 
   /** Diferenca deliberada em relacao a {@code criarMovimentacao}: aqui nao ha 409, so o pulo. */
@@ -488,7 +526,7 @@ class EstoqueMovimentacaoServiceTest {
     ItemEstoque item = item("1");
     when(servicoInsumoRepository.findByTenantAndService(TENANT_ID, SERVICE_ID))
         .thenReturn(List.of(insumo("5", "0")));
-    when(itemEstoqueRepository.findById(ITEM_ID)).thenReturn(Optional.of(item));
+    when(itemEstoqueRepository.travarPorIdETenant(ITEM_ID, TENANT_ID)).thenReturn(Optional.of(item));
     when(estoqueConfiguracaoRepository.findByTenantId(TENANT_ID))
         .thenReturn(Optional.of(configuracao(true, false)));
 
@@ -503,7 +541,7 @@ class EstoqueMovimentacaoServiceTest {
     ItemEstoque item = item("1");
     when(servicoInsumoRepository.findByTenantAndService(TENANT_ID, SERVICE_ID))
         .thenReturn(List.of(insumo("5", "0")));
-    when(itemEstoqueRepository.findById(ITEM_ID)).thenReturn(Optional.of(item));
+    when(itemEstoqueRepository.travarPorIdETenant(ITEM_ID, TENANT_ID)).thenReturn(Optional.of(item));
     when(estoqueConfiguracaoRepository.findByTenantId(TENANT_ID))
         .thenReturn(Optional.of(configuracao(false, true)));
 
@@ -518,7 +556,7 @@ class EstoqueMovimentacaoServiceTest {
     ItemEstoque item = item("10");
     when(servicoInsumoRepository.findByTenantAndService(TENANT_ID, SERVICE_ID))
         .thenReturn(List.of(insumo("1", "0")));
-    when(itemEstoqueRepository.findById(ITEM_ID)).thenReturn(Optional.of(item));
+    when(itemEstoqueRepository.travarPorIdETenant(ITEM_ID, TENANT_ID)).thenReturn(Optional.of(item));
 
     service.consumirInsumosPorAgendamento(
         TENANT_ID, APPOINTMENT_ID, java.util.Arrays.asList(null, SERVICE_ID));
@@ -526,15 +564,252 @@ class EstoqueMovimentacaoServiceTest {
     verify(movimentacaoEstoqueRepository).saveAndFlush(any());
   }
 
-  /** O consumo automatico nao gera evento de auditoria no original. */
+  /** O consumo que DEU CERTO nao gera evento de auditoria, como no original. */
   @Test
   void consumoNaoAudita() {
     when(servicoInsumoRepository.findByTenantAndService(TENANT_ID, SERVICE_ID))
         .thenReturn(List.of(insumo("1", "0")));
-    when(itemEstoqueRepository.findById(ITEM_ID)).thenReturn(Optional.of(item("10")));
+    when(itemEstoqueRepository.travarPorIdETenant(ITEM_ID, TENANT_ID)).thenReturn(Optional.of(item("10")));
 
     service.consumirInsumosPorAgendamento(TENANT_ID, APPOINTMENT_ID, List.of(SERVICE_ID));
 
     verifyNoInteractions(auditService);
+  }
+
+  /**
+   * A trava vem ANTES da conferencia de idempotencia: com a ordem invertida, dois fechamentos
+   * simultaneos passavam os dois pelo count e baixavam o insumo duas vezes.
+   */
+  @Test
+  void consumoTravaOItemAntesDeConferirSeJaFoiBaixado() {
+    when(servicoInsumoRepository.findByTenantAndService(TENANT_ID, SERVICE_ID))
+        .thenReturn(List.of(insumo("1", "0")));
+    when(itemEstoqueRepository.travarPorIdETenant(ITEM_ID, TENANT_ID)).thenReturn(Optional.of(item("10")));
+
+    service.consumirInsumosPorAgendamento(TENANT_ID, APPOINTMENT_ID, List.of(SERVICE_ID));
+
+    org.mockito.InOrder ordem = org.mockito.Mockito.inOrder(itemEstoqueRepository, movimentacaoEstoqueRepository);
+    ordem.verify(itemEstoqueRepository).travarPorIdETenant(ITEM_ID, TENANT_ID);
+    ordem.verify(movimentacaoEstoqueRepository)
+        .countByTenantIdAndAppointmentIdAndItemEstoqueId(TENANT_ID, APPOINTMENT_ID, ITEM_ID);
+  }
+
+  // ─── Ajuste: o numero e o saldo final ─────────────────────────────────────
+
+  /** O caso do Raio-X: 500 ml no sistema, 450,5 na prateleira. O backend gravava 49,5. */
+  @Test
+  void ajusteParaBaixoDefineOSaldoContado() {
+    ItemEstoque item = item("500");
+    when(itemEstoqueRepository.travarPorIdETenant(ITEM_ID, TENANT_ID)).thenReturn(Optional.of(item));
+
+    MovimentacaoEstoqueResponse response =
+        service.criarMovimentacao(request("AJUSTE", "450.5", "Contagem de setembro"));
+
+    assertThat(item.getSaldoAtual()).isEqualByComparingTo("450.5");
+    MovimentacaoEstoque persistida = movimentacaoPersistida();
+    assertThat(persistida.getTipo()).isEqualTo(TipoMovimentacaoEstoque.AJUSTE);
+    assertThat(persistida.getQuantidade()).isEqualByComparingTo("49.5");
+    assertThat(persistida.getSaldoAnterior()).isEqualByComparingTo("500");
+    assertThat(response.saldoPosterior).isEqualByComparingTo("450.5");
+  }
+
+  @Test
+  void ajusteParaCimaTambemExiste() {
+    ItemEstoque item = item("3");
+    when(itemEstoqueRepository.travarPorIdETenant(ITEM_ID, TENANT_ID)).thenReturn(Optional.of(item));
+
+    service.criarMovimentacao(request("AJUSTE", "8", "Sobra encontrada"));
+
+    assertThat(item.getSaldoAtual()).isEqualByComparingTo("8");
+    assertThat(movimentacaoPersistida().getQuantidade()).isEqualByComparingTo("5");
+  }
+
+  @Test
+  void ajusteParaZeroEValido() {
+    ItemEstoque item = item("4");
+    when(itemEstoqueRepository.travarPorIdETenant(ITEM_ID, TENANT_ID)).thenReturn(Optional.of(item));
+
+    service.criarMovimentacao(request("AJUSTE", "0", "Acabou"));
+
+    assertThat(item.getSaldoAtual()).isEqualByComparingTo("0");
+  }
+
+  @Test
+  void ajusteIgualAoSaldoAtualE400() {
+    when(itemEstoqueRepository.travarPorIdETenant(ITEM_ID, TENANT_ID)).thenReturn(Optional.of(item("10")));
+
+    assertThatThrownBy(() -> service.criarMovimentacao(request("AJUSTE", "10", "Conferido")))
+        .isInstanceOf(ApiClientErrorException.class)
+        .hasMessageContaining("nao ha o que ajustar")
+        .extracting(e -> ((ApiClientErrorException) e).getStatus())
+        .isEqualTo(400);
+    verify(movimentacaoEstoqueRepository, never()).saveAndFlush(any());
+  }
+
+  @Test
+  void entradaOuSaidaComQuantidadeZeroE400() {
+    when(itemEstoqueRepository.travarPorIdETenant(ITEM_ID, TENANT_ID)).thenReturn(Optional.of(item("10")));
+
+    assertThatThrownBy(() -> service.criarMovimentacao(request("SAIDA", "0", "Nada")))
+        .isInstanceOf(ApiClientErrorException.class)
+        .extracting(e -> ((ApiClientErrorException) e).getStatus())
+        .isEqualTo(400);
+  }
+
+  // ─── Lancamento financeiro ────────────────────────────────────────────────
+
+  @Test
+  void lancamentoSemValorUnitarioE400ENaoMexeNoSaldo() {
+    ItemEstoque item = item("10");
+    when(itemEstoqueRepository.travarPorIdETenant(ITEM_ID, TENANT_ID)).thenReturn(Optional.of(item));
+    MovimentacaoEstoqueRequest request = request("ENTRADA", "5", "Compra");
+    request.gerarLancamentoFinanceiro = Boolean.TRUE;
+
+    assertThatThrownBy(() -> service.criarMovimentacao(request))
+        .isInstanceOf(ApiClientErrorException.class)
+        .extracting(e -> ((ApiClientErrorException) e).getStatus())
+        .isEqualTo(400);
+    assertThat(item.getSaldoAtual()).isEqualByComparingTo("10");
+    verifyNoInteractions(servicoFinanceiro);
+  }
+
+  @Test
+  void lancamentoUsaAFormaDePagamentoInformada() {
+    when(itemEstoqueRepository.travarPorIdETenant(ITEM_ID, TENANT_ID)).thenReturn(Optional.of(item("0")));
+    MovimentacaoEstoqueRequest request = request("ENTRADA", "2", "Compra");
+    request.valorUnitarioPago = new BigDecimal("10");
+    request.gerarLancamentoFinanceiro = Boolean.TRUE;
+    request.formaPagamento = " pix ";
+
+    service.criarMovimentacao(request);
+
+    ArgumentCaptor<TransacaoRequest> despesa = ArgumentCaptor.forClass(TransacaoRequest.class);
+    verify(servicoFinanceiro).criar(despesa.capture());
+    assertThat(despesa.getValue().paymentMethod).isEqualTo("PIX");
+    assertThat(despesa.getValue().amount).isEqualByComparingTo("20.00");
+  }
+
+  @Test
+  void formaDePagamentoDesconhecidaE400() {
+    when(itemEstoqueRepository.travarPorIdETenant(ITEM_ID, TENANT_ID)).thenReturn(Optional.of(item("0")));
+    MovimentacaoEstoqueRequest request = request("ENTRADA", "2", "Compra");
+    request.valorUnitarioPago = new BigDecimal("10");
+    request.gerarLancamentoFinanceiro = Boolean.TRUE;
+    request.formaPagamento = "CHEQUE";
+
+    assertThatThrownBy(() -> service.criarMovimentacao(request))
+        .isInstanceOf(ApiClientErrorException.class)
+        .hasMessageContaining("Forma de pagamento invalida");
+  }
+
+  @Test
+  void semLancamentoNaoChamaOFinanceiro() {
+    when(itemEstoqueRepository.travarPorIdETenant(ITEM_ID, TENANT_ID)).thenReturn(Optional.of(item("0")));
+    MovimentacaoEstoqueRequest request = request("ENTRADA", "2", "Compra");
+    request.valorUnitarioPago = new BigDecimal("10");
+
+    service.criarMovimentacao(request);
+
+    verifyNoInteractions(servicoFinanceiro);
+    assertThat(movimentacaoPersistida().getTransacaoFinanceiraId()).isNull();
+  }
+
+  /** Saldo zerado nao tem valor a ponderar: o custo e o da propria compra. */
+  @Test
+  void primeiraEntradaDefineOCustoPeloPrecoPago() {
+    ItemEstoque item = item("0");
+    item.setCustoMedioUnitario(new BigDecimal("99"));
+    when(itemEstoqueRepository.travarPorIdETenant(ITEM_ID, TENANT_ID)).thenReturn(Optional.of(item));
+    MovimentacaoEstoqueRequest request = request("ENTRADA", "4", "Compra");
+    request.valorUnitarioPago = new BigDecimal("2.50");
+
+    service.criarMovimentacao(request);
+
+    assertThat(item.getCustoMedioUnitario()).isEqualByComparingTo("2.50");
+  }
+
+  // ─── Estoque minimo ───────────────────────────────────────────────────────
+
+  @Test
+  void avisaQuandoOSaldoChegaAoMinimo() {
+    ItemEstoque item = item("3");
+    when(itemEstoqueRepository.travarPorIdETenant(ITEM_ID, TENANT_ID)).thenReturn(Optional.of(item));
+    when(estoqueConfiguracaoRepository.findByTenantId(TENANT_ID))
+        .thenReturn(Optional.of(configuracao(false, true)));
+
+    service.criarMovimentacao(request("SAIDA", "1", "Uso interno"));
+
+    verify(notificationPublisher)
+        .publish(
+            eq(TENANT_ID),
+            any(),
+            any(),
+            eq("STOCK_ALERT"),
+            eq("estoque:" + ITEM_ID),
+            org.mockito.ArgumentMatchers.contains("Estoque baixo"),
+            eq(StatusNotification.SENT),
+            any(),
+            any(),
+            eq(6 * 60 * 60L));
+  }
+
+  /** So na travessia: um item que ja estava abaixo nao toca o sino a cada baixa. */
+  @Test
+  void naoRepeteOAvisoParaQuemJaEstavaAbaixo() {
+    when(itemEstoqueRepository.travarPorIdETenant(ITEM_ID, TENANT_ID)).thenReturn(Optional.of(item("1.5")));
+    when(estoqueConfiguracaoRepository.findByTenantId(TENANT_ID))
+        .thenReturn(Optional.of(configuracao(false, true)));
+
+    service.criarMovimentacao(request("SAIDA", "0.5", "Uso interno"));
+
+    verifyNoInteractions(notificationPublisher);
+  }
+
+  @Test
+  void alertaDesligadoNaoAvisa() {
+    when(itemEstoqueRepository.travarPorIdETenant(ITEM_ID, TENANT_ID)).thenReturn(Optional.of(item("3")));
+    when(estoqueConfiguracaoRepository.findByTenantId(TENANT_ID))
+        .thenReturn(Optional.of(configuracao(false, false)));
+
+    service.criarMovimentacao(request("SAIDA", "2", "Uso interno"));
+
+    verifyNoInteractions(notificationPublisher);
+  }
+
+  // ─── Inventario ───────────────────────────────────────────────────────────
+
+  /**
+   * A diferenca da contagem vai para o saldo de AGORA: contou-se 2 a menos quando havia 10, e desde
+   * entao saiu 1 — o saldo termina em 7, e nao nos 8 contados.
+   */
+  @Test
+  void inventarioAplicaADiferencaAoSaldoAtual() {
+    ItemEstoque item = item("9");
+    when(itemEstoqueRepository.travarPorIdETenant(ITEM_ID, TENANT_ID)).thenReturn(Optional.of(item));
+
+    MovimentacaoEstoqueResponse response =
+        service.ajustarPorInventario(ITEM_ID, new BigDecimal("-2"), "Inventario: Setembro");
+
+    assertThat(item.getSaldoAtual()).isEqualByComparingTo("7");
+    MovimentacaoEstoque persistida = movimentacaoPersistida();
+    assertThat(persistida.getOrigem()).isEqualTo(OrigemMovimentacaoEstoque.INVENTARIO);
+    assertThat(persistida.getTipo()).isEqualTo(TipoMovimentacaoEstoque.AJUSTE);
+    assertThat(response).isNotNull();
+  }
+
+  @Test
+  void inventarioNuncaDeixaOSaldoNegativo() {
+    ItemEstoque item = item("1");
+    when(itemEstoqueRepository.travarPorIdETenant(ITEM_ID, TENANT_ID)).thenReturn(Optional.of(item));
+
+    service.ajustarPorInventario(ITEM_ID, new BigDecimal("-5"), "Inventario");
+
+    assertThat(item.getSaldoAtual()).isEqualByComparingTo("0");
+  }
+
+  @Test
+  void inventarioSemDiferencaNaoMovimenta() {
+    assertThat(service.ajustarPorInventario(ITEM_ID, BigDecimal.ZERO, "Inventario")).isNull();
+    verifyNoInteractions(itemEstoqueRepository);
   }
 }

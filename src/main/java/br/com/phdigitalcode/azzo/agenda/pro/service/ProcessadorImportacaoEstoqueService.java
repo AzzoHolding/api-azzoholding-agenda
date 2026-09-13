@@ -288,6 +288,27 @@ public class ProcessadorImportacaoEstoqueService {
           linhasComErro,
           job.getDryRun());
 
+    } catch (PlanilhaGrandeDemais ex) {
+      // Diferente das outras falhas, esta a pessoa consegue resolver — por isso vira linha de erro
+      // visivel na tela, e nao so log.
+      job.setStatus(StatusImportacaoEstoque.FALHOU);
+      job.setTotalLinhas(ex.linhasDeDados);
+      job.setLinhasProcessadas(0);
+      job.setLinhasComErro(0);
+      importacaoEstoqueErroLinhaRepository.save(
+          erroLinha(
+              job,
+              1,
+              null,
+              "ARQUIVO_GRANDE_DEMAIS",
+              "A planilha tem "
+                  + ex.linhasDeDados
+                  + " linhas; o limite e "
+                  + (LIMITE_DE_LINHAS - 1)
+                  + ". Divida o arquivo e envie as partes.",
+              String.valueOf(ex.linhasDeDados)));
+      LOG.warn(
+          "importacao_estoque_grande_demais jobId={} linhas={}", jobId, ex.linhasDeDados);
     } catch (Exception ex) {
       job.setStatus(StatusImportacaoEstoque.FALHOU);
       job.setTotalLinhas(totalLinhas);
@@ -675,9 +696,29 @@ public class ProcessadorImportacaoEstoqueService {
 
   // ── UTILITARIOS ─────────────────────────────────────────────────────────────
 
+  /**
+   * Teto de linhas por planilha, cabecalho incluso. O upload ja e limitado a 10 MB, mas 10 MB de
+   * XLSX comprimido cabem centenas de milhares de linhas — e cada uma vira leitura, escrita e trava
+   * de item dentro de UMA transacao. Acima disto o job falha antes de gravar qualquer linha.
+   */
+  static final int LIMITE_DE_LINHAS = 5001;
+
+  /** Planilha acima de {@link #LIMITE_DE_LINHAS}; carrega quantas linhas de dados ela tinha. */
+  static final class PlanilhaGrandeDemais extends RuntimeException {
+    final int linhasDeDados;
+
+    PlanilhaGrandeDemais(int linhasDeDados) {
+      super("Planilha com " + linhasDeDados + " linhas de dados.");
+      this.linhasDeDados = linhasDeDados;
+    }
+  }
+
   private List<List<String>> parseXlsx(byte[] bytes) throws IOException {
     try (XSSFWorkbook workbook = new XSSFWorkbook(new ByteArrayInputStream(bytes))) {
       Sheet sheet = workbook.getSheetAt(0);
+      if (sheet.getLastRowNum() + 1 > LIMITE_DE_LINHAS) {
+        throw new PlanilhaGrandeDemais(sheet.getLastRowNum());
+      }
       List<List<String>> result = new ArrayList<>();
       for (Row row : sheet) {
         List<String> cols = new ArrayList<>();

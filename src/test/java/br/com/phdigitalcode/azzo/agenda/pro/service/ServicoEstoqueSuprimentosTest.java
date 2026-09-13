@@ -268,7 +268,7 @@ class ServicoEstoqueSuprimentosTest {
   @Test
   void registrarContagemDevolveOInventarioEGravaSaldoAtualComoEsperado() {
     prepararInventario(StatusInventarioEstoque.EM_CONTAGEM);
-    when(itemEstoqueRepository.findByIdAndTenantId(ITEM_ID, TENANT_ID))
+    when(itemEstoqueRepository.travarPorIdETenant(ITEM_ID, TENANT_ID))
         .thenReturn(Optional.of(item()));
     when(estoqueInventarioContagemRepository.countByInventarioIdAndItemEstoqueIdAndTenantId(
             INVENTARIO_ID, ITEM_ID, TENANT_ID))
@@ -293,7 +293,7 @@ class ServicoEstoqueSuprimentosTest {
   @Test
   void registrarSegundaContagemDoMesmoItemE409() {
     prepararInventario(StatusInventarioEstoque.EM_CONTAGEM);
-    when(itemEstoqueRepository.findByIdAndTenantId(ITEM_ID, TENANT_ID))
+    when(itemEstoqueRepository.travarPorIdETenant(ITEM_ID, TENANT_ID))
         .thenReturn(Optional.of(item()));
     when(estoqueInventarioContagemRepository.countByInventarioIdAndItemEstoqueIdAndTenantId(
             INVENTARIO_ID, ITEM_ID, TENANT_ID))
@@ -417,6 +417,28 @@ class ServicoEstoqueSuprimentosTest {
     assertThat(capturarAuditoria().action).isEqualTo("STOCK_INVENTORY_CLOSE");
   }
 
+  /**
+   * "Fechar e aplicar" aplica de verdade: a contagem de 9 onde se esperava 7 vira um ajuste de +2.
+   * No original o fechamento so trocava o status.
+   */
+  @Test
+  void fecharInventarioAplicaAsDiferencasAoSaldo() {
+    prepararInventario(StatusInventarioEstoque.EM_CONTAGEM);
+    when(estoqueInventarioContagemRepository.findByInventarioIdAndTenantIdOrderByCreatedAtDesc(
+            INVENTARIO_ID, TENANT_ID))
+        .thenReturn(List.of(contagemExistente()));
+    when(estoqueMovimentacaoService.ajustarPorInventario(eq(ITEM_ID), any(), any()))
+        .thenReturn(new br.com.phdigitalcode.azzo.agenda.pro.dto.EstoqueDtos.MovimentacaoEstoqueResponse());
+
+    service.fecharInventario(INVENTARIO_ID);
+
+    ArgumentCaptor<BigDecimal> diferenca = ArgumentCaptor.forClass(BigDecimal.class);
+    verify(estoqueMovimentacaoService)
+        .ajustarPorInventario(eq(ITEM_ID), diferenca.capture(), eq("Inventario: Contagem de Maio"));
+    assertThat(diferenca.getValue()).isEqualByComparingTo("2");
+    assertThat(comoMapa(capturarAuditoria().metadata)).containsEntry("itensAjustados", 1);
+  }
+
   @Test
   void fecharInventarioJaFechadoEIdempotenteENaoAudita() {
     prepararInventario(StatusInventarioEstoque.FECHADO);
@@ -427,12 +449,15 @@ class ServicoEstoqueSuprimentosTest {
     verifyNoInteractions(auditService);
   }
 
-  /** Assimetria do original: o fechamento nao bloqueia CANCELADO, so o proprio FECHADO. */
+  /** O original deixava fechar uma contagem ja descartada. Agora e 409, sem mexer em saldo. */
   @Test
-  void inventarioCanceladoPodeSerFechado() {
+  void inventarioCanceladoNaoPodeSerFechado() {
     prepararInventario(StatusInventarioEstoque.CANCELADO);
 
-    assertThat(service.fecharInventario(INVENTARIO_ID).status).isEqualTo("FECHADO");
+    assertThatThrownBy(() -> service.fecharInventario(INVENTARIO_ID))
+        .isInstanceOf(ApiClientErrorException.class)
+        .satisfies(e -> assertThat(((ApiClientErrorException) e).getStatus()).isEqualTo(409));
+    verifyNoInteractions(estoqueMovimentacaoService);
   }
 
   @Test
@@ -598,8 +623,8 @@ class ServicoEstoqueSuprimentosTest {
   @Test
   void listarPedidosCompraResolveOsFornecedoresEmLote() {
     EstoquePedidoCompra pedido = pedidoExistente(10, 10);
-    when(estoquePedidoCompraRepository.findAll(any(Specification.class), any(Sort.class)))
-        .thenReturn(List.of(pedido));
+    when(estoquePedidoCompraRepository.findAll(any(Specification.class), any(Pageable.class)))
+        .thenReturn(new PageImpl<>(List.of(pedido)));
     when(estoqueFornecedorRepository.findByTenantIdAndIdIn(eq(TENANT_ID), anyCollection()))
         .thenReturn(List.of(fornecedorExistente()));
 
@@ -612,8 +637,8 @@ class ServicoEstoqueSuprimentosTest {
 
   @Test
   void listarPedidosCompraVaziaNemConsultaOsFornecedores() {
-    when(estoquePedidoCompraRepository.findAll(any(Specification.class), any(Sort.class)))
-        .thenReturn(List.of());
+    when(estoquePedidoCompraRepository.findAll(any(Specification.class), any(Pageable.class)))
+        .thenReturn(new PageImpl<>(List.of()));
 
     assertThat(service.listarPedidosCompra(null, null, null, null)).isEmpty();
 
@@ -664,6 +689,35 @@ class ServicoEstoqueSuprimentosTest {
         .isInstanceOf(ApiClientErrorException.class)
         .satisfies(e -> assertThat(((ApiClientErrorException) e).getStatus()).isEqualTo(400));
     verify(estoquePedidoCompraRepository, never()).save(any());
+  }
+
+  /**
+   * Com item escolhido, o recebimento da entrada no estoque — com o custo proporcional do pedido:
+   * 4 de 10 itens de R$ 250 sao R$ 100, que entram como 2000 ml a R$ 0,05.
+   */
+  @Test
+  void receberPedidoComItemDaEntradaNoEstoque() {
+    prepararPedido(10, 10);
+    PedidoCompraRecebimentoRequest request = recebimentoRequest(4, null);
+    request.itemEstoqueId = ITEM_ID.toString();
+    request.quantidadeEstoque = new BigDecimal("2000");
+
+    service.receberPedidoCompra(PEDIDO_ID, request);
+
+    ArgumentCaptor<BigDecimal> custo = ArgumentCaptor.forClass(BigDecimal.class);
+    verify(estoqueMovimentacaoService)
+        .registrarEntradaDeCompra(
+            eq(ITEM_ID), eq(new BigDecimal("2000")), custo.capture(), any(String.class));
+    assertThat(custo.getValue()).isEqualByComparingTo("0.05");
+  }
+
+  @Test
+  void receberPedidoSemItemNaoMexeNoEstoque() {
+    prepararPedido(10, 10);
+
+    service.receberPedidoCompra(PEDIDO_ID, recebimentoRequest(4, null));
+
+    verifyNoInteractions(estoqueMovimentacaoService);
   }
 
   @Test
@@ -741,22 +795,39 @@ class ServicoEstoqueSuprimentosTest {
     verifyNoInteractions(auditService);
   }
 
-  /**
-   * Assimetria do original, preservada: o recebimento nao checa o status anterior — um rascunho vai
-   * direto para RECEBIDA, sem passar por ENVIADA.
-   */
   @Test
-  void receberTransferenciaAceitaRascunhoSemPassarPorEnviada() {
-    prepararTransferencia(StatusTransferenciaEstoque.RASCUNHO);
+  void receberTransferenciaEnviadaMarcaRecebida() {
+    prepararTransferencia(StatusTransferenciaEstoque.ENVIADA);
 
     assertThat(service.receberTransferencia(TRANSFERENCIA_ID).status).isEqualTo("RECEBIDA");
     assertThat(capturarAuditoria().action).isEqualTo("STOCK_TRANSFER_RECEIVE");
   }
 
+  /** O original aceitava receber um rascunho, pulando o envio. */
   @Test
-  void listarTransferenciasSemPaginacaoNaoUsaPageable() {
-    when(estoqueTransferenciaRepository.findAll(any(Specification.class), any(Sort.class)))
-        .thenReturn(List.of(transferencia(StatusTransferenciaEstoque.RASCUNHO)));
+  void receberTransferenciaEmRascunhoE409() {
+    prepararTransferencia(StatusTransferenciaEstoque.RASCUNHO);
+
+    assertThatThrownBy(() -> service.receberTransferencia(TRANSFERENCIA_ID))
+        .isInstanceOf(ApiClientErrorException.class)
+        .satisfies(e -> assertThat(((ApiClientErrorException) e).getStatus()).isEqualTo(409));
+    verify(estoqueTransferenciaRepository, never()).save(any());
+  }
+
+  /** Receber de novo devolve como esta — e nao audita duas vezes, como no original. */
+  @Test
+  void receberTransferenciaJaRecebidaEIdempotente() {
+    prepararTransferencia(StatusTransferenciaEstoque.RECEBIDA);
+
+    assertThat(service.receberTransferencia(TRANSFERENCIA_ID).status).isEqualTo("RECEBIDA");
+    verify(estoqueTransferenciaRepository, never()).save(any());
+    verifyNoInteractions(auditService);
+  }
+
+  @Test
+  void listarTransferenciasSemPaginacaoTrazAPrimeiraPaginaDoTeto() {
+    when(estoqueTransferenciaRepository.findAll(any(Specification.class), any(Pageable.class)))
+        .thenReturn(new PageImpl<>(List.of(transferencia(StatusTransferenciaEstoque.RASCUNHO))));
     when(itemEstoqueRepository.findByTenantIdAndIdIn(eq(TENANT_ID), anyCollection()))
         .thenReturn(List.of(item()));
 
@@ -765,14 +836,15 @@ class ServicoEstoqueSuprimentosTest {
 
     assertThat(transferencias).hasSize(1);
     assertThat(transferencias.get(0).itemNome).isEqualTo("Shampoo");
-    verify(estoqueTransferenciaRepository, never())
-        .findAll(any(Specification.class), any(Pageable.class));
+    ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
+    verify(estoqueTransferenciaRepository).findAll(any(Specification.class), pageable.capture());
+    assertThat(pageable.getValue().getPageSize()).isEqualTo(1000);
   }
 
   @Test
   void cursorPelaMetadeNaoInvalidaAListagem() {
-    when(estoqueTransferenciaRepository.findAll(any(Specification.class), any(Sort.class)))
-        .thenReturn(List.of());
+    when(estoqueTransferenciaRepository.findAll(any(Specification.class), any(Pageable.class)))
+        .thenReturn(new PageImpl<>(List.of()));
 
     // Só cursorCreatedAt, sem cursorId: equivale a nenhum cursor, nao a 400.
     assertThat(service.listarTransferencias(null, null, Instant.now().toString(), null)).isEmpty();

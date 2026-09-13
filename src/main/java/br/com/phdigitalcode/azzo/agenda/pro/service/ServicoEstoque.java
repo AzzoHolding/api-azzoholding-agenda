@@ -6,8 +6,12 @@ import static br.com.phdigitalcode.azzo.agenda.pro.service.EstoqueMovimentacaoSe
 
 import java.io.ByteArrayOutputStream;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -33,6 +37,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.dto.EstoqueDtos.CancelarInventarioRe
 import br.com.phdigitalcode.azzo.agenda.pro.dto.EstoqueDtos.ConfiguracaoEstoqueRequest;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.EstoqueDtos.ConfiguracaoEstoqueResponse;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.EstoqueDtos.DashboardEstoqueResponse;
+import br.com.phdigitalcode.azzo.agenda.pro.dto.EstoqueDtos.DashboardMargemServicoResponse;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.EstoqueDtos.FornecedorEstoqueRequest;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.EstoqueDtos.FornecedorEstoqueResponse;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.EstoqueDtos.ImportacaoErroLinhaResponse;
@@ -129,6 +134,8 @@ public class ServicoEstoque {
     public String contentType;
     public byte[] conteudo;
   }
+
+  private static final ZoneId ZONA_BR = ZoneId.of("America/Sao_Paulo");
 
   private final ItemEstoqueRepository itemEstoqueRepository;
   private final MovimentacaoEstoqueRepository movimentacaoEstoqueRepository;
@@ -303,26 +310,41 @@ public class ServicoEstoque {
   // ─── Dashboard ───────────────────────────────────────────────────────────
 
   /**
-   * Porte fiel, incluindo duas assimetrias do original:
+   * O painel do estoque no periodo {@code inicio}..{@code fim} (inclusivos; nulos viram do dia 1 do
+   * mes ate hoje).
+   *
+   * <p>Tres correcoes em relacao ao original, que ignorava o periodo, somava toda {@code SAIDA} como
+   * perda e nunca preenchia a margem:
    *
    * <ul>
-   *   <li>{@code margemServicos} <b>nunca e preenchido</b> — o DTO tem o campo e o original o
-   *       devolve sempre vazio;
-   *   <li>o recurso aceita {@code inicio}/{@code fim}/{@code serviceId}/{@code itemId} na query
-   *       string mas <b>nao os repassa</b>: o dashboard e sempre do tenant inteiro, sem recorte.
+   *   <li>{@code perdasValor} e so o que se perdeu — saidas manuais e ajustes para baixo —, ao custo
+   *       medio do item, agregado no banco ({@code somarPerdasPorItem});
+   *   <li>{@code margemServicos} traz receita, custo teorico dos insumos e margem de cada servico
+   *       que consome estoque, em CENTAVOS (o contrato do DTO);
+   *   <li>nada de carregar todas as movimentacoes do tenant em memoria.
    * </ul>
    *
-   * <p>{@code itensAbaixoMinimo} usa {@code <=} (item exatamente no minimo ja conta) e
-   * {@code perdasValor} soma o valor de <b>toda</b> SAIDA, nao so das perdas.
+   * <p>{@code itensAbaixoMinimo} usa {@code <=} (item exatamente no minimo ja conta).
    */
   @Transactional(readOnly = true)
-  public DashboardEstoqueResponse obterDashboard() {
+  public DashboardEstoqueResponse obterDashboard(LocalDate inicio, LocalDate fim) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    LocalDate hoje = LocalDate.now(ZONA_BR);
+    LocalDate de = inicio != null ? inicio : hoje.withDayOfMonth(1);
+    LocalDate ate = fim != null ? fim : hoje;
+    if (ate.isBefore(de)) {
+      throw new ApiClientErrorException(
+          "O fim do periodo nao pode ser antes do inicio.", HttpStatus.BAD_REQUEST.value());
+    }
+
     List<ItemEstoque> itens = itemEstoqueRepository.findByTenantId(tenantId);
-    List<MovimentacaoEstoque> movimentacoes = movimentacaoEstoqueRepository.findByTenantId(tenantId);
+    Map<UUID, ItemEstoque> itensPorId =
+        itens.stream().collect(Collectors.toMap(ItemEstoque::getId, item -> item, (a, b) -> a));
 
     DashboardEstoqueResponse response = new DashboardEstoqueResponse();
     response.atualizadoEm = Instant.now().toString();
+    response.periodoInicio = de.toString();
+    response.periodoFim = ate.toString();
     response.itensAbaixoMinimo =
         (int)
             itens.stream()
@@ -339,12 +361,68 @@ public class ServicoEstoque {
             .reduce(BigDecimal.ZERO, BigDecimal::add);
     response.rupturaTaxa =
         itens.isEmpty() ? 0d : (double) response.itensZerados / (double) itens.size();
-    response.perdasValor =
-        movimentacoes.stream()
-            .filter(m -> m.getTipo() == TipoMovimentacaoEstoque.SAIDA)
-            .map(m -> nvl(m.getValorTotalMovimentacao()))
-            .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+    Instant inicioDoPeriodo = de.atStartOfDay(ZONA_BR).toInstant();
+    Instant fimDoPeriodo = ate.plusDays(1).atStartOfDay(ZONA_BR).toInstant();
+    BigDecimal perdas = BigDecimal.ZERO;
+    for (Object[] linha :
+        movimentacaoEstoqueRepository.somarPerdasPorItem(tenantId, inicioDoPeriodo, fimDoPeriodo)) {
+      ItemEstoque item = itensPorId.get((UUID) linha[0]);
+      if (item == null) continue;
+      perdas = perdas.add(decimal(linha[1]).multiply(nvl(item.getCustoMedioUnitario())));
+    }
+    response.perdasValor = perdas.setScale(2, RoundingMode.HALF_UP);
+    response.margemServicos = calcularMargens(tenantId, de, ate, itensPorId);
     return response;
+  }
+
+  /**
+   * Receita real (agendamentos concluidos) contra o custo TEORICO dos insumos: execucoes vezes o
+   * que a ficha do servico consome, com a perda prevista, ao custo medio de hoje. E teorico de
+   * proposito — o consumo real pode ter sido pulado por falta de saldo, e a margem mediria o
+   * estoque, e nao o servico.
+   */
+  private List<DashboardMargemServicoResponse> calcularMargens(
+      UUID tenantId, LocalDate de, LocalDate ate, Map<UUID, ItemEstoque> itensPorId) {
+    Map<UUID, BigDecimal> custoPorExecucao = new HashMap<>();
+    for (ServicoInsumo insumo : servicoInsumoRepository.findByTenantIdAndAtivoTrue(tenantId)) {
+      ItemEstoque item = itensPorId.get(insumo.getItemEstoqueId());
+      if (item == null) continue;
+      BigDecimal fatorPerda =
+          BigDecimal.ONE.add(
+              nvl(insumo.getPercentualPerda()).divide(new BigDecimal("100"), 6, RoundingMode.HALF_UP));
+      BigDecimal custo =
+          nvl(insumo.getQuantidadeConsumo())
+              .multiply(fatorPerda)
+              .multiply(nvl(item.getCustoMedioUnitario()));
+      custoPorExecucao.merge(insumo.getServiceId(), custo, BigDecimal::add);
+    }
+
+    List<DashboardMargemServicoResponse> margens = new ArrayList<>();
+    for (Object[] linha : servicoInsumoRepository.somarExecucoesDosServicosComInsumo(tenantId, de, ate)) {
+      UUID serviceId = UUID.fromString(String.valueOf(linha[0]));
+      long execucoes = decimal(linha[1]).longValue();
+      long receita = decimal(linha[2]).longValue();
+      long custoInsumos =
+          nvl(custoPorExecucao.get(serviceId))
+              .multiply(BigDecimal.valueOf(execucoes))
+              .multiply(new BigDecimal("100"))
+              .setScale(0, RoundingMode.HALF_UP)
+              .longValue();
+      DashboardMargemServicoResponse margem = new DashboardMargemServicoResponse();
+      margem.serviceId = serviceId.toString();
+      margem.receitaTotal = receita;
+      margem.custoInsumosTotal = custoInsumos;
+      margem.margemBruta = receita - custoInsumos;
+      margens.add(margem);
+    }
+    return margens;
+  }
+
+  private static BigDecimal decimal(Object valor) {
+    if (valor == null) return BigDecimal.ZERO;
+    if (valor instanceof BigDecimal decimal) return decimal;
+    return new BigDecimal(valor.toString());
   }
 
   // ─── Configuracao ────────────────────────────────────────────────────────
@@ -828,7 +906,12 @@ public class ServicoEstoque {
 
     UUID itemId = UUID.fromString(request.itemEstoqueId);
     UUID tenantId = inventario.getTenantId();
-    ItemEstoque item = obterItemOuFalhar(itemId, tenantId);
+    // Trava o item: duas pessoas contando o mesmo item ao mesmo tempo passariam as duas pelo count
+    // abaixo e gravariam duas contagens — a tabela nao tem indice unico para o par.
+    ItemEstoque item =
+        itemEstoqueRepository
+            .travarPorIdETenant(itemId, tenantId)
+            .orElseThrow(() -> naoEncontrado("Item de estoque nao encontrado."));
 
     boolean jaContado =
         estoqueInventarioContagemRepository.countByInventarioIdAndItemEstoqueIdAndTenantId(
@@ -935,9 +1018,16 @@ public class ServicoEstoque {
   }
 
   /**
-   * Idempotente para {@code FECHADO} (devolve como esta, sem auditar). <b>Nao</b> bloqueia
-   * {@code CANCELADO}: um inventario cancelado pode ser fechado por este endpoint — assimetria do
-   * original, preservada.
+   * Fecha a contagem e <b>aplica as diferencas ao saldo</b> — o que a tela sempre prometeu ("Fechar
+   * e aplicar") e o original nao fazia: la o fechamento so trocava o status, e a contagem virava
+   * um registro sem efeito.
+   *
+   * <p>Cada item com diferenca ganha uma movimentacao {@code AJUSTE} de origem {@code INVENTARIO},
+   * calculada sobre o saldo de agora (ver {@code EstoqueMovimentacaoService.ajustarPorInventario}).
+   * Tudo na mesma transacao: ou todos os saldos mudam, ou nenhum.
+   *
+   * <p>Idempotente para {@code FECHADO} (devolve como esta, sem auditar e sem reaplicar).
+   * {@code CANCELADO} e 409 — o original deixava fechar uma contagem ja descartada.
    */
   @Transactional
   public InventarioEstoqueResponse fecharInventario(UUID inventarioId) {
@@ -946,10 +1036,31 @@ public class ServicoEstoque {
     if (inventario.getStatus() == StatusInventarioEstoque.FECHADO) {
       return toInventarioResponse(inventario);
     }
+    if (inventario.getStatus() == StatusInventarioEstoque.CANCELADO) {
+      throw conflito("Inventario cancelado nao pode ser fechado.");
+    }
+
+    int itensAjustados = 0;
+    String motivo = "Inventario: " + inventario.getNome();
+    for (EstoqueInventarioContagem contagem :
+        estoqueInventarioContagemRepository.findByInventarioIdAndTenantIdOrderByCreatedAtDesc(
+            inventario.getId(), inventario.getTenantId())) {
+      if (contagem.getQuantidadeContada() == null) continue;
+      BigDecimal diferenca =
+          contagem.getQuantidadeContada().subtract(nvl(contagem.getQuantidadeEsperada()));
+      if (estoqueMovimentacaoService.ajustarPorInventario(
+              contagem.getItemEstoqueId(), diferenca, motivo)
+          != null) {
+        itensAjustados++;
+      }
+    }
+
     inventario.setStatus(StatusInventarioEstoque.FECHADO);
     inventario.setDataFechamento(Instant.now());
     EstoqueInventario salvo = estoqueInventarioRepository.save(inventario);
     InventarioEstoqueResponse response = toInventarioResponse(salvo);
+    Map<String, Object> metadata = new HashMap<>();
+    metadata.put("itensAjustados", itensAjustados);
     auditarEstoque(
         salvo.getTenantId(),
         "STOCK_INVENTORY_CLOSE",
@@ -957,7 +1068,7 @@ public class ServicoEstoque {
         salvo.getId(),
         before,
         response,
-        null);
+        metadata);
     return response;
   }
 
@@ -1124,6 +1235,10 @@ public class ServicoEstoque {
    * {@code quantidadeRecebida} nao positiva e <b>400</b> (a validacao de bean so exige
    * {@code @NotNull}), acima da pendente e <b>409</b>; e a {@code observacao} do corpo
    * <b>substitui</b> a do pedido mesmo quando vem nula.
+   *
+   * <p>Com {@code itemEstoqueId}, o recebimento tambem <b>da entrada no estoque</b>, com o custo
+   * proporcional do pedido — no original o saldo nao mudava, e a entrada tinha de ser lancada de
+   * novo a mao.
    */
   @Transactional
   public PedidoCompraEstoqueResponse receberPedidoCompra(
@@ -1142,6 +1257,23 @@ public class ServicoEstoque {
       throw conflito("Quantidade recebida maior que a pendente.");
     }
 
+    MovimentacaoEstoqueResponse entrada = null;
+    if (request.itemEstoqueId != null && !request.itemEstoqueId.isBlank()) {
+      BigDecimal quantidadeEstoque =
+          request.quantidadeEstoque != null
+              ? request.quantidadeEstoque
+              : BigDecimal.valueOf(quantidadeRecebida);
+      entrada =
+          estoqueMovimentacaoService.registrarEntradaDeCompra(
+              UUID.fromString(request.itemEstoqueId),
+              quantidadeEstoque,
+              custoUnitarioDoRecebimento(pedido, quantidadeRecebida, quantidadeEstoque),
+              "Recebimento do pedido de compra"
+                  + (fornecedor != null && fornecedor.getNome() != null
+                      ? " — " + fornecedor.getNome()
+                      : ""));
+    }
+
     pedido.setQuantidadePendente(pedido.getQuantidadePendente() - quantidadeRecebida);
     pedido.setObservacao(EstoqueTextoUtil.normalizarTextoBase(request.observacao));
     pedido.setStatus(
@@ -1153,6 +1285,7 @@ public class ServicoEstoque {
     PedidoCompraEstoqueResponse response = toPedidoCompraResponse(salvo, fornecedor);
     Map<String, Object> metadata = new HashMap<>();
     metadata.put("quantidadeRecebida", quantidadeRecebida);
+    if (entrada != null) metadata.put("movimentacaoId", entrada.id);
     auditarEstoque(
         salvo.getTenantId(),
         "STOCK_PURCHASE_RECEIVE",
@@ -1162,6 +1295,28 @@ public class ServicoEstoque {
         response,
         metadata);
     return response;
+  }
+
+  /**
+   * O pedido so tem valor total e quantos itens: o custo que entra no estoque e a fracao recebida
+   * do valor, dividida pela quantidade que entra no saldo. Pedido sem valor entra sem custo.
+   */
+  static BigDecimal custoUnitarioDoRecebimento(
+      EstoquePedidoCompra pedido, int quantidadeRecebida, BigDecimal quantidadeEstoque) {
+    BigDecimal valorTotal = nvl(pedido.getValorTotal());
+    Integer quantidadeItens = pedido.getQuantidadeItens();
+    if (valorTotal.signum() <= 0
+        || quantidadeItens == null
+        || quantidadeItens <= 0
+        || quantidadeEstoque == null
+        || quantidadeEstoque.signum() <= 0) {
+      return null;
+    }
+    BigDecimal valorRecebido =
+        valorTotal
+            .multiply(BigDecimal.valueOf(quantidadeRecebida))
+            .divide(BigDecimal.valueOf(quantidadeItens), 6, RoundingMode.HALF_UP);
+    return valorRecebido.divide(quantidadeEstoque, 4, RoundingMode.HALF_UP);
   }
 
   // ─── Transferencia ───────────────────────────────────────────────────────
@@ -1234,15 +1389,24 @@ public class ServicoEstoque {
   }
 
   /**
-   * Marca {@code RECEBIDA} <b>sem checar o status anterior</b>: um rascunho pode ir direto para
-   * recebida, e receber duas vezes audita duas vezes. Assimetria do original (compare com
-   * {@link #enviarTransferencia}, que so age no rascunho), preservada.
+   * So recebe o que foi <b>enviado</b>. O original marcava {@code RECEBIDA} sem olhar o status: um
+   * rascunho pulava o envio e receber duas vezes auditava duas vezes. Agora ja recebida devolve
+   * como esta (idempotente) e qualquer outro status e 409.
+   *
+   * <p>O saldo nao muda, e isso e correto: o item tem um saldo so por salao, sem saldo por local.
+   * Transferir entre locais registra onde a mercadoria esta, sem mudar quanto existe.
    */
   @Transactional
   public TransferenciaEstoqueResponse receberTransferencia(UUID transferenciaId) {
     EstoqueTransferencia transferencia = obterTransferenciaOuFalhar(transferenciaId);
     ItemEstoque item = resolverItemDaTransferencia(transferencia);
     TransferenciaEstoqueResponse before = toTransferenciaResponse(transferencia, item);
+    if (transferencia.getStatus() == StatusTransferenciaEstoque.RECEBIDA) {
+      return before;
+    }
+    if (transferencia.getStatus() != StatusTransferenciaEstoque.ENVIADA) {
+      throw conflito("So transferencia enviada pode ser recebida.");
+    }
     transferencia.setStatus(StatusTransferenciaEstoque.RECEBIDA);
     EstoqueTransferencia salva = estoqueTransferenciaRepository.save(transferencia);
     TransferenciaEstoqueResponse response = toTransferenciaResponse(salva, item);
@@ -1363,19 +1527,26 @@ public class ServicoEstoque {
         .collect(Collectors.toMap(ItemEstoque::getId, item -> item));
   }
 
+  /** Teto das listagens pedidas sem paginacao, e tambem do {@code limit} informado. */
+  static final int LIMITE_DA_LISTAGEM = 1000;
+
   /**
    * Porte de {@code aplicarPaginacao}: {@code page}/{@code limit} nulos, zerados ou negativos
-   * significam "sem paginacao" (o original devolve a lista inteira). A ordenacao
-   * {@code createdAt desc, id desc} e sempre aplicada, com ou sem paginacao — e o que faz o cursor
-   * ser um keyset coerente.
+   * significam "sem paginacao". A ordenacao {@code createdAt desc, id desc} e sempre aplicada — e o
+   * que faz o cursor ser um keyset coerente.
+   *
+   * <p>Divergencia deliberada: o original devolvia a lista INTEIRA sem paginacao, e um tenant com
+   * anos de movimentacao derrubava a resposta. Agora "sem paginacao" e a primeira pagina de
+   * {@link #LIMITE_DA_LISTAGEM}, e nenhum {@code limit} passa desse teto.
    */
   private <T> List<T> buscar(
       JpaSpecificationExecutor<T> repositorio, Specification<T> spec, Integer page, Integer limit) {
     Sort sort = Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id"));
     if (page == null || limit == null || page <= 0 || limit <= 0) {
-      return repositorio.findAll(spec, sort);
+      return repositorio.findAll(spec, PageRequest.of(0, LIMITE_DA_LISTAGEM, sort)).getContent();
     }
-    return repositorio.findAll(spec, PageRequest.of(page - 1, limit, sort)).getContent();
+    int tamanho = Math.min(limit, LIMITE_DA_LISTAGEM);
+    return repositorio.findAll(spec, PageRequest.of(page - 1, tamanho, sort)).getContent();
   }
 
   /**

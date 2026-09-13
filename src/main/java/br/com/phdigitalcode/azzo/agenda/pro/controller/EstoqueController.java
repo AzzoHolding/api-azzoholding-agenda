@@ -3,6 +3,8 @@ package br.com.phdigitalcode.azzo.agenda.pro.controller;
 import java.io.IOException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.LocalDate;
+import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.UUID;
 
@@ -46,6 +48,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.dto.EstoqueDtos.MovimentacaoEstoqueR
 import br.com.phdigitalcode.azzo.agenda.pro.dto.EstoqueDtos.PedidoCompraEstoqueRequest;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.EstoqueDtos.PedidoCompraEstoqueResponse;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.EstoqueDtos.PedidoCompraRecebimentoRequest;
+import br.com.phdigitalcode.azzo.agenda.pro.dto.EstoqueDtos.PermissoesEstoqueResponse;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.EstoqueDtos.ServicoInsumoRequest;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.EstoqueDtos.ServicoInsumoResponse;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.EstoqueDtos.ServicoInsumoUpdateRequest;
@@ -54,6 +57,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.dto.EstoqueDtos.TransferenciaEstoque
 import br.com.phdigitalcode.azzo.agenda.pro.exception.ApiClientErrorException;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.MinioStorageService;
 import br.com.phdigitalcode.azzo.agenda.pro.security.ContextoTenant;
+import br.com.phdigitalcode.azzo.agenda.pro.security.PermissionService;
 import br.com.phdigitalcode.azzo.agenda.pro.security.RequiresPermission;
 import br.com.phdigitalcode.azzo.agenda.pro.service.ServicoEstoque;
 import jakarta.validation.Valid;
@@ -78,14 +82,17 @@ public class EstoqueController {
   private final ServicoEstoque servicoEstoque;
   private final MinioStorageService minioStorageService;
   private final ContextoTenant contextoTenant;
+  private final PermissionService permissionService;
 
   public EstoqueController(
       ServicoEstoque servicoEstoque,
       MinioStorageService minioStorageService,
-      ContextoTenant contextoTenant) {
+      ContextoTenant contextoTenant,
+      PermissionService permissionService) {
     this.servicoEstoque = servicoEstoque;
     this.minioStorageService = minioStorageService;
     this.contextoTenant = contextoTenant;
+    this.permissionService = permissionService;
   }
 
   // ─── Itens ───────────────────────────────────────────────────────────────
@@ -146,9 +153,9 @@ public class EstoqueController {
   // ─── Dashboard ───────────────────────────────────────────────────────────
 
   /**
-   * Os quatro parametros de recorte sao aceitos e <b>ignorados</b> — assimetria do original,
-   * preservada: {@code EstoqueResource.dashboard} os declara e chama
-   * {@code servicoEstoque.obterDashboard()} sem argumento nenhum.
+   * {@code inicio}/{@code fim} ({@code AAAA-MM-DD}, inclusivos) recortam as perdas e a margem; sem
+   * eles, vale o mes corrente. O original aceitava os parametros e os ignorava.
+   * {@code serviceId}/{@code itemId} continuam aceitos e sem efeito, por compatibilidade.
    */
   @GetMapping("/dashboard")
   @RequiresPermission("stock:view")
@@ -157,7 +164,29 @@ public class EstoqueController {
       @RequestParam(name = "fim", required = false) String fim,
       @RequestParam(name = "serviceId", required = false) String serviceId,
       @RequestParam(name = "itemId", required = false) String itemId) {
-    return servicoEstoque.obterDashboard();
+    return servicoEstoque.obterDashboard(data(inicio, "inicio"), data(fim, "fim"));
+  }
+
+  /**
+   * O que a pessoa logada pode fazer aqui. So {@code stock:view} para entrar: quem nao gerencia
+   * precisa saber disso ANTES de preencher um formulario que terminaria em 403.
+   */
+  @GetMapping("/permissoes")
+  @RequiresPermission("stock:view")
+  public PermissoesEstoqueResponse permissoes() {
+    PermissoesEstoqueResponse response = new PermissoesEstoqueResponse();
+    response.podeGerenciar = permissionService.possuiPermissao("stock:manage");
+    return response;
+  }
+
+  private static LocalDate data(String valor, String campo) {
+    if (valor == null || valor.isBlank()) return null;
+    try {
+      return LocalDate.parse(valor.trim());
+    } catch (DateTimeParseException e) {
+      throw new ApiClientErrorException(
+          campo + " invalido. Use AAAA-MM-DD.", HttpStatus.BAD_REQUEST.value());
+    }
   }
 
   // ─── Importacao em massa ─────────────────────────────────────────────────
