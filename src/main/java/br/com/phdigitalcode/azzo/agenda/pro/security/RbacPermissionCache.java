@@ -24,14 +24,27 @@ import br.com.phdigitalcode.azzo.agenda.pro.repository.RbacAuthorizationReposito
 public class RbacPermissionCache {
 
   private final RbacAuthorizationRepository rbacAuthorizationRepository;
+  private final AcessoPorPerfil acessoPorPerfil;
 
-  public RbacPermissionCache(RbacAuthorizationRepository rbacAuthorizationRepository) {
+  public RbacPermissionCache(
+      RbacAuthorizationRepository rbacAuthorizationRepository, AcessoPorPerfil acessoPorPerfil) {
     this.rbacAuthorizationRepository = rbacAuthorizationRepository;
+    this.acessoPorPerfil = acessoPorPerfil;
   }
 
+  /**
+   * Quem tem perfil de acesso usa as permissoes dos perfis (limitadas ao teto do dono); quem nao
+   * tem, as do papel fixo, como sempre. Ver {@link AcessoPorPerfil}.
+   */
   @Cacheable(cacheNames = "rbac-user-permissions", key = "#tenantId + ':' + #userId")
   public Set<String> listarPermissoesUsuario(UUID tenantId, UUID userId) {
-    return new HashSet<>(rbacAuthorizationRepository.listarPermissoesPorUsuarioETenant(tenantId, userId));
+    return acessoPorPerfil
+        .resolver(tenantId, userId, null)
+        .<Set<String>>map(acesso -> new HashSet<>(acesso.permissoes()))
+        .orElseGet(
+            () ->
+                new HashSet<>(
+                    rbacAuthorizationRepository.listarPermissoesPorUsuarioETenant(tenantId, userId)));
   }
 
   @CacheEvict(cacheNames = "rbac-user-permissions", allEntries = true)

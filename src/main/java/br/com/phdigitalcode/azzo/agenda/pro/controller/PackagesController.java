@@ -19,7 +19,7 @@ import jakarta.validation.Valid;
 /** Espelha {@code modules/packages/api/PackagesResource.java}. */
 @RestController
 @RequestMapping("/api/v1/packages")
-@PreAuthorize("hasAnyRole('OWNER', 'PROFESSIONAL')")
+@PreAuthorize("hasAnyRole('OWNER', 'PROFESSIONAL', 'STAFF')")
 public class PackagesController {
 
   private final ServicoPackages servicoPackages;

@@ -23,7 +23,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.service.NotificationService;
 /** Espelha {@code modules/notifications/api/NotificationsResource.java} — mesmos paths, verbos, roles e permissoes. */
 @RestController
 @RequestMapping("/api/v1/notifications")
-@PreAuthorize("hasAnyRole('OWNER', 'PROFESSIONAL')")
+@PreAuthorize("hasAnyRole('OWNER', 'PROFESSIONAL', 'STAFF')")
 public class NotificationController {
 
   private final NotificationService notificationService;

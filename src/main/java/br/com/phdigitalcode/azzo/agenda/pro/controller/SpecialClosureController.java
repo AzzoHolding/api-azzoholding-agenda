@@ -55,7 +55,7 @@ public class SpecialClosureController {
   }
 
   @GetMapping
-  @PreAuthorize("hasAnyRole('OWNER', 'PROFESSIONAL')")
+  @PreAuthorize("hasAnyRole('OWNER', 'PROFESSIONAL', 'STAFF')")
   public ResponseEntity<List<SpecialClosureDto>> listar(
       @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
       @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
