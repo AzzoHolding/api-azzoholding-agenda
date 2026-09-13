@@ -48,7 +48,7 @@ import jakarta.validation.Valid;
  */
 @RestController
 @RequestMapping("/api/v1/finance/transactions")
-@PreAuthorize("hasAnyRole('OWNER', 'PROFESSIONAL')")
+@PreAuthorize("hasAnyRole('OWNER', 'PROFESSIONAL', 'STAFF')")
 public class FinanceiroController {
 
   private static final ZoneId ZONA_BR = ZoneId.of("America/Sao_Paulo");

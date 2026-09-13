@@ -24,7 +24,7 @@ import jakarta.validation.Valid;
 /** Espelha {@code modules/finance/api/FechamentoCaixaResource.java}. */
 @RestController
 @RequestMapping("/api/v1/finance/cash-closings")
-@PreAuthorize("hasAnyRole('OWNER', 'PROFESSIONAL')")
+@PreAuthorize("hasAnyRole('OWNER', 'PROFESSIONAL', 'STAFF')")
 public class FechamentoCaixaController {
 
   private final ServicoFechamentoCaixa servicoFechamentoCaixa;

@@ -34,7 +34,7 @@ import org.springframework.http.MediaType;
  */
 @RestController
 @RequestMapping("/api/v1/salon")
-@PreAuthorize("hasAnyRole('OWNER', 'PROFESSIONAL')")
+@PreAuthorize("hasAnyRole('OWNER', 'PROFESSIONAL', 'STAFF')")
 public class SalonController {
 
   private static final Set<String> MIME_TYPES_PERMITIDOS = Set.of("image/jpeg", "image/png", "image/webp");

@@ -12,7 +12,9 @@ import org.springframework.transaction.annotation.Transactional;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.MenuDtos.MenuConfigItemResponse;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.MenuDtos.MenuConfigResponse;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.PapelUsuario;
+import br.com.phdigitalcode.azzo.agenda.pro.security.AcessoPorPerfil;
 import br.com.phdigitalcode.azzo.agenda.pro.security.AuthenticatedUser;
+import br.com.phdigitalcode.azzo.agenda.pro.security.ResolucaoDeAcesso.AcessoEfetivo;
 import br.com.phdigitalcode.azzo.agenda.pro.security.ContextoTenant;
 import br.com.phdigitalcode.azzo.agenda.pro.security.MenuRouteCache;
 
@@ -33,16 +35,26 @@ public class MenuService {
   private final AuthenticatedUser authenticatedUser;
   private final MenuRouteCache menuRouteCache;
   private final ContextoTenant contextoTenant;
+  private final AcessoPorPerfil acessoPorPerfil;
 
   @PersistenceContext
   private EntityManager entityManager;
 
-  public MenuService(AuthenticatedUser authenticatedUser, MenuRouteCache menuRouteCache, ContextoTenant contextoTenant) {
+  public MenuService(
+      AuthenticatedUser authenticatedUser,
+      MenuRouteCache menuRouteCache,
+      ContextoTenant contextoTenant,
+      AcessoPorPerfil acessoPorPerfil) {
     this.authenticatedUser = authenticatedUser;
     this.menuRouteCache = menuRouteCache;
     this.contextoTenant = contextoTenant;
+    this.acessoPorPerfil = acessoPorPerfil;
   }
 
+  /**
+   * As rotas vem dos perfis de acesso quando a pessoa tem algum (limitadas ao teto do dono), e do
+   * papel fixo quando nao tem. Dono e administrador do sistema nunca passam por perfil.
+   */
   @Transactional(readOnly = true)
   public MenuConfigResponse obterMenuAtual() {
     PapelUsuario role = obterRoleOuFalhar();
@@ -50,7 +62,13 @@ public class MenuService {
 
     MenuConfigResponse response = new MenuConfigResponse();
     response.role = role.name();
-    response.allowedRoutes = menuRouteCache.getAllowedRoutes(tenantId, role);
+    boolean usaPerfil = role != PapelUsuario.OWNER && role != PapelUsuario.ADMIN;
+    response.allowedRoutes =
+        (usaPerfil
+                ? acessoPorPerfil.resolver(tenantId, authenticatedUser.idOuNulo(), role.name())
+                : java.util.Optional.<AcessoEfetivo>empty())
+            .map(AcessoEfetivo::rotas)
+            .orElseGet(() -> menuRouteCache.getAllowedRoutes(tenantId, role));
     response.items = getActiveCatalogItems();
     return response;
   }

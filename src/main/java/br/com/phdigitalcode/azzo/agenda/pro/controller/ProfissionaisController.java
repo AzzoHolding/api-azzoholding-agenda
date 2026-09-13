@@ -35,7 +35,7 @@ import jakarta.validation.Valid;
 /** Espelha {@code modules/professionals/api/ProfissionaisResource.java}. */
 @RestController
 @RequestMapping("/api/v1/professionals")
-@PreAuthorize("hasAnyRole('OWNER', 'PROFESSIONAL')")
+@PreAuthorize("hasAnyRole('OWNER', 'PROFESSIONAL', 'STAFF')")
 public class ProfissionaisController {
 
   private final ProfissionalService profissionalService;

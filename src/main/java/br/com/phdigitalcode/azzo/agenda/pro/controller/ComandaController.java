@@ -25,7 +25,7 @@ import jakarta.validation.Valid;
  */
 @RestController
 @RequestMapping("/api/v1/pos/comandas")
-@PreAuthorize("hasAnyRole('OWNER', 'PROFESSIONAL')")
+@PreAuthorize("hasAnyRole('OWNER', 'PROFESSIONAL', 'STAFF')")
 public class ComandaController {
 
   private final ServicoComanda servicoComanda;

@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.MenuDtos.MenuConfigItemResponse;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.MenuDtos.MenuConfigResponse;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.PapelUsuario;
+import br.com.phdigitalcode.azzo.agenda.pro.security.AcessoPorPerfil;
 import br.com.phdigitalcode.azzo.agenda.pro.security.AuthenticatedUser;
 import br.com.phdigitalcode.azzo.agenda.pro.security.ContextoTenant;
 import br.com.phdigitalcode.azzo.agenda.pro.security.MenuRouteCache;
@@ -32,6 +33,7 @@ class MenuServiceTest {
   private MenuRouteCache menuRouteCache;
   private ContextoTenant contextoTenant;
   private EntityManager entityManager;
+  private AcessoPorPerfil acessoPorPerfil;
   private MenuService service;
 
   @BeforeEach
@@ -41,7 +43,11 @@ class MenuServiceTest {
     contextoTenant = mock(ContextoTenant.class);
     entityManager = mock(EntityManager.class);
 
-    service = new MenuService(authenticatedUser, menuRouteCache, contextoTenant);
+    acessoPorPerfil = mock(AcessoPorPerfil.class);
+    when(acessoPorPerfil.resolver(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+        .thenReturn(java.util.Optional.empty());
+
+    service = new MenuService(authenticatedUser, menuRouteCache, contextoTenant, acessoPorPerfil);
 
     Field field = MenuService.class.getDeclaredField("entityManager");
     field.setAccessible(true);
@@ -89,6 +95,46 @@ class MenuServiceTest {
     assertThat(item.label).isEqualTo("Dashboard");
     assertThat(item.active).isTrue();
     assertThat(item.sidebarVisible).isTrue();
+  }
+
+  /** Quem tem perfil ve as rotas dos perfis; o cache do papel fixo nem e consultado. */
+  @Test
+  void membroComPerfilUsaAsRotasDosPerfis() {
+    UUID tenantId = UUID.randomUUID();
+    UUID userId = UUID.randomUUID();
+    when(authenticatedUser.roleOuNulo()).thenReturn("STAFF");
+    when(authenticatedUser.idOuNulo()).thenReturn(userId);
+    when(contextoTenant.obterTenantIdOuFalhar()).thenReturn(tenantId);
+    when(acessoPorPerfil.resolver(tenantId, userId, "STAFF"))
+        .thenReturn(
+            java.util.Optional.of(
+                new br.com.phdigitalcode.azzo.agenda.pro.security.ResolucaoDeAcesso.AcessoEfetivo(
+                    List.of("/agenda", "/perfil-usuario"), List.of("appointment:read"))));
+    Query query = mock(Query.class);
+    when(query.getResultList()).thenReturn(List.of());
+    when(entityManager.createNativeQuery(org.mockito.ArgumentMatchers.anyString())).thenReturn(query);
+
+    MenuConfigResponse response = service.obterMenuAtual();
+
+    assertThat(response.role).isEqualTo("STAFF");
+    assertThat(response.allowedRoutes).containsExactly("/agenda", "/perfil-usuario");
+    org.mockito.Mockito.verifyNoInteractions(menuRouteCache);
+  }
+
+  /** O dono nunca passa por perfil — nem se, por engano, tiver um gravado. */
+  @Test
+  void donoNaoPassaPorPerfil() {
+    UUID tenantId = UUID.randomUUID();
+    when(authenticatedUser.roleOuNulo()).thenReturn("OWNER");
+    when(contextoTenant.obterTenantIdOuFalhar()).thenReturn(tenantId);
+    when(menuRouteCache.getAllowedRoutes(tenantId, PapelUsuario.OWNER)).thenReturn(List.of("/dashboard"));
+    Query query = mock(Query.class);
+    when(query.getResultList()).thenReturn(List.of());
+    when(entityManager.createNativeQuery(org.mockito.ArgumentMatchers.anyString())).thenReturn(query);
+
+    service.obterMenuAtual();
+
+    org.mockito.Mockito.verifyNoInteractions(acessoPorPerfil);
   }
 
   @Test

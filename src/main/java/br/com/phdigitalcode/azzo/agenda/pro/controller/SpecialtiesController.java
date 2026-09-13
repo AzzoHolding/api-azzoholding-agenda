@@ -30,7 +30,7 @@ import jakarta.validation.Valid;
  */
 @RestController
 @RequestMapping("/api/v1/specialties")
-@PreAuthorize("hasAnyRole('OWNER', 'PROFESSIONAL')")
+@PreAuthorize("hasAnyRole('OWNER', 'PROFESSIONAL', 'STAFF')")
 public class SpecialtiesController {
 
   private final SpecialtyService specialtyService;

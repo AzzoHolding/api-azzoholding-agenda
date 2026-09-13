@@ -15,7 +15,7 @@ import jakarta.validation.Valid;
 /** Espelha {@code modules/suggestions/api/SuggestionResource.java} ({@code @Path("/api/v1/suggestions")}). */
 @RestController
 @RequestMapping("/api/v1/suggestions")
-@PreAuthorize("hasAnyRole('OWNER', 'PROFESSIONAL', 'ADMIN')")
+@PreAuthorize("hasAnyRole('OWNER', 'PROFESSIONAL', 'STAFF', 'ADMIN')")
 public class SuggestionController {
 
   private final SuggestionService suggestionService;

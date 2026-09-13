@@ -49,7 +49,7 @@ public class SettingsController {
   // ---- Leitura geral (OWNER e PROFESSIONAL podem ler) ----
 
   @GetMapping
-  @PreAuthorize("hasAnyRole('OWNER', 'PROFESSIONAL')")
+  @PreAuthorize("hasAnyRole('OWNER', 'PROFESSIONAL', 'STAFF')")
   public SettingsDtos.SettingsResponse obter() {
     return servicoSettings.obter();
   }
@@ -78,7 +78,7 @@ public class SettingsController {
   // ---- Horarios de funcionamento — tabela relacional ----
 
   @GetMapping("/business-hours/table")
-  @PreAuthorize("hasAnyRole('OWNER', 'PROFESSIONAL')")
+  @PreAuthorize("hasAnyRole('OWNER', 'PROFESSIONAL', 'STAFF')")
   public List<SettingsDtos.BusinessHoursItemResponse> obterBusinessHoursTabela() {
     return servicoSettings.obterBusinessHoursTabela();
   }
