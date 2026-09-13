@@ -4,7 +4,9 @@ import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 
+import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 
@@ -25,7 +27,7 @@ public final class EstoqueDtos {
     @NotBlank public String nome;
     public String sku;
     @NotBlank public String unidadeMedida;
-    @NotNull @DecimalMin("0.0") public BigDecimal estoqueMinimo;
+    @NotNull @DecimalMin("0.0") @Digits(integer = 15, fraction = 4) public BigDecimal estoqueMinimo;
     public Boolean ativo;
   }
 
@@ -33,7 +35,7 @@ public final class EstoqueDtos {
     public String nome;
     public String sku;
     public String unidadeMedida;
-    @DecimalMin("0.0") public BigDecimal estoqueMinimo;
+    @DecimalMin("0.0") @Digits(integer = 15, fraction = 4) public BigDecimal estoqueMinimo;
     public Boolean ativo;
   }
 
@@ -50,14 +52,33 @@ public final class EstoqueDtos {
     public String updatedAt;
   }
 
+  /**
+   * {@code quantidade} aceita zero por causa do {@code AJUSTE}: la o numero e o saldo final, e zerar
+   * um item e um ajuste legitimo. Para {@code ENTRADA}/{@code SAIDA} o service exige maior que zero.
+   */
   public static class MovimentacaoEstoqueRequest {
     @NotBlank public String itemEstoqueId;
     @NotBlank public String tipo;
-    @NotNull @DecimalMin(value = "0.0001", inclusive = true) public BigDecimal quantidade;
+
+    @NotNull
+    @DecimalMin(value = "0.0", inclusive = true)
+    @Digits(integer = 15, fraction = 4)
+    public BigDecimal quantidade;
+
     @NotBlank public String motivo;
     public String origem;
+
+    @DecimalMin(value = "0.0", inclusive = true)
+    @Digits(integer = 15, fraction = 4)
     public BigDecimal valorUnitarioPago;
+
     public Boolean gerarLancamentoFinanceiro;
+
+    /**
+     * Forma de pagamento da despesa criada quando {@code gerarLancamentoFinanceiro} esta ligado —
+     * {@code CASH}, {@code CREDIT_CARD}, {@code DEBIT_CARD}, {@code PIX} ou {@code OTHER} (padrao).
+     */
+    public String formaPagamento;
   }
 
   public static class MovimentacaoEstoqueResponse {
@@ -84,13 +105,24 @@ public final class EstoqueDtos {
   public static class ServicoInsumoRequest {
     @NotBlank public String serviceId;
     @NotBlank public String itemEstoqueId;
-    @NotNull @DecimalMin(value = "0.0001", inclusive = true) public BigDecimal quantidadeConsumo;
-    @DecimalMin("0.0") public BigDecimal percentualPerda;
+
+    @NotNull
+    @DecimalMin(value = "0.0001", inclusive = true)
+    @Digits(integer = 15, fraction = 4)
+    public BigDecimal quantidadeConsumo;
+
+    @DecimalMin("0.0") @DecimalMax("100.0") @Digits(integer = 3, fraction = 2)
+    public BigDecimal percentualPerda;
   }
 
   public static class ServicoInsumoUpdateRequest {
-    @NotNull @DecimalMin(value = "0.0001", inclusive = true) public BigDecimal quantidadeConsumo;
-    @DecimalMin("0.0") public BigDecimal percentualPerda;
+    @NotNull
+    @DecimalMin(value = "0.0001", inclusive = true)
+    @Digits(integer = 15, fraction = 4)
+    public BigDecimal quantidadeConsumo;
+
+    @DecimalMin("0.0") @DecimalMax("100.0") @Digits(integer = 3, fraction = 2)
+    public BigDecimal percentualPerda;
   }
 
   public static class ServicoInsumoResponse {
@@ -116,8 +148,15 @@ public final class EstoqueDtos {
     public long margemBruta;
   }
 
+  /**
+   * {@code perdasValor} e {@code margemServicos} sao do periodo {@code periodoInicio}..
+   * {@code periodoFim} (padrao: do dia 1 do mes ate hoje). Os contadores de itens sao a foto de
+   * agora — saldo nao tem periodo.
+   */
   public static class DashboardEstoqueResponse {
     public String atualizadoEm;
+    public String periodoInicio;
+    public String periodoFim;
     public int itensAbaixoMinimo;
     public int itensZerados;
     public BigDecimal valorEstoqueCustoMedio;
@@ -182,12 +221,17 @@ public final class EstoqueDtos {
 
   public static class InventarioContagemRequest {
     @NotBlank public String itemEstoqueId;
-    @NotNull @DecimalMin("0.0") public BigDecimal quantidadeContada;
+
+    @NotNull @DecimalMin("0.0") @Digits(integer = 15, fraction = 4)
+    public BigDecimal quantidadeContada;
+
     public String observacao;
   }
 
   public static class AtualizarContagemInventarioRequest {
-    @NotNull @DecimalMin("0.0") public BigDecimal quantidadeContada;
+    @NotNull @DecimalMin("0.0") @Digits(integer = 15, fraction = 4)
+    public BigDecimal quantidadeContada;
+
     public String observacao;
   }
 
@@ -260,14 +304,25 @@ public final class EstoqueDtos {
 
   public static class PedidoCompraEstoqueRequest {
     @NotBlank public String fornecedorId;
-    @NotNull @DecimalMin("0.0") public BigDecimal valorTotal;
+    @NotNull @DecimalMin("0.0") @Digits(integer = 15, fraction = 4) public BigDecimal valorTotal;
     @NotNull public Integer quantidadeItens;
     public String observacao;
   }
 
+  /**
+   * {@code itemEstoqueId} e opcional: o pedido de compra nao sabe de que item e (so fornecedor,
+   * valor e quantos itens). Informado, o recebimento da <b>entrada</b> nesse item — o que antes
+   * exigia lancar a entrada de novo, a mao. {@code quantidadeEstoque} e quanto entra no saldo, na
+   * unidade do item (dez frascos de 1 L em um item medido em ML sao 10000); ausente, vale a
+   * {@code quantidadeRecebida}.
+   */
   public static class PedidoCompraRecebimentoRequest {
     @NotNull public Integer quantidadeRecebida;
     public String observacao;
+    public String itemEstoqueId;
+
+    @DecimalMin(value = "0.0001", inclusive = true) @Digits(integer = 15, fraction = 4)
+    public BigDecimal quantidadeEstoque;
   }
 
   public static class PedidoCompraEstoqueResponse {
@@ -289,8 +344,13 @@ public final class EstoqueDtos {
     @NotBlank public String origem;
     @NotBlank public String destino;
     @NotBlank public String itemEstoqueId;
-    @NotNull @DecimalMin(value = "0.0001") public BigDecimal quantidade;
+    @NotNull @DecimalMin(value = "0.0001") @Digits(integer = 15, fraction = 4) public BigDecimal quantidade;
     public String observacao;
+  }
+
+  /** O que a pessoa logada pode fazer no estoque — para a tela nao oferecer o que daria 403. */
+  public static class PermissoesEstoqueResponse {
+    public boolean podeGerenciar;
   }
 
   public static class TransferenciaEstoqueResponse {

@@ -48,6 +48,20 @@ public class PermissionService {
     }
   }
 
+  /**
+   * A mesma checagem de {@link #validarPermissao}, sem lancar: serve para a tela saber o que
+   * oferecer antes de a pessoa preencher um formulario que terminaria em 403.
+   */
+  public boolean possuiPermissao(String permissionCode) {
+    try {
+      return rbacPermissionCache
+          .listarPermissoesUsuario(obterTenantIdOuFalhar(), obterUserIdOuFalhar())
+          .contains(permissionCode);
+    } catch (RuntimeException e) {
+      return false;
+    }
+  }
+
   public void limparCachePermissoesUsuario() {
     rbacPermissionCache.limparCache();
   }

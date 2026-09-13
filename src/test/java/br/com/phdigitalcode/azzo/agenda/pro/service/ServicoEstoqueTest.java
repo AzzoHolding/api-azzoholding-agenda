@@ -11,6 +11,7 @@ import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -284,19 +285,36 @@ class ServicoEstoqueTest {
 
   // ─── Itens: listagem, paginacao e cursor ─────────────────────────────────
 
+  /**
+   * "Sem paginacao" deixou de ser a lista inteira: e a primeira pagina de mil, sempre na ordem do
+   * cursor. O original devolvia tudo, e um tenant com anos de historico derrubava a resposta.
+   */
   @Test
-  void listarItensSemPaginacaoUsaOrdenacaoSemPageable() {
-    when(itemEstoqueRepository.findAll(any(Specification.class), any(Sort.class)))
-        .thenReturn(List.of(itemExistente()));
+  void listarItensSemPaginacaoTrazAPrimeiraPaginaDoTeto() {
+    when(itemEstoqueRepository.findAll(any(Specification.class), any(Pageable.class)))
+        .thenReturn(new PageImpl<>(List.of(itemExistente())));
 
     List<ItemEstoqueResponse> resposta =
         service.listarItens(null, null, null, null, null, null, null);
 
     assertThat(resposta).hasSize(1);
-    ArgumentCaptor<Sort> sort = ArgumentCaptor.forClass(Sort.class);
-    verify(itemEstoqueRepository).findAll(any(Specification.class), sort.capture());
-    assertThat(sort.getValue().toString()).isEqualTo("createdAt: DESC,id: DESC");
-    verify(itemEstoqueRepository, never()).findAll(any(Specification.class), any(Pageable.class));
+    ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
+    verify(itemEstoqueRepository).findAll(any(Specification.class), pageable.capture());
+    assertThat(pageable.getValue().getPageNumber()).isZero();
+    assertThat(pageable.getValue().getPageSize()).isEqualTo(1000);
+    assertThat(pageable.getValue().getSort().toString()).isEqualTo("createdAt: DESC,id: DESC");
+  }
+
+  @Test
+  void limitAcimaDoTetoECortado() {
+    when(itemEstoqueRepository.findAll(any(Specification.class), any(Pageable.class)))
+        .thenReturn(new PageImpl<>(List.of()));
+
+    service.listarItens(1, 50000, null, null, null, null, null);
+
+    ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
+    verify(itemEstoqueRepository).findAll(any(Specification.class), pageable.capture());
+    assertThat(pageable.getValue().getPageSize()).isEqualTo(1000);
   }
 
   @Test
@@ -313,25 +331,28 @@ class ServicoEstoqueTest {
   }
 
   @Test
-  void listarItensComPageOuLimitNaoPositivoCaiParaListaInteira() {
-    when(itemEstoqueRepository.findAll(any(Specification.class), any(Sort.class)))
-        .thenReturn(List.of());
+  void listarItensComPageOuLimitNaoPositivoCaiParaAPrimeiraPaginaDoTeto() {
+    when(itemEstoqueRepository.findAll(any(Specification.class), any(Pageable.class)))
+        .thenReturn(new PageImpl<>(List.of()));
 
     service.listarItens(0, 20, null, null, null, null, null);
     service.listarItens(1, 0, null, null, null, null, null);
 
-    verify(itemEstoqueRepository, never()).findAll(any(Specification.class), any(Pageable.class));
+    ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
+    verify(itemEstoqueRepository, org.mockito.Mockito.times(2))
+        .findAll(any(Specification.class), pageable.capture());
+    assertThat(pageable.getAllValues()).allSatisfy(p -> assertThat(p.getPageSize()).isEqualTo(1000));
   }
 
   @Test
   void listarItensComCursorPelaMetadeIgnoraOCursor() {
-    when(itemEstoqueRepository.findAll(any(Specification.class), any(Sort.class)))
-        .thenReturn(List.of());
+    when(itemEstoqueRepository.findAll(any(Specification.class), any(Pageable.class)))
+        .thenReturn(new PageImpl<>(List.of()));
 
     // So o createdAt, sem o id: o original trata como "sem cursor", nao como erro.
     service.listarItens(null, null, Instant.now().toString(), null, null, null, null);
 
-    verify(itemEstoqueRepository).findAll(any(Specification.class), any(Sort.class));
+    verify(itemEstoqueRepository).findAll(any(Specification.class), any(Pageable.class));
   }
 
   @Test
@@ -351,8 +372,8 @@ class ServicoEstoqueTest {
   @Test
   void listarMovimentacoesResolveNomeDoItemEmLote() {
     MovimentacaoEstoque movimentacao = movimentacaoExistente();
-    when(movimentacaoEstoqueRepository.findAll(any(Specification.class), any(Sort.class)))
-        .thenReturn(List.of(movimentacao));
+    when(movimentacaoEstoqueRepository.findAll(any(Specification.class), any(Pageable.class)))
+        .thenReturn(new PageImpl<>(List.of(movimentacao)));
     when(itemEstoqueRepository.findByTenantIdAndIdIn(TENANT_ID, Set.of(ITEM_ID)))
         .thenReturn(List.of(itemExistente()));
 
@@ -368,8 +389,8 @@ class ServicoEstoqueTest {
 
   @Test
   void listarMovimentacoesSemResultadoNaoConsultaItens() {
-    when(movimentacaoEstoqueRepository.findAll(any(Specification.class), any(Sort.class)))
-        .thenReturn(List.of());
+    when(movimentacaoEstoqueRepository.findAll(any(Specification.class), any(Pageable.class)))
+        .thenReturn(new PageImpl<>(List.of()));
 
     assertThat(service.listarMovimentacoes(null, null, null, null, null, null)).isEmpty();
 
@@ -378,8 +399,8 @@ class ServicoEstoqueTest {
 
   @Test
   void listarMovimentacoesComTipoEmMinusculaNormalizaAntesDoValueOf() {
-    when(movimentacaoEstoqueRepository.findAll(any(Specification.class), any(Sort.class)))
-        .thenReturn(List.of());
+    when(movimentacaoEstoqueRepository.findAll(any(Specification.class), any(Pageable.class)))
+        .thenReturn(new PageImpl<>(List.of()));
 
     assertThat(service.listarMovimentacoes(null, null, null, null, null, " saida "))
         .isEmpty();
@@ -413,20 +434,27 @@ class ServicoEstoqueTest {
   // ─── Dashboard ───────────────────────────────────────────────────────────
 
   @Test
-  void dashboardAgregaItensEMovimentacoesDoTenant() {
+  void dashboardAgregaItensPerdasEMargemDoPeriodo() {
     ItemEstoque zerado = item("Zerado", "0.0000", "2.0000", "10.00");
     ItemEstoque noMinimo = item("No minimo", "5.0000", "5.0000", "4.00");
     ItemEstoque folgado = item("Folgado", "10.0000", "1.0000", "3.00");
     when(itemEstoqueRepository.findByTenantId(TENANT_ID))
         .thenReturn(List.of(zerado, noMinimo, folgado));
-    when(movimentacaoEstoqueRepository.findByTenantId(TENANT_ID))
+    // Perdas ja agregadas no banco, em quantidade: 2 do "No minimo" e 1,5 do "Folgado".
+    when(movimentacaoEstoqueRepository.somarPerdasPorItem(eq(TENANT_ID), any(), any()))
         .thenReturn(
             List.of(
-                movimentacao(TipoMovimentacaoEstoque.SAIDA, "30.00"),
-                movimentacao(TipoMovimentacaoEstoque.SAIDA, "12.00"),
-                movimentacao(TipoMovimentacaoEstoque.ENTRADA, "500.00")));
+                new Object[] {noMinimo.getId(), new BigDecimal("2")},
+                new Object[] {folgado.getId(), new BigDecimal("1.5")}));
+    // O servico consome 2 un do "No minimo" com 10% de perda: 2 x 1,1 x 4,00 = 8,80 por execucao.
+    ServicoInsumo insumo = insumoExistente();
+    insumo.setItemEstoqueId(noMinimo.getId());
+    when(servicoInsumoRepository.findByTenantIdAndAtivoTrue(TENANT_ID)).thenReturn(List.of(insumo));
+    when(servicoInsumoRepository.somarExecucoesDosServicosComInsumo(eq(TENANT_ID), any(), any()))
+        .thenReturn(List.<Object[]>of(new Object[] {SERVICE_ID.toString(), 3L, 15000L}));
 
-    DashboardEstoqueResponse response = service.obterDashboard();
+    DashboardEstoqueResponse response =
+        service.obterDashboard(LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 12));
 
     // `<=`: item exatamente no minimo conta como abaixo do minimo.
     assertThat(response.itensAbaixoMinimo).isEqualTo(2);
@@ -434,32 +462,56 @@ class ServicoEstoqueTest {
     // 0*10 + 5*4 + 10*3 = 50
     assertThat(response.valorEstoqueCustoMedio).isEqualByComparingTo("50.00");
     assertThat(response.rupturaTaxa).isEqualTo(1d / 3d);
-    // So as SAIDAs entram em perdasValor; a ENTRADA de 500 fica de fora.
-    assertThat(response.perdasValor).isEqualByComparingTo("42.00");
-    // O original nunca preenche margemServicos.
-    assertThat(response.margemServicos).isEmpty();
+    // 2 x 4,00 + 1,5 x 3,00 = 12,50, ao custo medio de cada item.
+    assertThat(response.perdasValor).isEqualByComparingTo("12.50");
+    assertThat(response.periodoInicio).isEqualTo("2026-09-01");
+    assertThat(response.periodoFim).isEqualTo("2026-09-12");
+    // Em centavos: 3 execucoes x 880 = 2640 de insumo contra 15000 de receita.
+    assertThat(response.margemServicos).hasSize(1);
+    assertThat(response.margemServicos.getFirst().serviceId).isEqualTo(SERVICE_ID.toString());
+    assertThat(response.margemServicos.getFirst().custoInsumosTotal).isEqualTo(2640L);
+    assertThat(response.margemServicos.getFirst().margemBruta).isEqualTo(12360L);
     assertThat(response.atualizadoEm).isNotBlank();
+  }
+
+  @Test
+  void dashboardSemPeriodoUsaOMesCorrente() {
+    when(itemEstoqueRepository.findByTenantId(TENANT_ID)).thenReturn(List.of());
+
+    DashboardEstoqueResponse response = service.obterDashboard(null, null);
+
+    LocalDate hoje = LocalDate.now(java.time.ZoneId.of("America/Sao_Paulo"));
+    assertThat(response.periodoInicio).isEqualTo(hoje.withDayOfMonth(1).toString());
+    assertThat(response.periodoFim).isEqualTo(hoje.toString());
+  }
+
+  @Test
+  void dashboardComFimAntesDoInicioE400() {
+    assertThatThrownBy(
+            () -> service.obterDashboard(LocalDate.of(2026, 9, 12), LocalDate.of(2026, 9, 1)))
+        .isInstanceOf(ApiClientErrorException.class)
+        .extracting(e -> ((ApiClientErrorException) e).getStatus())
+        .isEqualTo(400);
   }
 
   @Test
   void dashboardSemItensNaoDividePorZero() {
     when(itemEstoqueRepository.findByTenantId(TENANT_ID)).thenReturn(List.of());
-    when(movimentacaoEstoqueRepository.findByTenantId(TENANT_ID)).thenReturn(List.of());
 
-    DashboardEstoqueResponse response = service.obterDashboard();
+    DashboardEstoqueResponse response = service.obterDashboard(null, null);
 
     assertThat(response.rupturaTaxa).isZero();
     assertThat(response.valorEstoqueCustoMedio).isEqualByComparingTo(BigDecimal.ZERO);
     assertThat(response.perdasValor).isEqualByComparingTo(BigDecimal.ZERO);
+    assertThat(response.margemServicos).isEmpty();
   }
 
   @Test
   void dashboardTrataCustoMedioNuloComoZero() {
     when(itemEstoqueRepository.findByTenantId(TENANT_ID))
         .thenReturn(List.of(item("Sem custo", "10.0000", "1.0000", null)));
-    when(movimentacaoEstoqueRepository.findByTenantId(TENANT_ID)).thenReturn(List.of());
 
-    assertThat(service.obterDashboard().valorEstoqueCustoMedio)
+    assertThat(service.obterDashboard(null, null).valorEstoqueCustoMedio)
         .isEqualByComparingTo(BigDecimal.ZERO);
   }
 

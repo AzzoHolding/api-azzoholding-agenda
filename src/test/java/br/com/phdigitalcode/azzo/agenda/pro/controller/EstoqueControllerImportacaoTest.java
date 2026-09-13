@@ -29,6 +29,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.dto.EstoqueDtos.ImportacaoResultadoA
 import br.com.phdigitalcode.azzo.agenda.pro.exception.ApiClientErrorException;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.MinioStorageService;
 import br.com.phdigitalcode.azzo.agenda.pro.security.ContextoTenant;
+import br.com.phdigitalcode.azzo.agenda.pro.security.PermissionService;
 import br.com.phdigitalcode.azzo.agenda.pro.service.ServicoEstoque;
 
 /**
@@ -50,6 +51,7 @@ class EstoqueControllerImportacaoTest {
   private ServicoEstoque servicoEstoque;
   private MinioStorageService minioStorageService;
   private ContextoTenant contextoTenant;
+  private PermissionService permissionService;
   private EstoqueController controller;
 
   @BeforeEach
@@ -57,7 +59,8 @@ class EstoqueControllerImportacaoTest {
     servicoEstoque = mock(ServicoEstoque.class);
     minioStorageService = mock(MinioStorageService.class);
     contextoTenant = mock(ContextoTenant.class);
-    controller = new EstoqueController(servicoEstoque, minioStorageService, contextoTenant);
+    permissionService = mock(PermissionService.class);
+    controller = new EstoqueController(servicoEstoque, minioStorageService, contextoTenant, permissionService);
   }
 
   private MockMultipartFile arquivo(String nome, byte[] conteudo) {
