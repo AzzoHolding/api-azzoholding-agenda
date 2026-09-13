@@ -28,10 +28,14 @@ import br.com.phdigitalcode.azzo.agenda.pro.service.AuditQueryService;
  * Espelha {@code modules/audit/api/AuditoriaResource.java} ({@code @Path("/api/v1/auditoria")},
  * {@code @RolesAllowed({"OWNER", "FINANCE"})} de classe — nao ha faixas diferentes por metodo aqui,
  * ao contrario de {@code BillingController}).
+ *
+ * <p>Desde a V126 entra tambem quem recebeu a tela {@code /auditoria} num perfil de acesso
+ * ({@code audit:view}). O papel continua valendo sozinho: FINANCE nao tem linha em {@code roles} e
+ * perderia a trilha se a regra fosse so a permissao. A LGPD ({@code /lgpd}) segue so do dono.
  */
 @RestController
 @RequestMapping("/api/v1/auditoria")
-@PreAuthorize("hasAnyRole('OWNER', 'FINANCE')")
+@PreAuthorize("hasAnyRole('OWNER', 'FINANCE') or @permissionService.possuiPermissao('audit:view')")
 public class AuditoriaController {
 
   private final ContextoTenant contextoTenant;
@@ -130,7 +134,7 @@ public class AuditoriaController {
   @GetMapping("/events/export/{exportId}")
   public ResponseEntity<String> downloadExport(@PathVariable("exportId") String exportId) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
-    AuditQueryService.ExportDownload download = auditQueryService.downloadExport(exportId);
+    AuditQueryService.ExportDownload download = auditQueryService.downloadExport(tenantId, exportId);
     String filename = "auditoria-" + exportId + ("CSV".equals(download.format()) ? ".csv" : ".json");
     auditarLeitura(tenantId, "AUDIT_EVENTS_EXPORT_DOWNLOAD", exportId, null);
     return ResponseEntity.ok()
