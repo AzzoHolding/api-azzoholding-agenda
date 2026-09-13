@@ -248,7 +248,7 @@ class AuditQueryServiceTest {
     assertThat(response.exportId).isNotBlank();
     assertThat(response.downloadUrl).isEqualTo("/api/v1/auditoria/events/export/" + response.exportId);
 
-    AuditQueryService.ExportDownload download = service.downloadExport(response.exportId);
+    AuditQueryService.ExportDownload download = service.downloadExport(tenantId, response.exportId);
     assertThat(download.format()).isEqualTo("JSON");
     assertThat(download.contentType()).contains("application/json");
   }
@@ -264,7 +264,7 @@ class AuditQueryServiceTest {
     AuditDtos.AuditExportResponse response = service.export(tenantId, request);
 
     assertThat(response.format).isEqualTo("CSV");
-    AuditQueryService.ExportDownload download = service.downloadExport(response.exportId);
+    AuditQueryService.ExportDownload download = service.downloadExport(tenantId, response.exportId);
     assertThat(download.contentType()).contains("text/csv");
     assertThat(download.payload()).contains("id,createdAt,module,action");
   }
@@ -281,13 +281,29 @@ class AuditQueryServiceTest {
 
   @Test
   void downloadExportLancaQuandoExportIdInvalido() {
-    assertThatThrownBy(() -> service.downloadExport(null)).isInstanceOf(IllegalArgumentException.class);
-    assertThatThrownBy(() -> service.downloadExport("  ")).isInstanceOf(IllegalArgumentException.class);
+    assertThatThrownBy(() -> service.downloadExport(tenantId, null)).isInstanceOf(IllegalArgumentException.class);
+    assertThatThrownBy(() -> service.downloadExport(tenantId, "  ")).isInstanceOf(IllegalArgumentException.class);
   }
 
   @Test
   void downloadExportLancaQuandoNaoEncontrado() {
-    assertThatThrownBy(() -> service.downloadExport("inexistente")).isInstanceOf(IllegalArgumentException.class);
+    assertThatThrownBy(() -> service.downloadExport(tenantId, "inexistente"))
+        .isInstanceOf(IllegalArgumentException.class);
+  }
+
+  @Test
+  void downloadExportDeOutroSalaoRespondeComoNaoEncontrado() {
+    when(auditEventRepository.findAll(any(Specification.class), any(PageRequest.class)))
+        .thenReturn(new PageImpl<>(List.of()));
+    AuditDtos.AuditExportResponse response = service.export(tenantId, null);
+
+    assertThatThrownBy(() -> service.downloadExport(UUID.randomUUID(), response.exportId))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("Export nao encontrado ou expirado");
+    assertThatThrownBy(() -> service.downloadExport(null, response.exportId))
+        .isInstanceOf(IllegalArgumentException.class);
+    // O dono da exportacao continua baixando: a recusa acima nao a apagou.
+    assertThat(service.downloadExport(tenantId, response.exportId).format()).isEqualTo("JSON");
   }
 
 }

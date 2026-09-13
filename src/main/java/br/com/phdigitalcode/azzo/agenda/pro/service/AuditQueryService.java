@@ -41,7 +41,7 @@ public class AuditQueryService {
 
   private static final Logger LOG = LoggerFactory.getLogger(AuditQueryService.class);
 
-  private record ExportEntry(String payload, String format, Instant expiresAt) {}
+  private record ExportEntry(String payload, String format, Instant expiresAt, UUID tenantId) {}
 
   private final ConcurrentHashMap<String, ExportEntry> exportStore = new ConcurrentHashMap<>();
 
@@ -273,7 +273,7 @@ public class AuditQueryService {
 
     // limpar entradas expiradas antes de adicionar a nova
     exportStore.entrySet().removeIf(e -> Instant.now().isAfter(e.getValue().expiresAt()));
-    exportStore.put(exportId, new ExportEntry(payload, format, expiresAt));
+    exportStore.put(exportId, new ExportEntry(payload, format, expiresAt, tenantId));
 
     AuditDtos.AuditExportResponse response = new AuditDtos.AuditExportResponse();
     response.exportId = exportId;
@@ -286,11 +286,19 @@ public class AuditQueryService {
 
   public record ExportDownload(String payload, String format, String contentType) {}
 
-  public ExportDownload downloadExport(String exportId) {
+  /**
+   * So o salao que gerou a exportacao a baixa. O id e aleatorio, mas a trilha agora pode ser
+   * distribuida a funcionarios, e um id vazado nao pode abrir a trilha de outro salao. Responde
+   * igual a "nao encontrado" para nao confirmar que o id existe.
+   */
+  public ExportDownload downloadExport(UUID tenantId, String exportId) {
     if (exportId == null || exportId.isBlank()) throw new IllegalArgumentException("exportId invalido");
     ExportEntry entry = exportStore.get(exportId.trim());
     if (entry == null || Instant.now().isAfter(entry.expiresAt())) {
       exportStore.remove(exportId.trim());
+      throw new IllegalArgumentException("Export nao encontrado ou expirado");
+    }
+    if (tenantId == null || !tenantId.equals(entry.tenantId())) {
       throw new IllegalArgumentException("Export nao encontrado ou expirado");
     }
     String contentType = "CSV".equals(entry.format())
