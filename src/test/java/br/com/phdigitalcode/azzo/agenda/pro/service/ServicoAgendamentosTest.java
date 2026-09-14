@@ -168,6 +168,14 @@ class ServicoAgendamentosTest {
             authenticatedUser);
 
     lenient().when(contextoTenant.obterTenantIdOuFalhar()).thenReturn(tenantId);
+    // criar() confere que o cliente e do salao; por padrao ele e. Quem testa o contrario sobrepoe.
+    lenient()
+        .when(clienteRepository.findByIdAndTenantId(clientId, tenantId))
+        .thenReturn(Optional.of(clienteDoSalao()));
+    // O repositorio de verdade nunca devolve nulo (devolve EMPTY); o mock sem stub devolveria.
+    lenient()
+        .when(clienteStatsRepository.findStatsByTenantAndClient(any(), any()))
+        .thenReturn(ClienteStatsRepository.ClienteStats.EMPTY);
     // Simula o que o JPA faz: persist dispara o @PrePersist (id + createdAt).
     lenient()
         .when(agendamentoRepository.saveAndFlush(any(Agendamento.class)))
@@ -278,10 +286,20 @@ class ServicoAgendamentosTest {
             eq(tenantId), eq(professionalId), any(), anyList()))
         .thenReturn(List.of());
     lenient().when(agendamentoItemRepository.existsByAppointmentId(any())).thenReturn(false);
-    lenient().when(clienteRepository.findByIdAndTenantId(clientId, tenantId)).thenReturn(Optional.empty());
+    lenient()
+        .when(clienteRepository.findByIdAndTenantId(clientId, tenantId))
+        .thenReturn(Optional.of(clienteDoSalao()));
     lenient()
         .when(profissionalRepository.findByIdAndTenantId(professionalId, tenantId))
         .thenReturn(Optional.empty());
+  }
+
+  private Cliente clienteDoSalao() {
+    Cliente c = new Cliente();
+    c.setId(clientId);
+    c.setTenantId(tenantId);
+    c.setName("Maria");
+    return c;
   }
 
   // ─── CRIACAO ──────────────────────────────────────────────────────────────
@@ -504,7 +522,6 @@ class ServicoAgendamentosTest {
     void overrideManualConfirmadoCria() {
       stubConflitoDeAgenda();
       when(appointmentSettingsService.allowsManualConflictByTenantId(tenantId)).thenReturn(true);
-      lenient().when(clienteRepository.findByIdAndTenantId(clientId, tenantId)).thenReturn(Optional.empty());
       lenient()
           .when(profissionalRepository.findByIdAndTenantId(professionalId, tenantId))
           .thenReturn(Optional.empty());
@@ -535,6 +552,99 @@ class ServicoAgendamentosTest {
       assertThat(response.id).isNotNull();
       verify(notificacaoService)
           .registrarCriacaoAgendamento(eq(tenantId), any(), eq(clientId), eq("APPOINTMENT_CREATED"));
+    }
+
+    @Test
+    @DisplayName("recusa cliente de outro salao (o id nao pode ser gravado sem conferir o tenant)")
+    void recusaClienteDeOutroSalao() {
+      when(clienteRepository.findByIdAndTenantId(clientId, tenantId)).thenReturn(Optional.empty());
+
+      assertThatThrownBy(() -> service.criar(requestValido()))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessage("Cliente nao encontrado");
+      verify(agendamentoRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    @DisplayName("sem cliente ou profissional diz o campo, em vez de estourar NPE")
+    void semClienteOuProfissionalDizOCampo() {
+      AgendamentoRequest semCliente = requestValido();
+      semCliente.clientId = null;
+      assertThatThrownBy(() -> service.criar(semCliente)).hasMessage("Cliente e obrigatorio");
+
+      AgendamentoRequest semProfissional = requestValido();
+      semProfissional.professionalId = " ";
+      assertThatThrownBy(() -> service.criar(semProfissional)).hasMessage("Profissional e obrigatorio");
+
+      AgendamentoRequest idRuim = requestValido();
+      idRuim.professionalId = "nao-e-uuid";
+      assertThatThrownBy(() -> service.criar(idRuim)).hasMessage("Profissional invalido");
+    }
+
+    @Test
+    @DisplayName("agendamento novo so nasce pendente ou confirmado — concluido pularia comanda e pagamento")
+    void naoCriaJaConcluido() {
+      stubCriacaoSemConflito();
+      AgendamentoRequest concluido = requestValido();
+      concluido.status = "COMPLETED";
+
+      assertThatThrownBy(() -> service.criar(concluido))
+          .hasMessage("Agendamento novo so pode ser criado como pendente ou confirmado");
+      verify(agendamentoRepository, never()).saveAndFlush(any());
+      verify(commissionService, never())
+          .registerServiceCommissionsIfApplicable(any(), any(), any(), any(), any());
+
+      AgendamentoRequest confirmado = requestValido();
+      confirmado.status = "CONFIRMED";
+      assertThat(service.criar(confirmado).status).isEqualTo("CONFIRMED");
+    }
+
+    @Test
+    @DisplayName("preco vem do servico; do pedido so vale o desconto")
+    void precoDoServicoEDescontoDoPedido() {
+      stubCriacaoSemConflito();
+      AgendamentoRequest req = requestValido();
+      req.items = List.of(item("1.00", "30.00"));
+
+      service.criar(req);
+
+      AgendamentoItem gravado = itemGravado();
+      assertThat(gravado.getUnitPrice()).isEqualByComparingTo("100.00");
+      assertThat(gravado.getGrossAmount()).isEqualByComparingTo("100.00");
+      assertThat(gravado.getDiscountAmount()).isEqualByComparingTo("30.00");
+      assertThat(gravado.getTotalPrice()).isEqualByComparingTo("70.00");
+    }
+
+    @Test
+    @DisplayName("desconto acima do preco vira o preco inteiro: total nunca negativo")
+    void descontoAcimaDoPreco() {
+      stubCriacaoSemConflito();
+      AgendamentoRequest req = requestValido();
+      req.items = List.of(item(null, "500.00"));
+
+      service.criar(req);
+
+      AgendamentoItem gravado = itemGravado();
+      assertThat(gravado.getDiscountAmount()).isEqualByComparingTo("100.00");
+      assertThat(gravado.getTotalPrice()).isEqualByComparingTo("0.00");
+    }
+
+    private AgendamentoRequest.ItemRequest item(String precoDoPedido, String desconto) {
+      AgendamentoRequest.ItemRequest item = new AgendamentoRequest.ItemRequest();
+      item.serviceId = serviceId.toString();
+      if (precoDoPedido != null) {
+        item.unitPrice = new BigDecimal(precoDoPedido);
+        item.grossAmount = new BigDecimal(precoDoPedido);
+        item.totalPrice = new BigDecimal(precoDoPedido);
+      }
+      item.discountAmount = new BigDecimal(desconto);
+      return item;
+    }
+
+    private AgendamentoItem itemGravado() {
+      ArgumentCaptor<AgendamentoItem> captor = ArgumentCaptor.forClass(AgendamentoItem.class);
+      verify(agendamentoItemRepository).save(captor.capture());
+      return captor.getValue();
     }
 
     private void stubConflitoDeAgenda() {

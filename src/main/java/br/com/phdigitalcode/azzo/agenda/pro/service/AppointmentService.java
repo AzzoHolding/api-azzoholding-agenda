@@ -196,10 +196,12 @@ public class AppointmentService {
 
     Profissional profissional = validarProfissionalDoTenant(tenantId, professionalId);
     List<TimeRange> workingRanges = obterJanelasDeTrabalho(tenantId, profissional, date);
-    if (workingRanges.isEmpty()) {
-      throw new IllegalStateException("Profissional sem horario de trabalho para a data informada");
+    if (workingRanges == null) {
+      // Sem jornada para o dia: vale a janela do salao — como na criacao.
+      workingRanges = List.of(salonBusinessRange);
+    } else {
+      workingRanges = intersectRanges(workingRanges, List.of(salonBusinessRange));
     }
-    workingRanges = intersectRanges(workingRanges, List.of(salonBusinessRange));
     if (workingRanges.isEmpty()) {
       return emptyContext(tenantId, serviceDurationMinutes, bufferMinutes);
     }
@@ -260,24 +262,39 @@ public class AppointmentService {
                 new IllegalArgumentException("Profissional nao encontrado para o tenant informado"));
   }
 
+  /**
+   * As janelas do profissional no dia, com a MESMA regra da criacao
+   * ({@code ServicoAgendamentos.isProfessionalAvailableAt}):
+   *
+   * <ul>
+   *   <li>{@code null}: sem restricao. Nenhuma jornada cadastrada, ou nenhuma para este dia da
+   *       semana. Vale a janela do salao.
+   *   <li>lista vazia: o dia esta cadastrado e ele nao atende (folga ou so faixa invalida).
+   * </ul>
+   *
+   * <p>Antes os dois casos viravam "sem horario de trabalho" e o endpoint respondia 400, enquanto
+   * a criacao aceitava o mesmo horario: quem marcava pela lista de horarios nao conseguia agendar.
+   */
   private List<TimeRange> obterJanelasDeTrabalho(
       UUID tenantId, Profissional profissional, LocalDate date) {
     List<ProfissionalWorkingHour> workingHours =
         profissionalWorkingHourRepository.listByProfessional(tenantId, profissional.getId());
-    if (workingHours == null || workingHours.isEmpty()) return List.of();
+    if (workingHours == null || workingHours.isEmpty()) return null;
 
     int targetDay = date.getDayOfWeek().getValue();
+    boolean diaCadastrado = false;
     List<TimeRange> ranges = new ArrayList<>();
     for (ProfissionalWorkingHour item : workingHours) {
-      if (item == null || !item.isWorking()) continue;
-      if (!matchesDay(item.getDayOfWeek(), targetDay)) continue;
+      if (item == null || !matchesDay(item.getDayOfWeek(), targetDay)) continue;
+      diaCadastrado = true;
+      if (!item.isWorking()) continue;
       LocalTime start = item.getStartTime();
       LocalTime end = item.getEndTime();
       if (start == null || end == null || !start.isBefore(end)) continue;
       ranges.add(new TimeRange(start, end));
     }
 
-    return mergeRanges(ranges);
+    return diaCadastrado ? mergeRanges(ranges) : null;
   }
 
   /**

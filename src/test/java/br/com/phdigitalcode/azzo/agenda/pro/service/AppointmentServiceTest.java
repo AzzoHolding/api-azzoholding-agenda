@@ -120,16 +120,35 @@ class AppointmentServiceTest {
   }
 
   @Test
-  @DisplayName("profissional sem jornada na data cadastrada lanca IllegalStateException")
+  @DisplayName("profissional sem jornada cadastrada segue a janela do salao (mesma regra da criacao)")
   void profissionalSemJornada() {
     janelaSalao("09:00", "19:00");
     profissionalExiste();
     when(profissionalWorkingHourRepository.listByProfessional(tenantId, professionalId))
         .thenReturn(List.of());
 
-    assertThatThrownBy(() -> service.findAvailableSlots(tenantId, professionalId, DATA, 30, 0))
-        .isInstanceOf(IllegalStateException.class)
-        .hasMessage("Profissional sem horario de trabalho para a data informada");
+    List<TimeSlotResponse> slots = service.findAvailableSlots(tenantId, professionalId, DATA, 30, 0);
+
+    assertThat(slots).isNotEmpty();
+    assertThat(slots)
+        .allSatisfy(
+            slot -> {
+              assertThat(slot.startTime).isAfterOrEqualTo(LocalTime.of(9, 0));
+              assertThat(slot.endTime).isBeforeOrEqualTo(LocalTime.of(19, 0));
+            });
+  }
+
+  @Test
+  @DisplayName("jornada so de outros dias: o dia sem cadastro segue a janela do salao")
+  void diaSemCadastroSegueOSalao() {
+    janelaSalao("09:00", "19:00");
+    profissionalExiste();
+    int hoje = DATA.getDayOfWeek().getValue();
+    int outroDia = hoje == 7 ? 1 : hoje + 1;
+    when(profissionalWorkingHourRepository.listByProfessional(tenantId, professionalId))
+        .thenReturn(List.of(workingHour(outroDia, "09:00", "12:00", true)));
+
+    assertThat(service.findAvailableSlots(tenantId, professionalId, DATA, 30, 0)).isNotEmpty();
   }
 
   // ---------- portoes que zeram a agenda ----------
@@ -331,7 +350,7 @@ class AppointmentServiceTest {
   }
 
   @Test
-  @DisplayName("jornada marcada como nao-trabalhada ou de outro dia da semana e descartada")
+  @DisplayName("dia cadastrado como folga zera os horarios, sem erro; o de outro dia nao conta")
   void jornadaDeOutroDiaOuInativaEDescartada() {
     janelaSalao("09:00", "19:00");
     profissionalExiste();
@@ -343,8 +362,7 @@ class AppointmentServiceTest {
                 workingHour(hoje, "09:00", "12:00", false),
                 workingHour(outroDia, "09:00", "12:00", true)));
 
-    assertThatThrownBy(() -> service.findAvailableSlots(tenantId, professionalId, DATA, 30, 0))
-        .isInstanceOf(IllegalStateException.class);
+    assertThat(service.findAvailableSlots(tenantId, professionalId, DATA, 30, 0)).isEmpty();
   }
 
   @Test
