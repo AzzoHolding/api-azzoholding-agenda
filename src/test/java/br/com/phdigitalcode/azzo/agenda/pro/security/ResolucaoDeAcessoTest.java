@@ -107,6 +107,37 @@ class ResolucaoDeAcessoTest {
     assertThat(ResolucaoDeAcesso.rotasPessoais("STAFF")).doesNotContain("/minha-producao");
   }
 
+  private static ItemCatalogo acompanha(String rota, String alvo) {
+    return new ItemCatalogo(UUID.randomUUID(), rota, rota, null, 0, null, true, false, true, alvo);
+  }
+
+  /** V128: o fiscal esta em varias rotas e e UMA escolha — as outras acompanham /fiscal. */
+  @Test
+  void quemAcompanhaVemJuntoENaoEEscolhido() {
+    List<ItemCatalogo> catalogo =
+        List.of(
+            item("/fiscal"),
+            acompanha("/fiscal/nfse", "/fiscal"),
+            acompanha("/emitir-nota", "/fiscal"),
+            item("/fiscal/nfse/:id"),
+            item("/agenda"));
+    Set<String> teto = Set.of("/fiscal", "/fiscal/nfse", "/emitir-nota", "/fiscal/nfse/:id", "/agenda");
+
+    assertThat(ResolucaoDeAcesso.distribuiveis(catalogo, teto).keySet())
+        .containsExactlyInAnyOrder("/fiscal", "/agenda");
+    // O detalhe com parametro segue /fiscal/nfse, que acompanha /fiscal.
+    assertThat(ResolucaoDeAcesso.rotasEfetivas(catalogo, teto, Set.of("/fiscal"), false, "STAFF"))
+        .contains("/fiscal", "/fiscal/nfse", "/emitir-nota", "/fiscal/nfse/:id");
+    // Gravado sozinho no perfil, quem acompanha nao entra: nao e escolha.
+    assertThat(ResolucaoDeAcesso.rotasEfetivas(catalogo, teto, Set.of("/fiscal/nfse", "/agenda"), false, "STAFF"))
+        .contains("/agenda")
+        .doesNotContain("/fiscal/nfse", "/fiscal/nfse/:id");
+    // Fora do teto do dono, nao vem nem junto.
+    assertThat(ResolucaoDeAcesso.rotasEfetivas(catalogo, Set.of("/fiscal"), Set.of("/fiscal"), false, "STAFF"))
+        .contains("/fiscal")
+        .doesNotContain("/fiscal/nfse", "/emitir-nota");
+  }
+
   @Test
   void distribuiveisTiramExclusivasEmBreveEDetalhes() {
     assertThat(ResolucaoDeAcesso.distribuiveis(CATALOGO, TETO).keySet())

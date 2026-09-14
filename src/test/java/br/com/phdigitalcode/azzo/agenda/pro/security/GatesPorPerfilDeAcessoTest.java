@@ -23,13 +23,25 @@ import org.springframework.test.context.junit.jupiter.SpringJUnitConfig;
 
 import br.com.phdigitalcode.azzo.agenda.pro.controller.AuditoriaController;
 import br.com.phdigitalcode.azzo.agenda.pro.controller.CommissionController;
+import br.com.phdigitalcode.azzo.agenda.pro.controller.FiscalController;
+import br.com.phdigitalcode.azzo.agenda.pro.controller.NfseController;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditService;
 import br.com.phdigitalcode.azzo.agenda.pro.service.AuditQueryService;
 import br.com.phdigitalcode.azzo.agenda.pro.service.CommissionService;
+import br.com.phdigitalcode.azzo.agenda.pro.service.FiscalAccessService;
+import br.com.phdigitalcode.azzo.agenda.pro.service.FiscalIdempotencyService;
+import br.com.phdigitalcode.azzo.agenda.pro.service.NfseCertificateUnlockService;
+import br.com.phdigitalcode.azzo.agenda.pro.service.NfseConfigService;
+import br.com.phdigitalcode.azzo.agenda.pro.service.NfseIdempotencyService;
+import br.com.phdigitalcode.azzo.agenda.pro.service.NfseLocationService;
+import br.com.phdigitalcode.azzo.agenda.pro.service.NfsePdfJobService;
+import br.com.phdigitalcode.azzo.agenda.pro.service.NfseProviderCapabilitiesService;
+import br.com.phdigitalcode.azzo.agenda.pro.service.NfseService;
+import br.com.phdigitalcode.azzo.agenda.pro.service.ServicoFiscal;
 
 /**
  * Avalia DE VERDADE as expressoes "papel OU permissao" das telas distribuiveis (auditoria, V126;
- * comissoes, V127) com o Spring Security ligado. O teste de string do controller nao pega uma
+ * comissoes, V127; fiscal, V128) com o Spring Security ligado. O teste de string do controller nao pega uma
  * expressao que nao resolve — por exemplo, o bean {@code permissionService} com outro nome.
  */
 @SpringJUnitConfig(GatesPorPerfilDeAcessoTest.Configuracao.class)
@@ -53,11 +65,36 @@ class GatesPorPerfilDeAcessoTest {
       return new AuditoriaController(
           mock(ContextoTenant.class), mock(AuditQueryService.class), mock(AuditService.class));
     }
+
+    @Bean
+    FiscalController fiscalController() {
+      return new FiscalController(
+          mock(ServicoFiscal.class),
+          mock(FiscalAccessService.class),
+          mock(FiscalIdempotencyService.class),
+          mock(ContextoTenant.class));
+    }
+
+    @Bean
+    NfseController nfseController() {
+      return new NfseController(
+          mock(NfseService.class),
+          mock(FiscalAccessService.class),
+          mock(NfseCertificateUnlockService.class),
+          mock(NfseIdempotencyService.class),
+          mock(NfseLocationService.class),
+          mock(NfseConfigService.class),
+          mock(NfseProviderCapabilitiesService.class),
+          mock(NfsePdfJobService.class),
+          mock(ContextoTenant.class));
+    }
   }
 
   @Autowired private PermissionService permissionService;
   @Autowired private CommissionController comissoes;
   @Autowired private AuditoriaController auditoria;
+  @Autowired private FiscalController fiscal;
+  @Autowired private NfseController nfse;
 
   @AfterEach
   void limpar() {
@@ -102,6 +139,38 @@ class GatesPorPerfilDeAcessoTest {
     logadoComo("ADMIN");
     assertThatThrownBy(() -> comissoes.cycles(null)).isInstanceOf(AccessDeniedException.class);
     assertThatThrownBy(() -> auditoria.filterOptions(null, null)).isInstanceOf(AccessDeniedException.class);
+    assertThatThrownBy(() -> fiscal.listarInvoices(null, null, null, null, null))
+        .isInstanceOf(AccessDeniedException.class);
+  }
+
+  @Test
+  void fiscalSoLeituraConsultaMasNaoEmite() {
+    logadoComo("STAFF");
+    when(permissionService.possuiPermissao("fiscal:view")).thenReturn(true);
+    assertThatCode(() -> fiscal.listarInvoices(null, null, null, null, null)).doesNotThrowAnyException();
+    // A emissao le a configuracao: a leitura dela vem com fiscal:view.
+    assertThatCode(() -> nfse.obterConfig(null)).doesNotThrowAnyException();
+    assertThatCode(() -> fiscal.obterTaxConfig()).doesNotThrowAnyException();
+    assertThatThrownBy(() -> nfse.autorizar("n-1", null, null)).isInstanceOf(AccessDeniedException.class);
+  }
+
+  @Test
+  void comOsDoisCodigosDoFiscalEmiteMasNaoMexeNaConfiguracao() {
+    logadoComo("STAFF");
+    when(permissionService.possuiPermissao("fiscal:view")).thenReturn(true);
+    when(permissionService.possuiPermissao("fiscal:manage")).thenReturn(true);
+    assertThatCode(() -> nfse.autorizar("n-1", null, null)).doesNotThrowAnyException();
+    assertThatCode(() -> fiscal.recalcular(2026, 9)).doesNotThrowAnyException();
+    assertThatThrownBy(() -> nfse.salvarConfig(null)).isInstanceOf(AccessDeniedException.class);
+    assertThatThrownBy(() -> fiscal.salvarCertificado(null)).isInstanceOf(AccessDeniedException.class);
+    assertThatThrownBy(() -> fiscal.atualizarTaxConfig(null)).isInstanceOf(AccessDeniedException.class);
+  }
+
+  @Test
+  void donoMexeNaConfiguracaoFiscal() {
+    logadoComo("OWNER");
+    assertThatCode(() -> nfse.salvarConfig(null)).doesNotThrowAnyException();
+    assertThatCode(() -> fiscal.atualizarTaxConfig(null)).doesNotThrowAnyException();
   }
 
   @Test

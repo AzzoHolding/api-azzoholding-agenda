@@ -49,7 +49,7 @@ public class PerfilAcessoRepository {
             .createNativeQuery(
                 """
                 SELECT id, route, label, parent_item_menu_id, display_order, icon_key,
-                       sidebar_visible, exclusivo_do_dono, distribuivel
+                       sidebar_visible, exclusivo_do_dono, distribuivel, acompanha_rota
                 FROM item_menu
                 WHERE is_active = TRUE
                 ORDER BY display_order, label
@@ -67,7 +67,8 @@ public class PerfilAcessoRepository {
                     texto(l[5]),
                     booleano(l[6]),
                     booleano(l[7]),
-                    booleano(l[8])))
+                    booleano(l[8]),
+                    texto(l[9])))
         .toList();
   }
 

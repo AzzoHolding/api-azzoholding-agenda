@@ -32,7 +32,12 @@ public final class ResolucaoDeAcesso {
 
   private ResolucaoDeAcesso() {}
 
-  /** Uma linha do catalogo {@code item_menu}. */
+  /**
+   * Uma linha do catalogo {@code item_menu}.
+   *
+   * @param acompanhaRota {@code item_menu.acompanha_rota}: o item nao e escolhido, vem junto com
+   *     essa rota (V128 — o fiscal, espalhado em varias rotas, e UMA escolha)
+   */
   public record ItemCatalogo(
       UUID id,
       String route,
@@ -42,7 +47,26 @@ public final class ResolucaoDeAcesso {
       String iconKey,
       boolean sidebarVisible,
       boolean exclusivoDoDono,
-      boolean distribuivel) {
+      boolean distribuivel,
+      String acompanhaRota) {
+
+    public ItemCatalogo(
+        UUID id,
+        String route,
+        String label,
+        UUID parentId,
+        int displayOrder,
+        String iconKey,
+        boolean sidebarVisible,
+        boolean exclusivoDoDono,
+        boolean distribuivel) {
+      this(id, route, label, parentId, displayOrder, iconKey, sidebarVisible, exclusivoDoDono, distribuivel, null);
+    }
+
+    /** Vem junto com outra tela em vez de ser escolhido. */
+    public boolean acompanha() {
+      return acompanhaRota != null && !acompanhaRota.isBlank();
+    }
 
     /** {@code /clientes/:id} e o detalhe de {@code /clientes}: vem junto, nao e escolhido. */
     public boolean comParametro() {
@@ -59,12 +83,12 @@ public final class ResolucaoDeAcesso {
 
   /**
    * O que o dono pode distribuir: esta no teto, nao e exclusivo dele, ja tem backend por permissao
-   * e nao e detalhe com parametro.
+   * e nao e detalhe com parametro nem acompanha outra tela.
    */
   public static Map<String, ItemCatalogo> distribuiveis(Collection<ItemCatalogo> catalogo, Set<String> teto) {
     Map<String, ItemCatalogo> resultado = new LinkedHashMap<>();
     for (ItemCatalogo item : catalogo) {
-      if (item.route() == null || item.comParametro()) continue;
+      if (item.route() == null || item.comParametro() || item.acompanha()) continue;
       if (item.exclusivoDoDono() || !item.distribuivel()) continue;
       if (!teto.contains(item.route())) continue;
       resultado.put(item.route(), item);
@@ -89,6 +113,14 @@ public final class ResolucaoDeAcesso {
     Set<String> liberadas = new TreeSet<>();
     for (String rota : distribuiveis.keySet()) {
       if (acessoTotal || rotasDosPerfis.contains(rota)) liberadas.add(rota);
+    }
+
+    // Itens que acompanham outra tela (item_menu.acompanha_rota) vem junto com ela. Antes dos
+    // detalhes com parametro: /fiscal/nfse/:id segue /fiscal/nfse, que acompanha /fiscal.
+    for (ItemCatalogo item : catalogo) {
+      if (item.route() == null || !item.acompanha()) continue;
+      if (item.exclusivoDoDono() || !item.distribuivel() || !teto.contains(item.route())) continue;
+      if (liberadas.contains(item.acompanhaRota())) liberadas.add(item.route());
     }
 
     // Detalhes com parametro seguem a tela de origem, se o dono tambem os tem.

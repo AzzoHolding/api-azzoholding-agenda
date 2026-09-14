@@ -47,7 +47,8 @@ class MenuRouteCacheTest {
   @Test
   void removeRotasFiscaisQuandoTenantNaoPodeAcessarFiscal() {
     when(menuPermissionRepository.buscarRotasPorTenantEPapel(tenantId, PapelUsuario.OWNER))
-        .thenReturn(Optional.of(List.of("/dashboard", "/configuracoes/fiscal", "/fiscal/nfse/x", "/nota-fiscal")));
+        .thenReturn(Optional.of(
+            List.of("/dashboard", "/fiscal", "/configuracoes/fiscal", "/fiscal/nfse/x", "/nota-fiscal")));
     when(fiscalAccessService.podeAcessarFiscal(tenantId)).thenReturn(false);
 
     List<String> routes = cache.getAllowedRoutes(tenantId, PapelUsuario.OWNER);
