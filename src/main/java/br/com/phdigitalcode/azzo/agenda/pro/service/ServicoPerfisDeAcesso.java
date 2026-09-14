@@ -138,7 +138,8 @@ public class ServicoPerfisDeAcesso {
     Set<String> teto = acessoPorPerfil.tetoDoDono(tenantId);
     List<FuncionalidadeResponse> resultado = new ArrayList<>();
     for (ItemCatalogo item : repositorio.catalogoAtivo()) {
-      if (item.route() == null || item.comParametro() || item.exclusivoDoDono()) continue;
+      // Quem acompanha outra tela nao e escolhido: vem junto com ela (item_menu.acompanha_rota).
+      if (item.route() == null || item.comParametro() || item.exclusivoDoDono() || item.acompanha()) continue;
       if (!teto.contains(item.route())) continue;
       FuncionalidadeResponse f = new FuncionalidadeResponse();
       f.id = item.id().toString();
