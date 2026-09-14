@@ -82,11 +82,19 @@ public final class SchedulingDtos {
    * service.
    */
   public static class AgendamentoRequest {
+    @NotBlank(message = "Cliente e obrigatorio")
     public String clientId;
+
+    @NotBlank(message = "Profissional e obrigatorio")
     public String professionalId;
+
     public String serviceId;
     public List<ItemRequest> items = new ArrayList<>();
+
+    @NotBlank(message = "Data do agendamento e obrigatoria")
     public String date; // yyyy-MM-dd
+
+    @NotBlank(message = "Hora de inicio e obrigatoria")
     public String startTime;
     public String endTime;
     public String status; // enum string

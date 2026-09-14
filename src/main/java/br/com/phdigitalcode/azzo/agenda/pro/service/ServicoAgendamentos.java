@@ -323,12 +323,7 @@ public class ServicoAgendamentos {
     agendamentoRepository.saveAndFlush(a);
     persistItems(a, resolvedItems);
 
-    if (a.getStatus() == StatusAgendamento.COMPLETED) {
-      registrarReceitaConclusaoSeNecessario(tenantId, a, null);
-      commissionService.registerServiceCommissionsIfApplicable(
-          tenantId, a.getId(), a.getProfessionalId(), a.getItems(), a.getDate());
-    }
-
+    // Nao ha efeito financeiro na criacao: aplicar() so aceita PENDING ou CONFIRMED.
     notificacaoService.registrarCriacaoAgendamento(
         tenantId, a.getId(), a.getClientId(), "APPOINTMENT_CREATED");
     try {
@@ -1620,12 +1615,24 @@ public class ServicoAgendamentos {
 
   private List<ResolvedAppointmentItem> aplicar(
       AgendamentoRequest req, Agendamento a, UUID tenantId) {
-    a.setClientId(UUID.fromString(req.clientId));
-    a.setProfessionalId(UUID.fromString(req.professionalId));
+    // Os obrigatorios sao conferidos aqui tambem: a rota interna do assistente chama criar() sem
+    // @Valid, e sem isto um campo ausente virava NPE e "erro inesperado".
+    a.setClientId(uuidObrigatorio(req.clientId, "Cliente"));
+    if (clienteRepository.findByIdAndTenantId(a.getClientId(), tenantId).isEmpty()) {
+      // Sem esta checagem o id de um cliente de OUTRO salao era gravado no agendamento.
+      throw new IllegalArgumentException("Cliente nao encontrado");
+    }
+    a.setProfessionalId(uuidObrigatorio(req.professionalId, "Profissional"));
+    if (req.date == null || req.date.isBlank()) {
+      throw new IllegalArgumentException("Data do agendamento e obrigatoria");
+    }
     a.setDate(DataUtil.parseDataISO(req.date));
     if (a.getDate() == null) throw new IllegalArgumentException("Data invalida");
     if (tenantOperationalSettingsService.isClosedOnSpecialDate(tenantId, a.getDate())) {
       throw new IllegalArgumentException("Salao fechado na data informada");
+    }
+    if (req.startTime == null || req.startTime.isBlank()) {
+      throw new IllegalArgumentException("Hora de inicio e obrigatoria");
     }
     LocalTime start = parseTimeOrThrow(req.startTime);
     a.setStartTime(formatTime(start));
@@ -1661,7 +1668,15 @@ public class ServicoAgendamentos {
     }
     a.setNotes(req.notes);
     if (req.status != null && !req.status.isBlank()) {
-      a.setStatus(StatusAgendamento.fromValue(req.status));
+      // Agendamento novo nasce pendente ou confirmado. Criar ja CONCLUIDO lancava receita e
+      // comissao na hora, pulando a comanda e a escolha do pagamento; em andamento pulava a
+      // abertura da comanda. Esses caminhos existem, e passam pela mudanca de status.
+      StatusAgendamento inicial = StatusAgendamento.fromValue(req.status);
+      if (inicial != StatusAgendamento.PENDING && inicial != StatusAgendamento.CONFIRMED) {
+        throw new IllegalArgumentException(
+            "Agendamento novo so pode ser criado como pendente ou confirmado");
+      }
+      a.setStatus(inicial);
     }
     return items;
   }
@@ -1700,19 +1715,18 @@ public class ServicoAgendamentos {
       }
 
       int quantity = item.quantity <= 0 ? 1 : item.quantity;
+      // O preco e o do SERVICO, sempre; do pedido so vale o desconto, limitado ao bruto. Antes o
+      // preco, o bruto e o total eram gravados como o cliente mandasse — qualquer chamada punha o
+      // valor que quisesse no agendamento (e dali na comanda, na receita e na comissao).
       BigDecimal unitPrice =
-          NumericUtil.isPositive(item.unitPrice) ? NumericUtil.normalize(item.unitPrice) : servico.getPrice();
-      BigDecimal discountAmount = NumericUtil.maxZero(item.discountAmount);
-      BigDecimal inferredGrossAmount =
-          NumericUtil.isPositive(item.grossAmount)
-              ? NumericUtil.normalize(item.grossAmount)
-              : NumericUtil.multiply(unitPrice, quantity);
-      BigDecimal totalPrice =
-          NumericUtil.isPositive(item.totalPrice)
-              ? NumericUtil.normalize(item.totalPrice)
-              : NumericUtil.maxZero(NumericUtil.subtract(inferredGrossAmount, discountAmount));
-      BigDecimal grossAmount =
-          NumericUtil.normalize(inferredGrossAmount.max(NumericUtil.add(totalPrice, discountAmount)));
+          NumericUtil.normalize(servico.getPrice() != null ? servico.getPrice() : BigDecimal.ZERO);
+      BigDecimal grossAmount = NumericUtil.normalize(NumericUtil.multiply(unitPrice, quantity));
+      BigDecimal discountAmount =
+          NumericUtil.normalize(
+              item.discountAmount == null
+                  ? BigDecimal.ZERO
+                  : NumericUtil.maxZero(item.discountAmount).min(grossAmount));
+      BigDecimal totalPrice = NumericUtil.normalize(NumericUtil.subtract(grossAmount, discountAmount));
       resolvedItems.add(
           new ResolvedAppointmentItem(
               serviceId, quantity, unitPrice, grossAmount, discountAmount, totalPrice, servico));
@@ -1956,6 +1970,18 @@ public class ServicoAgendamentos {
         serviceId != null ? servicoRepository.findByIdAndTenantId(serviceId, tenantId).orElse(null) : null;
     response.serviceName = service != null ? service.getName() : null;
     return response;
+  }
+
+  /** Id obrigatorio do pedido: ausente ou malformado vira mensagem que diz o campo. */
+  private static UUID uuidObrigatorio(String valor, String campo) {
+    if (valor == null || valor.isBlank()) {
+      throw new IllegalArgumentException(campo + " e obrigatorio");
+    }
+    try {
+      return UUID.fromString(valor.trim());
+    } catch (IllegalArgumentException e) {
+      throw new IllegalArgumentException(campo + " invalido");
+    }
   }
 
   private boolean isInternalManualOrigin(String origin) {
