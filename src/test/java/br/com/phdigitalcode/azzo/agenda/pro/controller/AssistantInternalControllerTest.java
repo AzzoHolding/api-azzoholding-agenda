@@ -242,7 +242,8 @@ class AssistantInternalControllerTest {
   @Test
   void listarProfissionaisDelegaParaProfissionalServiceComServiceId() {
     List<ProfissionalResponse> response = List.of(new ProfissionalResponse());
-    when(profissionalService.listar("srv-1")).thenReturn(response);
+    // `true`: o assistente so oferece quem aceita agendamento.
+    when(profissionalService.listar("srv-1", true)).thenReturn(response);
 
     assertThat(controller.listarProfissionais(tenantId.toString(), "srv-1")).isSameAs(response);
     verify(contextoTenant).definirTenantId(tenantId);

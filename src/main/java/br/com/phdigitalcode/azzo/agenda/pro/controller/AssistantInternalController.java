@@ -160,7 +160,9 @@ public class AssistantInternalController {
       @RequestParam(value = "serviceId", required = false) String serviceId) {
     contextoTenant.definirTenantId(UUID.fromString(tenantId));
     try {
-      return profissionalService.listar(serviceId);
+      // O assistente so oferece quem aceita agendamento: a recepcao continua na equipe, mas nao
+      // e opcao para o cliente marcar.
+      return profissionalService.listar(serviceId, true);
     } finally {
       contextoTenant.limparTenantIdOverride();
     }

@@ -121,6 +121,31 @@ class ServicoPublicBookingTest {
         .hasMessageContaining("Salao nao encontrado");
   }
 
+  // ---- quem nao aceita agendamento fica fora do link publico ----
+
+  @Test
+  void listarProfissionaisAtivosDeixaDeForaQuemNaoRecebeAgendamento() {
+    Profissional ana = profissionalAtivo(UUID.randomUUID());
+    Profissional recepcao = profissionalAtivo(UUID.randomUUID());
+    recepcao.setAcceptsAppointments(false);
+    when(profissionalRepository.findByTenantIdAndIsActiveTrue(tenantId)).thenReturn(List.of(ana, recepcao));
+
+    assertThat(service.listarProfissionaisAtivos("salao-teste"))
+        .extracting(p -> p.id)
+        .containsExactly(ana.getId().toString());
+  }
+
+  @Test
+  void listarServicosAtivosDeixaDeForaServicoSoDeQuemNaoRecebeAgendamento() {
+    Profissional recepcao = profissionalAtivo(UUID.randomUUID());
+    recepcao.setAcceptsAppointments(false);
+    Servico soDaRecepcao = servicoAtivo(UUID.randomUUID(), 30, BigDecimal.TEN);
+    soDaRecepcao.setProfissionais(Set.of(recepcao));
+    when(servicoRepository.findByTenantId(tenantId)).thenReturn(List.of(soDaRecepcao));
+
+    assertThat(service.listarServicosAtivos("salao-teste")).isEmpty();
+  }
+
   // ---- listarServicosAtivos ----
 
   @Test

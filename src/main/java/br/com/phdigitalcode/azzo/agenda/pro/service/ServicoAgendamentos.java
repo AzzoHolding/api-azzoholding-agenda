@@ -131,6 +131,8 @@ public class ServicoAgendamentos {
 
   private static final ZoneId ZONE_BR = ZoneId.of("America/Sao_Paulo");
   private static final DateTimeFormatter TIME_FMT = DateTimeFormatter.ofPattern("HH:mm");
+  /** Profissional desligado de "aceita agendamento": continua na equipe, sem marcacao nova. */
+  static final String NAO_RECEBE_AGENDAMENTO = "Este profissional nao recebe agendamentos";
 
   private final AgendamentoRepository agendamentoRepository;
   private final AgendamentoQueryRepository agendamentoQueryRepository;
@@ -468,6 +470,9 @@ public class ServicoAgendamentos {
     if (novoProfissional == null) {
       throw new IllegalArgumentException("Profissional nao encontrado ou inativo");
     }
+    if (!novoProfissional.isAcceptsAppointments()) {
+      throw new IllegalArgumentException(NAO_RECEBE_AGENDAMENTO);
+    }
 
     List<Servico> services =
         agendamento.getItems().stream()
@@ -552,6 +557,7 @@ public class ServicoAgendamentos {
         Profissional prof =
             profissionalRepository.findByIdAndTenantIdAndIsActiveTrue(novoProfId, tenantId).orElse(null);
         if (prof == null) throw new IllegalArgumentException("Profissional nao encontrado ou inativo");
+        if (!prof.isAcceptsAppointments()) throw new IllegalArgumentException(NAO_RECEBE_AGENDAMENTO);
         a.setProfessionalId(novoProfId);
       }
     }
@@ -1643,6 +1649,11 @@ public class ServicoAgendamentos {
             .orElse(null);
     if (profissional == null) {
       throw new IllegalArgumentException("Profissional nao encontrado ou inativo");
+    }
+    // Marcacao NOVA so com quem aceita agendamento. Editar um atendimento ja marcado de quem deixou
+    // de aceitar continua valendo (as outras rotas so checam quando o profissional MUDA).
+    if (!profissional.isAcceptsAppointments()) {
+      throw new IllegalArgumentException(NAO_RECEBE_AGENDAMENTO);
     }
 
     List<ResolvedAppointmentItem> items = resolveRequestedItems(req, tenantId, a.getProfessionalId());
