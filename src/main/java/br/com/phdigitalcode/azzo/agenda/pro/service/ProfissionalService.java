@@ -3,6 +3,9 @@ package br.com.phdigitalcode.azzo.agenda.pro.service;
 import java.security.SecureRandom;
 import java.time.Instant;
 import java.time.LocalTime;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -34,12 +37,14 @@ import br.com.phdigitalcode.azzo.agenda.pro.entity.Servico;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.Specialty;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.Usuario;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.PapelUsuario;
+import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.StatusAgendamento;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.id.RbacUserRoleId;
 import br.com.phdigitalcode.azzo.agenda.pro.exception.ApiClientErrorException;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditConstants;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditEventCommand;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditService;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.CredentialsEmailService;
+import br.com.phdigitalcode.azzo.agenda.pro.repository.AgendamentoRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.PlanLimitsRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.ProfissionalRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.ProfissionalWorkingHourRepository;
@@ -66,6 +71,8 @@ public class ProfissionalService {
 
   private static final String PASSWORD_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789@#$%";
   private static final Random RANDOM = new SecureRandom();
+  private static final ZoneId ZONA_DO_SALAO = ZoneId.of("America/Sao_Paulo");
+  private static final DateTimeFormatter HORA = DateTimeFormatter.ofPattern("HH:mm");
 
   private final ProfissionalRepository profissionalRepository;
   private final ProfissionalWorkingHourRepository profissionalWorkingHourRepository;
@@ -81,6 +88,7 @@ public class ProfissionalService {
   private final ContextoTenant contextoTenant;
   private final AuditService auditService;
   private final PasswordPolicyValidator passwordPolicyValidator;
+  private final AgendamentoRepository agendamentoRepository;
 
   public ProfissionalService(
       ProfissionalRepository profissionalRepository,
@@ -96,7 +104,8 @@ public class ProfissionalService {
       AfterCommitExecutor afterCommitExecutor,
       ContextoTenant contextoTenant,
       AuditService auditService,
-      PasswordPolicyValidator passwordPolicyValidator) {
+      PasswordPolicyValidator passwordPolicyValidator,
+      AgendamentoRepository agendamentoRepository) {
     this.profissionalRepository = profissionalRepository;
     this.profissionalWorkingHourRepository = profissionalWorkingHourRepository;
     this.usuarioRepository = usuarioRepository;
@@ -111,24 +120,57 @@ public class ProfissionalService {
     this.contextoTenant = contextoTenant;
     this.auditService = auditService;
     this.passwordPolicyValidator = passwordPolicyValidator;
+    this.agendamentoRepository = agendamentoRepository;
   }
 
+  /** A equipe: todos os ativos, inclusive quem nao recebe agendamento. */
   @Transactional(readOnly = true)
   public List<ProfissionalResponse> listar(String serviceId) {
+    return listar(serviceId, false);
+  }
+
+  /**
+   * {@code somenteQuemAgenda}: so quem aceita agendamento — para as listas de MARCAR horario (o
+   * assistente). A tela de equipe usa a outra: quem nao agenda continua sendo da equipe.
+   */
+  @Transactional(readOnly = true)
+  public List<ProfissionalResponse> listar(String serviceId, boolean somenteQuemAgenda) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    List<Profissional> encontrados;
     if (serviceId == null || serviceId.isBlank()) {
-      return profissionalRepository.findByTenantIdAndIsActiveTrue(tenantId).stream().map(this::toResponse).toList();
+      encontrados = profissionalRepository.findByTenantIdAndIsActiveTrue(tenantId);
+    } else {
+      UUID serviceUuid = UUID.fromString(serviceId);
+      Servico servico = servicoRepository.findByIdAndTenantId(serviceUuid, tenantId)
+          .filter(Servico::isActive)
+          .orElseThrow(() -> new IllegalArgumentException("Servico nao encontrado"));
+      encontrados = servico.getProfissionais() == null || servico.getProfissionais().isEmpty()
+          ? profissionalRepository.findByTenantIdAndIsActiveTrue(tenantId)
+          : servico.getProfissionais().stream().filter(Profissional::isActive).toList();
     }
+    return encontrados.stream()
+        .filter(p -> !somenteQuemAgenda || p.isAcceptsAppointments())
+        .map(this::toResponse)
+        .toList();
+  }
 
-    UUID serviceUuid = UUID.fromString(serviceId);
-    Servico servico = servicoRepository.findByIdAndTenantId(serviceUuid, tenantId)
-        .filter(Servico::isActive)
-        .orElseThrow(() -> new IllegalArgumentException("Servico nao encontrado"));
-
-    if (servico.getProfissionais() == null || servico.getProfissionais().isEmpty()) {
-      return profissionalRepository.findByTenantIdAndIsActiveTrue(tenantId).stream().map(this::toResponse).toList();
-    }
-    return servico.getProfissionais().stream().filter(Profissional::isActive).map(this::toResponse).toList();
+  /**
+   * Quantos atendimentos por vir (pendentes e confirmados, de agora em diante) estao com o
+   * profissional. E o numero que a tela mostra ao desligar "aceita agendamento": os ja marcados
+   * continuam — nada e cancelado —, e o dono precisa saber quantos sao.
+   */
+  @Transactional(readOnly = true)
+  public long contarAgendamentosFuturos(UUID id) {
+    UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    profissionalRepository.findByIdAndTenantId(id, tenantId)
+        .orElseThrow(() -> new IllegalArgumentException("Profissional nao encontrado"));
+    ZonedDateTime agora = ZonedDateTime.now(ZONA_DO_SALAO);
+    return agendamentoRepository.countFutureActiveForProfessional(
+        tenantId,
+        id,
+        List.of(StatusAgendamento.PENDING, StatusAgendamento.CONFIRMED),
+        agora.toLocalDate(),
+        agora.toLocalTime().format(HORA));
   }
 
   @Transactional(readOnly = true)
@@ -307,6 +349,9 @@ public class ProfissionalService {
     p.setSpecialties(resolveSpecialties(tenantId, req.specialties));
     p.setCommissionRate(req.commissionRate);
     p.setActive(req.isActive);
+    // Ausente mantem o que ja estava (e o cadastro nasce com o padrao da entidade, TRUE): um
+    // cliente antigo que nao conhece o campo nao pode tirar ninguem da agenda.
+    if (req.acceptsAppointments != null) p.setAcceptsAppointments(req.acceptsAppointments);
   }
 
   private void replaceWorkingHours(Profissional profissional, UUID tenantId, List<WorkingHoursDto> requestedHours) {
@@ -402,7 +447,13 @@ public class ProfissionalService {
   private void syncLinkedUserOnUpdate(UUID tenantId, Profissional p, ProfissionalRequest req) {
     Usuario user = null;
     if (req.userId != null && !req.userId.isBlank()) {
-      user = usuarioRepository.findById(UUID.fromString(req.userId))
+      UUID novoUserId = UUID.fromString(req.userId);
+      // Ligar um login (o do dono, por exemplo) so vale para quem ainda nao tem: trocar deixaria o
+      // login anterior sem cadastro, com acesso e sem ninguem saber de quem e.
+      if (p.getUserId() != null && !p.getUserId().equals(novoUserId)) {
+        throw new IllegalArgumentException("Este profissional ja tem login proprio");
+      }
+      user = usuarioRepository.findById(novoUserId)
           .filter(item -> tenantId.equals(item.getTenantId()))
           .orElseThrow(() -> new IllegalArgumentException("Usuario informado nao encontrado no tenant"));
       p.setUserId(user.getId());
@@ -589,6 +640,7 @@ public class ProfissionalService {
             .map(this::toWorkingHoursDto)
             .toList());
     r.isActive = p.isActive();
+    r.acceptsAppointments = p.isAcceptsAppointments();
     r.createdAt = p.getCreatedAt() != null ? p.getCreatedAt().toString() : null;
     return r;
   }

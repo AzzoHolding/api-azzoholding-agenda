@@ -599,6 +599,20 @@ class ServicoAgendamentosTest {
       assertThat(service.criar(confirmado).status).isEqualTo("CONFIRMED");
     }
 
+    /** Quem nao aceita agendamento continua na equipe, mas nao recebe marcacao nova. */
+    @Test
+    void naoCriaParaQuemNaoRecebeAgendamento() {
+      when(tenantOperationalSettingsService.isClosedOnSpecialDate(eq(tenantId), any())).thenReturn(false);
+      Profissional recepcao = profissional();
+      recepcao.setAcceptsAppointments(false);
+      when(profissionalRepository.findByIdAndTenantIdAndIsActiveTrue(professionalId, tenantId))
+          .thenReturn(Optional.of(recepcao));
+
+      assertThatThrownBy(() -> service.criar(requestValido()))
+          .hasMessage("Este profissional nao recebe agendamentos");
+      verify(agendamentoRepository, never()).saveAndFlush(any());
+    }
+
     @Test
     @DisplayName("preco vem do servico; do pedido so vale o desconto")
     void precoDoServicoEDescontoDoPedido() {

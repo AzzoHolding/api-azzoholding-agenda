@@ -101,7 +101,9 @@ public class ServicoPublicBooking {
   public List<ServicoResponse> listarServicosAtivos(String slug) {
     Tenant tenant = obterTenantPorSlug(slug);
     return servicoRepository.findByTenantId(tenant.getId()).stream()
-        .filter(s -> s.isActive() && !s.getProfissionais().isEmpty())
+        // Servico so aparece se alguem que ATENDE pode faze-lo: vinculado so a quem nao recebe
+        // agendamento (ou a inativos), o cliente escolheria e nao acharia profissional.
+        .filter(s -> s.isActive() && s.getProfissionais().stream().anyMatch(ServicoPublicBooking::atendeNoLink))
         .map(this::toServicoResponse)
         .toList();
   }
@@ -119,7 +121,10 @@ public class ServicoPublicBooking {
   @Transactional(readOnly = true)
   public List<ProfissionalResponse> listarProfissionaisAtivos(String slug, String serviceId, String serviceIds) {
     Tenant tenant = obterTenantPorSlug(slug);
-    List<Profissional> ativos = profissionalRepository.findByTenantIdAndIsActiveTrue(tenant.getId());
+    // Quem nao recebe agendamento continua na equipe, mas nao e opcao no link publico.
+    List<Profissional> ativos = profissionalRepository.findByTenantIdAndIsActiveTrue(tenant.getId()).stream()
+        .filter(Profissional::isAcceptsAppointments)
+        .toList();
     List<Servico> selectedServices = resolveSelectedServices(tenant.getId(), serviceId, serviceIds);
     if (selectedServices.isEmpty()) {
       return ativos.stream().map(this::toProfissionalResponse).toList();
@@ -155,6 +160,7 @@ public class ServicoPublicBooking {
     if (profissionalUuid != null) {
       Profissional profissional = profissionalRepository
           .findByIdAndTenantIdAndIsActiveTrue(profissionalUuid, tenant.getId())
+          .filter(Profissional::isAcceptsAppointments)
           .orElse(null);
       if (profissional == null) throw new IllegalArgumentException("Profissional nao encontrado");
       for (Servico servico : selectedServices) {
@@ -228,6 +234,7 @@ public class ServicoPublicBooking {
 
     Profissional profissional = profissionalRepository
         .findByIdAndTenantIdAndIsActiveTrue(professionalUuid, tenant.getId())
+        .filter(Profissional::isAcceptsAppointments)
         .orElse(null);
     if (profissional == null) throw new IllegalArgumentException("Profissional nao encontrado");
     for (ResolvedPublicItem item : selectedItems) {
@@ -368,6 +375,11 @@ public class ServicoPublicBooking {
   public List<LocalDate> listarDatasIndisponiveis(String slug, LocalDate from, LocalDate to) {
     Tenant tenant = obterTenantPorSlug(slug);
     return specialClosureService.listarDatasIndisponiveis(tenant.getId(), from, to);
+  }
+
+  /** Pode ser escolhido no link publico: ativo e aceitando agendamento. */
+  private static boolean atendeNoLink(Profissional profissional) {
+    return profissional.isActive() && profissional.isAcceptsAppointments();
   }
 
   private Tenant obterTenantPorSlug(String slug) {

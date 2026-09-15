@@ -1,6 +1,7 @@
 package br.com.phdigitalcode.azzo.agenda.pro.controller;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -71,6 +72,16 @@ public class ProfissionaisController {
       profissionalService.validarAcessoProprio(id, userIdAutenticadoOuFalhar());
     }
     return profissionalService.obterPorId(id);
+  }
+
+  /**
+   * Quantos atendimentos por vir (pendentes e confirmados) estao com o profissional. A tela usa ao
+   * desligar "aceita agendamento": os ja marcados continuam, e o dono ve quantos sao.
+   */
+  @GetMapping("/{id}/upcoming-appointments")
+  @RequiresPermission("professional:read")
+  public Map<String, Long> contarAgendamentosFuturos(@PathVariable UUID id) {
+    return Map.of("count", profissionalService.contarAgendamentosFuturos(id));
   }
 
   @PostMapping
