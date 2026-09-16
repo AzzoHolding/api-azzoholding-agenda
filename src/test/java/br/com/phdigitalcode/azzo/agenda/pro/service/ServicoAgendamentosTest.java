@@ -838,7 +838,9 @@ class ServicoAgendamentosTest {
       assertThat(response.comandaId).isEqualTo(comandaId.toString());
       ArgumentCaptor<ComandaDtos.AdicionarItemRequest> itemCaptor =
           ArgumentCaptor.forClass(ComandaDtos.AdicionarItemRequest.class);
-      verify(servicoComanda).adicionarItem(eq(comandaId), itemCaptor.capture());
+      // Caminho interno: o preco acordado no agendamento vale, por isso nao e a rota do PDV
+      // (que passou a usar sempre o preco de tabela).
+      verify(servicoComanda).adicionarItemDoAgendamento(eq(comandaId), itemCaptor.capture());
       assertThat(itemCaptor.getValue().tipo).isEqualTo("SERVICO");
       assertThat(itemCaptor.getValue().referenciaId).isEqualTo(serviceId.toString());
     }

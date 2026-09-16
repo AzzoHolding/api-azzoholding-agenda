@@ -139,12 +139,23 @@ public class ServicoFechamentoCaixa {
     Map<MetodoPagamento, BigDecimal> counted = normalizeCountedTotals(request.countedTotals);
     Map<MetodoPagamento, BigDecimal> difference = calculateDifference(expected, counted);
 
+    // Diferenca sem explicacao e exatamente a assinatura de dinheiro que sumiu: o fechamento fica
+    // gravado com quem contou, quanto faltou e POR QUE — e o "por que" nao pode ser opcional
+    // (achado do teste de ponta a ponta de 2026-09-16). Contagem que bate segue sem exigir nada.
+    String observacoes = normalizeNullable(request.notes);
+    boolean temDiferenca =
+        difference.values().stream().anyMatch(valor -> valor != null && valor.signum() != 0);
+    if (temDiferenca && observacoes == null) {
+      throw new IllegalArgumentException(
+          "Explique a diferenca entre o esperado e o contado antes de fechar o caixa.");
+    }
+
     Map<String, Object> before = buildAuditPayload(fechamento);
 
     fechamento.setStatus(StatusFechamentoCaixa.CLOSED);
     fechamento.setClosedAt(Instant.now());
     fechamento.setClosedBy(authenticatedUser.idOuNulo());
-    fechamento.setClosingNotes(normalizeNullable(request.notes));
+    fechamento.setClosingNotes(observacoes);
     fechamento.setExpectedTotalsJson(writeTotals(expected));
     fechamento.setCountedTotalsJson(writeTotals(counted));
     fechamento.setDifferenceTotalsJson(writeTotals(difference));

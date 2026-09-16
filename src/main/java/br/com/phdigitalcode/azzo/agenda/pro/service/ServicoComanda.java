@@ -4,7 +4,9 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import org.springframework.data.domain.Page;
@@ -34,6 +36,9 @@ import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.TipoMovimentacaoEstoque
 import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.TipoTransacao;
 import br.com.phdigitalcode.azzo.agenda.pro.exception.ApiClientErrorException;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.AsaasClient;
+import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditConstants;
+import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditEventCommand;
+import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditService;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.TenantAsaasChargeService;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.AppointmentDepositRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.ClientPackageBalanceRepository;
@@ -99,6 +104,8 @@ public class ServicoComanda {
   private final TenantLoyaltySettingsRepository tenantLoyaltySettingsRepository;
   private final MovimentacaoEstoqueRepository movimentacaoEstoqueRepository;
 
+  private final AuditService auditService;
+
   public ServicoComanda(
       ContextoTenant contextoTenant,
       AuthenticatedUser authenticatedUser,
@@ -121,7 +128,8 @@ public class ServicoComanda {
       ClientPackagePurchaseRepository clientPackagePurchaseRepository,
       ClientPackageBalanceRepository clientPackageBalanceRepository,
       TenantLoyaltySettingsRepository tenantLoyaltySettingsRepository,
-      MovimentacaoEstoqueRepository movimentacaoEstoqueRepository) {
+      MovimentacaoEstoqueRepository movimentacaoEstoqueRepository,
+      AuditService auditService) {
     this.contextoTenant = contextoTenant;
     this.authenticatedUser = authenticatedUser;
     this.comandaRepository = comandaRepository;
@@ -144,6 +152,7 @@ public class ServicoComanda {
     this.clientPackageBalanceRepository = clientPackageBalanceRepository;
     this.tenantLoyaltySettingsRepository = tenantLoyaltySettingsRepository;
     this.movimentacaoEstoqueRepository = movimentacaoEstoqueRepository;
+    this.auditService = auditService;
   }
 
   @Transactional
@@ -201,6 +210,25 @@ public class ServicoComanda {
   @Transactional
   public ComandaDtos.ComandaResponse adicionarItem(
       UUID id, ComandaDtos.AdicionarItemRequest request) {
+    return adicionarItem(id, request, false);
+  }
+
+  /**
+   * Lanca o item com o preco que vem no pedido, e nao o de tabela.
+   *
+   * <b>So para o fluxo interno</b> da comanda automatica do agendamento ({@code
+   * ServicoAgendamentos.criarComandaComItens}): ali o preco e o que foi ACORDADO com o cliente
+   * naquele atendimento, que pode ser anterior a uma mudanca de tabela. Nao existe rota HTTP para
+   * isto de proposito.
+   */
+  @Transactional
+  public ComandaDtos.ComandaResponse adicionarItemDoAgendamento(
+      UUID id, ComandaDtos.AdicionarItemRequest request) {
+    return adicionarItem(id, request, true);
+  }
+
+  private ComandaDtos.ComandaResponse adicionarItem(
+      UUID id, ComandaDtos.AdicionarItemRequest request, boolean precoDoAgendamento) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Comanda comanda = buscarOuFalhar(id, tenantId);
     exigirAberta(comanda);
@@ -231,8 +259,14 @@ public class ServicoComanda {
               .findByIdAndTenantId(referenciaId, tenantId)
               .orElseThrow(() -> new ApiClientErrorException("Servico nao encontrado.", 404));
       item.setDescricao(servico.getName());
+      // ⚠️ O preco do SERVICO e o do CATALOGO. Aceitar `precoUnitario` de quem chama permitia
+      // lancar um servico de R$ 120 por R$ 1 — e isso NAO aparecia como desconto em relatorio
+      // nenhum (achado do teste de ponta a ponta de 2026-09-16). O preco do pedido so vale no
+      // fluxo interno do agendamento, onde ele e o valor acordado com o cliente.
       item.setPrecoUnitario(
-          request.precoUnitario != null ? request.precoUnitario : servico.getPrice());
+          precoDoAgendamento && request.precoUnitario != null
+              ? request.precoUnitario
+              : servico.getPrice());
     } else if (ComandaItem.TIPO_PRODUTO.equals(request.tipo)) {
       ItemEstoque produto =
           itemEstoqueRepository
@@ -242,6 +276,10 @@ public class ServicoComanda {
       if (request.precoUnitario == null) {
         throw new IllegalArgumentException(
             "Preco de venda e obrigatorio para item do tipo PRODUTO.");
+      }
+      // Produto por R$ 0,00 seria brinde sem registro de brinde: sai do estoque e nao entra no caixa.
+      if (NumericUtil.isZeroOrNegative(request.precoUnitario)) {
+        throw new IllegalArgumentException("Preco de venda do produto precisa ser maior que zero.");
       }
       item.setDescricao(produto.getNome());
       item.setPrecoUnitario(request.precoUnitario);
@@ -263,6 +301,7 @@ public class ServicoComanda {
     comandaItemRepository.flush();
 
     recalcular(comanda);
+    auditar(tenantId, "POS_ITEM_ADD", comanda, null, dadosDoItem(item));
     return obter(id);
   }
 
@@ -277,10 +316,12 @@ public class ServicoComanda {
             .findByIdAndComandaId(itemId, comanda.getId())
             .orElseThrow(
                 () -> new ApiClientErrorException("Item nao encontrado na comanda.", 404));
+    Map<String, Object> antes = dadosDoItem(item);
     comandaItemRepository.delete(item);
     comandaItemRepository.flush();
 
     recalcular(comanda);
+    auditar(tenantId, "POS_ITEM_REMOVE", comanda, antes, null);
     return obter(id);
   }
 
@@ -294,12 +335,14 @@ public class ServicoComanda {
     if (request.percentual.compareTo(new BigDecimal("100")) > 0) {
       throw new IllegalArgumentException("Desconto nao pode ser maior que 100%.");
     }
+    Map<String, Object> antesDoDesconto = dadosDoDesconto(comanda);
     List<ComandaItem> itens = comandaItemRepository.findByComandaIdOrderByCreatedAt(comanda.getId());
     BigDecimal subtotal = somarItens(itens);
     comanda.setDesconto(NumericUtil.percentOf(subtotal, request.percentual.doubleValue()));
     comanda.setDescontoMotivo(request.motivo.trim());
     comanda.setTotal(NumericUtil.maxZero(NumericUtil.subtract(subtotal, comanda.getDesconto())));
 
+    auditar(tenantId, "POS_DISCOUNT_APPLY", comanda, antesDoDesconto, dadosDoDesconto(comanda));
     return toResponse(
         comanda, itens, comandaPagamentoRepository.findByComandaIdOrderByCreatedAt(comanda.getId()));
   }
@@ -318,6 +361,10 @@ public class ServicoComanda {
     comanda.setGorjeta(request.valor);
     comanda.setGorjetaProfessionalId(professionalId);
 
+    Map<String, Object> gorjeta = new HashMap<>();
+    gorjeta.put("valor", request.valor);
+    gorjeta.put("professionalId", professionalId.toString());
+    auditar(tenantId, "POS_TIP_SET", comanda, null, gorjeta);
     return toResponse(
         comanda,
         comandaItemRepository.findByComandaIdOrderByCreatedAt(comanda.getId()),
@@ -351,6 +398,12 @@ public class ServicoComanda {
 
     comandaPagamentoRepository.save(pagamento);
     comandaPagamentoRepository.flush();
+
+    Map<String, Object> dados = new HashMap<>();
+    dados.put("meio", pagamento.getMeio());
+    dados.put("valor", pagamento.getValor());
+    dados.put("status", pagamento.getStatus());
+    auditar(tenantId, "POS_PAYMENT_ADD", comanda, null, dados);
     return obter(id);
   }
 
@@ -511,6 +564,7 @@ public class ServicoComanda {
     comanda.setClosedAt(Instant.now());
     comanda.setFechadaPor(obterUsuarioId());
 
+    auditar(tenantId, "POS_COMANDA_CLOSE", comanda, null, dadosDaComanda(comanda));
     return toResponse(comanda, itens, pagamentos);
   }
 
@@ -803,6 +857,7 @@ public class ServicoComanda {
     comanda.setCancelMotivo(request.motivo.trim());
     comanda.setClosedAt(Instant.now());
 
+    auditar(tenantId, "POS_COMANDA_CANCEL", comanda, null, dadosDaComanda(comanda));
     return toResponse(
         comanda,
         comandaItemRepository.findByComandaIdOrderByCreatedAt(comanda.getId()),
@@ -879,6 +934,8 @@ public class ServicoComanda {
     comanda.setEstornadoEm(agora);
     comanda.setEstornoMotivo(motivo);
 
+    auditar(tenantId, "POS_COMANDA_REVERSE", comanda, null, dadosDaComanda(comanda));
+
     return toResponse(
         comanda,
         itens,
@@ -952,6 +1009,11 @@ public class ServicoComanda {
 
     cliente.setLoyaltyPoints(cliente.getLoyaltyPoints() - request.pontos);
 
+    Map<String, Object> resgate = new HashMap<>();
+    resgate.put("pontos", request.pontos);
+    resgate.put("valorResgate", valorResgate);
+    resgate.put("clientId", comanda.getClientId().toString());
+    auditar(tenantId, "POS_LOYALTY_REDEEM", comanda, null, resgate);
     return obter(id);
   }
 
@@ -1070,5 +1132,70 @@ public class ServicoComanda {
     } catch (Exception e) {
       throw new IllegalArgumentException(message);
     }
+  }
+
+  // ─── Auditoria do caixa aberto ──────────────────────────────────────────────
+
+  /**
+   * Registra quem mexeu no dinheiro desta comanda.
+   *
+   * O PDV era o unico lugar do sistema onde dinheiro mudava de mao SEM trilha: desconto, item
+   * removido, pagamento, fechamento, cancelamento e estorno nao deixavam registro de autor (achado
+   * do teste de ponta a ponta de 2026-09-16). Profissionais, agendamentos e fechamento de caixa
+   * sempre tiveram. Falha de auditoria nunca derruba a operacao — o caixa nao pode parar por isso.
+   */
+  private void auditar(
+      UUID tenantId, String action, Comanda comanda, Object antes, Object depois) {
+    try {
+      AuditEventCommand command = new AuditEventCommand();
+      command.tenantId = tenantId;
+      command.module = AuditConstants.Module.FINANCE;
+      command.action = action;
+      command.entityType = "COMANDA";
+      command.entityId = comanda.getId() != null ? comanda.getId().toString() : null;
+      command.sourceChannel = AuditConstants.SourceChannel.API;
+      command.before = antes;
+      command.after = depois;
+      auditService.recordSuccess(command);
+    } catch (Exception ignored) {
+      // Auditoria nao deve quebrar o fluxo principal.
+    }
+  }
+
+  private Map<String, Object> dadosDaComanda(Comanda comanda) {
+    Map<String, Object> dados = new HashMap<>();
+    dados.put("status", comanda.getStatus());
+    dados.put("subtotal", comanda.getSubtotal());
+    dados.put("desconto", comanda.getDesconto());
+    dados.put("descontoMotivo", comanda.getDescontoMotivo());
+    dados.put("gorjeta", comanda.getGorjeta());
+    dados.put("total", comanda.getTotal());
+    dados.put("clientId", comanda.getClientId() != null ? comanda.getClientId().toString() : null);
+    dados.put(
+        "appointmentId",
+        comanda.getAppointmentId() != null ? comanda.getAppointmentId().toString() : null);
+    return dados;
+  }
+
+  private Map<String, Object> dadosDoItem(ComandaItem item) {
+    Map<String, Object> dados = new HashMap<>();
+    dados.put("itemId", item.getId() != null ? item.getId().toString() : null);
+    dados.put("tipo", item.getTipo());
+    dados.put("descricao", item.getDescricao());
+    dados.put("quantidade", item.getQuantidade());
+    dados.put("precoUnitario", item.getPrecoUnitario());
+    dados.put("total", item.getTotal());
+    dados.put(
+        "professionalId",
+        item.getProfessionalId() != null ? item.getProfessionalId().toString() : null);
+    return dados;
+  }
+
+  private Map<String, Object> dadosDoDesconto(Comanda comanda) {
+    Map<String, Object> dados = new HashMap<>();
+    dados.put("desconto", comanda.getDesconto());
+    dados.put("descontoMotivo", comanda.getDescontoMotivo());
+    dados.put("total", comanda.getTotal());
+    return dados;
   }
 }
