@@ -875,6 +875,41 @@ public class TenantOperationalSettingsService {
   }
 
   // ============================================================
+  // Teto de desconto do PDV (V131)
+  // ============================================================
+
+  @Transactional
+  public SettingsDtos.DiscountPolicyResponse getDiscountPolicy(UUID tenantId) {
+    return toDiscountPolicyResponse(findByTenantIdOrCreate(tenantId));
+  }
+
+  /**
+   * Grava o teto. Fora de 0..100 o pedido e RECUSADO, e nao silenciosamente ignorado como nos
+   * campos antigos daqui: um teto que a tela acha que salvou e o servidor descartou seria pior que
+   * nao ter teto — o dono confiaria num limite inexistente.
+   */
+  @Transactional
+  public SettingsDtos.DiscountPolicyResponse updateDiscountPolicy(
+      UUID tenantId, SettingsDtos.DiscountPolicyRequest request) {
+    TenantOperationalSettings entity = findByTenantIdOrCreate(tenantId);
+    if (request != null && request.maxDiscountPercent != null) {
+      int teto = request.maxDiscountPercent;
+      if (teto < 0 || teto > 100) {
+        throw new IllegalArgumentException("O teto de desconto vai de 0% a 100%.");
+      }
+      entity.setPosMaxDiscountPercent(teto);
+    }
+    return toDiscountPolicyResponse(entity);
+  }
+
+  private SettingsDtos.DiscountPolicyResponse toDiscountPolicyResponse(
+      TenantOperationalSettings entity) {
+    SettingsDtos.DiscountPolicyResponse r = new SettingsDtos.DiscountPolicyResponse();
+    r.maxDiscountPercent = entity.getPosMaxDiscountPercent();
+    return r;
+  }
+
+  // ============================================================
   // Regua de lembretes (F03 — V120)
   // ============================================================
 

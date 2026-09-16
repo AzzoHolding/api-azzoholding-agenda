@@ -23,6 +23,11 @@ public class ComandaItem {
   public static final String TIPO_PRODUTO = "PRODUTO";
   public static final String TIPO_PACOTE = "PACOTE";
 
+  /** De onde o item veio: o agendamento trouxe, ou alguem lancou na mao no PDV. */
+  public static final String ORIGEM_AGENDAMENTO = "AGENDAMENTO";
+
+  public static final String ORIGEM_MANUAL = "MANUAL";
+
   @Id
   @Column(name = "id", nullable = false)
   private UUID id;
@@ -53,6 +58,14 @@ public class ComandaItem {
 
   @Column(name = "total", nullable = false)
   private BigDecimal total;
+
+  /**
+   * Origem do item (V132). Sem isto, o servico que o agendamento trouxe e o lancado a mao ficavam
+   * indistinguiveis — e lancar de novo o mesmo servico cobrava o cliente duas vezes sem que
+   * ninguem visse de onde tinha vindo cada linha.
+   */
+  @Column(name = "origem", nullable = false)
+  private String origem = ORIGEM_MANUAL;
 
   @Column(name = "created_at", nullable = false)
   private Instant createdAt;

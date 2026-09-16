@@ -24,6 +24,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.entity.Comanda;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.ComandaItem;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.ComandaPagamento;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.ItemEstoque;
+import br.com.phdigitalcode.azzo.agenda.pro.entity.Profissional;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.MovimentacaoEstoque;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.ServicePackage;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.ServicePackageItem;
@@ -40,6 +41,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditConstants;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditEventCommand;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditService;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.TenantAsaasChargeService;
+import br.com.phdigitalcode.azzo.agenda.pro.repository.AgendamentoRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.AppointmentDepositRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.ClientPackageBalanceRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.ClientPackagePurchaseRepository;
@@ -54,6 +56,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.repository.ServicePackageItemReposit
 import br.com.phdigitalcode.azzo.agenda.pro.repository.ServicePackageRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.ServicoRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.TenantLoyaltySettingsRepository;
+import br.com.phdigitalcode.azzo.agenda.pro.repository.TenantOperationalSettingsRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.TransacaoRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.TransactionCategoryRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.security.AuthenticatedUser;
@@ -103,6 +106,8 @@ public class ServicoComanda {
   private final ClientPackageBalanceRepository clientPackageBalanceRepository;
   private final TenantLoyaltySettingsRepository tenantLoyaltySettingsRepository;
   private final MovimentacaoEstoqueRepository movimentacaoEstoqueRepository;
+  private final TenantOperationalSettingsRepository tenantOperationalSettingsRepository;
+  private final AgendamentoRepository agendamentoRepository;
 
   private final AuditService auditService;
 
@@ -129,6 +134,8 @@ public class ServicoComanda {
       ClientPackageBalanceRepository clientPackageBalanceRepository,
       TenantLoyaltySettingsRepository tenantLoyaltySettingsRepository,
       MovimentacaoEstoqueRepository movimentacaoEstoqueRepository,
+      TenantOperationalSettingsRepository tenantOperationalSettingsRepository,
+      AgendamentoRepository agendamentoRepository,
       AuditService auditService) {
     this.contextoTenant = contextoTenant;
     this.authenticatedUser = authenticatedUser;
@@ -152,6 +159,8 @@ public class ServicoComanda {
     this.clientPackageBalanceRepository = clientPackageBalanceRepository;
     this.tenantLoyaltySettingsRepository = tenantLoyaltySettingsRepository;
     this.movimentacaoEstoqueRepository = movimentacaoEstoqueRepository;
+    this.tenantOperationalSettingsRepository = tenantOperationalSettingsRepository;
+    this.agendamentoRepository = agendamentoRepository;
     this.auditService = auditService;
   }
 
@@ -174,11 +183,23 @@ public class ServicoComanda {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     int pageSize = size > 0 ? size : 20;
     Pageable pageable = PageRequest.of(Math.max(page, 0), pageSize);
-    Page<Comanda> pagina =
-        (status != null && !status.isBlank())
-            ? comandaRepository.findByTenantIdAndStatusOrderByOpenedAtDesc(
-                tenantId, status, pageable)
-            : comandaRepository.findByTenantIdOrderByOpenedAtDesc(tenantId, pageable);
+    String statusFiltrado = (status != null && !status.isBlank()) ? status : null;
+    UUID profissionalId = profissionalDoUsuarioLogado(tenantId);
+
+    Page<Comanda> pagina;
+    if (profissionalId != null) {
+      // Profissional ve so as comandas dele — as que abriu, as com item dele e as do
+      // agendamento dele.
+      pagina =
+          comandaRepository.listarDoProfissional(
+              tenantId, statusFiltrado, obterUsuarioId(), profissionalId, pageable);
+    } else if (statusFiltrado != null) {
+      pagina =
+          comandaRepository.findByTenantIdAndStatusOrderByOpenedAtDesc(
+              tenantId, statusFiltrado, pageable);
+    } else {
+      pagina = comandaRepository.findByTenantIdOrderByOpenedAtDesc(tenantId, pageable);
+    }
 
     ComandaDtos.ComandaPageResponse response = new ComandaDtos.ComandaPageResponse();
     response.totalElements = pagina.getTotalElements();
@@ -201,6 +222,7 @@ public class ServicoComanda {
   public ComandaDtos.ComandaResponse obter(UUID id) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Comanda comanda = buscarOuFalhar(id, tenantId);
+    exigirComandaDoProfissional(tenantId, comanda);
     return toResponse(
         comanda,
         comandaItemRepository.findByComandaIdOrderByCreatedAt(comanda.getId()),
@@ -231,6 +253,7 @@ public class ServicoComanda {
       UUID id, ComandaDtos.AdicionarItemRequest request, boolean precoDoAgendamento) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Comanda comanda = buscarOuFalhar(id, tenantId);
+    exigirComandaDoProfissional(tenantId, comanda);
     exigirAberta(comanda);
 
     if (ComandaItem.TIPO_PACOTE.equals(request.tipo) && comanda.getClientId() == null) {
@@ -245,11 +268,15 @@ public class ServicoComanda {
       throw new IllegalArgumentException("Profissional nao encontrado.");
     }
 
+    exigirConfirmacaoDeDuplicado(comanda, request, referenciaId);
+
     ComandaItem item = new ComandaItem();
     item.setTenantId(tenantId);
     item.setComandaId(comanda.getId());
     item.setTipo(request.tipo);
     item.setReferenciaId(referenciaId);
+    item.setOrigem(
+        precoDoAgendamento ? ComandaItem.ORIGEM_AGENDAMENTO : ComandaItem.ORIGEM_MANUAL);
     item.setProfessionalId(professionalId);
     item.setQuantidade(request.quantidade != null ? request.quantidade : BigDecimal.ONE);
 
@@ -309,6 +336,7 @@ public class ServicoComanda {
   public ComandaDtos.ComandaResponse removerItem(UUID id, UUID itemId) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Comanda comanda = buscarOuFalhar(id, tenantId);
+    exigirComandaDoProfissional(tenantId, comanda);
     exigirAberta(comanda);
 
     ComandaItem item =
@@ -330,11 +358,13 @@ public class ServicoComanda {
       UUID id, ComandaDtos.AplicarDescontoRequest request) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Comanda comanda = buscarOuFalhar(id, tenantId);
+    exigirComandaDoProfissional(tenantId, comanda);
     exigirAberta(comanda);
 
     if (request.percentual.compareTo(new BigDecimal("100")) > 0) {
       throw new IllegalArgumentException("Desconto nao pode ser maior que 100%.");
     }
+    exigirTetoDeDesconto(tenantId, request.percentual);
     Map<String, Object> antesDoDesconto = dadosDoDesconto(comanda);
     List<ComandaItem> itens = comandaItemRepository.findByComandaIdOrderByCreatedAt(comanda.getId());
     BigDecimal subtotal = somarItens(itens);
@@ -347,11 +377,34 @@ public class ServicoComanda {
         comanda, itens, comandaPagamentoRepository.findByComandaIdOrderByCreatedAt(comanda.getId()));
   }
 
+  /**
+   * O teto de desconto da equipe (V131), configurado pelo dono em {@code /settings/discount-policy}.
+   *
+   * <p>Antes disso, qualquer papel zerava uma conta de R$ 500 com 100% de desconto e um motivo
+   * digitado a mao — era o caminho mais curto para atender de graca quem se quer agradar, ou para
+   * cobrar por fora (achado do teste de ponta a ponta de 2026-09-16). O DONO continua sem limite:
+   * o dinheiro e dele, e alguem precisa poder dar a cortesia de verdade.
+   *
+   * <p>Padrao 100 = sem teto, para nenhum salao perder o desconto que ja dava por causa do deploy.
+   */
+  private void exigirTetoDeDesconto(UUID tenantId, BigDecimal percentual) {
+    if (authenticatedUser.temRole("OWNER")) return;
+
+    int teto = tenantOperationalSettingsRepository.findByTenantIdOrCreate(tenantId)
+        .getPosMaxDiscountPercent();
+    if (teto >= 100) return;
+    if (percentual.compareTo(new BigDecimal(teto)) <= 0) return;
+
+    throw new IllegalArgumentException(
+        "O desconto maximo sem o dono e de " + teto + "%. Chame o dono para dar mais que isso.");
+  }
+
   @Transactional
   public ComandaDtos.ComandaResponse registrarGorjeta(
       UUID id, ComandaDtos.RegistrarGorjetaRequest request) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Comanda comanda = buscarOuFalhar(id, tenantId);
+    exigirComandaDoProfissional(tenantId, comanda);
     exigirAberta(comanda);
 
     UUID professionalId = parseUuidOrThrow(request.professionalId, "professionalId invalido.");
@@ -376,6 +429,7 @@ public class ServicoComanda {
       UUID id, ComandaDtos.RegistrarPagamentoRequest request) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Comanda comanda = buscarOuFalhar(id, tenantId);
+    exigirComandaDoProfissional(tenantId, comanda);
     exigirAberta(comanda);
 
     ComandaPagamento pagamento = new ComandaPagamento();
@@ -475,6 +529,7 @@ public class ServicoComanda {
         comandaRepository
             .findByIdAndTenantParaAtualizacao(id, tenantId)
             .orElseThrow(() -> new ApiClientErrorException("Comanda nao encontrada.", 404));
+    exigirComandaDoProfissional(tenantId, comanda);
     exigirAberta(comanda);
 
     List<ComandaItem> itens = comandaItemRepository.findByComandaIdOrderByCreatedAt(comanda.getId());
@@ -834,6 +889,7 @@ public class ServicoComanda {
       UUID id, ComandaDtos.CancelarComandaRequest request) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Comanda comanda = buscarOuFalhar(id, tenantId);
+    exigirComandaDoProfissional(tenantId, comanda);
     exigirAberta(comanda);
 
     List<ComandaPagamento> pagamentos =
@@ -973,6 +1029,7 @@ public class ServicoComanda {
       UUID id, ComandaDtos.ResgatarFidelidadeRequest request) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Comanda comanda = buscarOuFalhar(id, tenantId);
+    exigirComandaDoProfissional(tenantId, comanda);
     exigirAberta(comanda);
 
     if (comanda.getClientId() == null) {
@@ -1032,6 +1089,90 @@ public class ServicoComanda {
     if (!Comanda.STATUS_ABERTA.equals(comanda.getStatus())) {
       throw new IllegalArgumentException("Comanda nao esta aberta.");
     }
+  }
+
+  /**
+   * O profissional do salao, quando quem chamou E um profissional e nada mais.
+   *
+   * <p>Devolve {@code null} para o dono, a recepcao (STAFF) e o ADMIN — eles veem o salao inteiro,
+   * que e o trabalho deles. Tambem devolve {@code null} quando o login nao esta ligado a nenhum
+   * cadastro de profissional: nesse caso nao existe "comanda dele" para delimitar, e o papel
+   * sozinho ja foi conferido no controller.
+   */
+  private UUID profissionalDoUsuarioLogado(UUID tenantId) {
+    if (!authenticatedUser.temRole("PROFESSIONAL")) return null;
+    if (authenticatedUser.temRole("OWNER")
+        || authenticatedUser.temRole("STAFF")
+        || authenticatedUser.temRole("ADMIN")) {
+      return null;
+    }
+    UUID usuarioId = obterUsuarioId();
+    if (usuarioId == null) return null;
+    return profissionalRepository
+        .findByTenantIdAndUserId(tenantId, usuarioId)
+        .map(Profissional::getId)
+        .orElse(null);
+  }
+
+  /**
+   * Um profissional so mexe na comanda DELE (achado do teste de ponta a ponta de 2026-09-16: ele
+   * lia, lancava item, dava desconto e recebia pagamento na comanda de qualquer colega — e podia
+   * mandar a comissao do item para quem quisesse).
+   *
+   * <p>"Dele" e: ele abriu, tem item dele, ou e do agendamento dele. Responde 404, e nao 403, pelo
+   * motivo de sempre: "existe, mas nao e sua" ja conta o que ele nao deveria saber.
+   */
+  private void exigirComandaDoProfissional(UUID tenantId, Comanda comanda) {
+    UUID profissionalId = profissionalDoUsuarioLogado(tenantId);
+    if (profissionalId == null) return;
+
+    if (comanda.getAbertaPor() != null && comanda.getAbertaPor().equals(obterUsuarioId())) return;
+    if (comandaItemRepository.findByComandaIdOrderByCreatedAt(comanda.getId()).stream()
+        .anyMatch(item -> profissionalId.equals(item.getProfessionalId()))) {
+      return;
+    }
+    if (comanda.getAppointmentId() != null
+        && agendamentoRepository
+            .findByIdAndTenantId(comanda.getAppointmentId(), tenantId)
+            .map(agendamento -> profissionalId.equals(agendamento.getProfessionalId()))
+            .orElse(false)) {
+      return;
+    }
+    throw new ApiClientErrorException("Comanda nao encontrada.", 404);
+  }
+
+  /**
+   * Item repetido precisa de confirmacao (V132).
+   *
+   * <p>O agendamento ja lanca os servicos dele na comanda; lancar o mesmo servico de novo na tela
+   * cobrava o cliente duas vezes sem aviso nenhum. O caso legitimo existe (dois cortes na mesma
+   * conta), entao a segunda linha igual e recusada UMA vez, dizendo o que a comanda ja tem, e
+   * passa quando o pedido vem com {@code confirmarDuplicado}.
+   */
+  private void exigirConfirmacaoDeDuplicado(
+      Comanda comanda, ComandaDtos.AdicionarItemRequest request, UUID referenciaId) {
+    if (Boolean.TRUE.equals(request.confirmarDuplicado)) return;
+
+    ComandaItem repetido =
+        comandaItemRepository.findByComandaIdOrderByCreatedAt(comanda.getId()).stream()
+            .filter(
+                item ->
+                    request.tipo.equals(item.getTipo())
+                        && referenciaId.equals(item.getReferenciaId()))
+            .findFirst()
+            .orElse(null);
+    if (repetido == null) return;
+
+    String origem =
+        ComandaItem.ORIGEM_AGENDAMENTO.equals(repetido.getOrigem())
+            ? " (veio do agendamento)"
+            : "";
+    throw new IllegalArgumentException(
+        "Esta comanda ja tem \""
+            + repetido.getDescricao()
+            + "\""
+            + origem
+            + ". Confirme se e para cobrar duas vezes.");
   }
 
   void exigirFechada(Comanda comanda) {
@@ -1098,6 +1239,7 @@ public class ServicoComanda {
     r.quantidade = item.getQuantidade();
     r.precoUnitario = item.getPrecoUnitario();
     r.total = item.getTotal();
+    r.origem = item.getOrigem();
     return r;
   }
 

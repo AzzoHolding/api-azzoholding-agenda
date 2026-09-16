@@ -391,20 +391,42 @@ public class ServicoCatalogoRelatorios {
           ORDER BY valor DESC
           LIMIT :limit OFFSET :offset
           """);
+      // Uma LINHA POR CONTA, e nao o total por motivo (2026-09-16).
+      //
+      // O agregado dizia "R$ 2.400 em 'cortesia'" e escondia justamente o que o dono precisa
+      // olhar: QUAL conta, de QUAL cliente, por QUEM, e se a conta foi ZERADA. Cortesia de 100%
+      // e a forma mais limpa de atender de graca quem se quer agradar — ou de cobrar por fora —,
+      // entao ela vem marcada e o relatorio ordena pelo desconto maior.
       case "descontos" -> definitionSimple(
           key,
-          "Descontos concedidos",
+          "Descontos e cortesias",
           List.of("comanda"),
-          List.of("operador_id", "motivo", "quantidade", "valor_desconto"),
+          List.of(
+              "data",
+              "cliente",
+              "operador",
+              "subtotal",
+              "valor_desconto",
+              "percentual",
+              "cortesia",
+              "motivo"),
           """
-          SELECT c.fechada_por::text, COALESCE(NULLIF(c.desconto_motivo, ''), 'Sem motivo'), COUNT(*)::int, COALESCE(SUM(c.desconto), 0)
+          SELECT c.closed_at::date::text,
+                 COALESCE(cl.name, 'Venda avulsa'),
+                 COALESCE(u.name, 'Nao identificado'),
+                 c.subtotal,
+                 c.desconto,
+                 ROUND(c.desconto * 100.0 / NULLIF(c.subtotal, 0), 2),
+                 CASE WHEN c.desconto >= c.subtotal THEN 'Sim' ELSE 'Nao' END,
+                 COALESCE(NULLIF(c.desconto_motivo, ''), 'Sem motivo')
           FROM comandas c
+          LEFT JOIN clients cl ON cl.id = c.client_id AND cl.tenant_id = c.tenant_id
+          LEFT JOIN users u ON u.id = COALESCE(c.fechada_por, c.aberta_por)
           WHERE c.tenant_id = :tenantId
             AND c.status = 'FECHADA'
             AND c.closed_at::date BETWEEN :dataInicio AND :dataFim
             AND c.desconto > 0
-          GROUP BY c.fechada_por, COALESCE(NULLIF(c.desconto_motivo, ''), 'Sem motivo')
-          ORDER BY 4 DESC
+          ORDER BY c.desconto DESC, c.closed_at DESC
           LIMIT :limit OFFSET :offset
           """);
       case "comissoes-periodo" -> definitionSimple(

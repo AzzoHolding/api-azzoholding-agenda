@@ -161,6 +161,19 @@ public class ServicoSettings {
     return tenantOperationalSettingsService.updateCancellationPolicy(tenantId, request);
   }
 
+  // Teto de desconto do PDV — V131
+
+  public SettingsDtos.DiscountPolicyResponse obterDiscountPolicy() {
+    UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    return tenantOperationalSettingsService.getDiscountPolicy(tenantId);
+  }
+
+  public SettingsDtos.DiscountPolicyResponse atualizarDiscountPolicy(
+      SettingsDtos.DiscountPolicyRequest request) {
+    UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    return tenantOperationalSettingsService.updateDiscountPolicy(tenantId, request);
+  }
+
   // Regua de lembretes — F03
 
   public SettingsDtos.ReminderSettingsResponse obterReminderSettings() {

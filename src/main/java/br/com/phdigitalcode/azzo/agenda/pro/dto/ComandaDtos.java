@@ -36,6 +36,13 @@ public final class ComandaDtos {
 
     /** Obrigatorio para PRODUTO; para SERVICO usa o preco de tabela se omitido. */
     public BigDecimal precoUnitario;
+
+    /**
+     * "Sim, e de proposito": lancar de novo um item que a comanda ja tem e RECUSADO ate alguem
+     * confirmar. O caso legitimo existe (dois cortes na mesma conta), o acidente tambem — e o
+     * acidente cobra o cliente duas vezes.
+     */
+    public Boolean confirmarDuplicado;
   }
 
   public static class AplicarDescontoRequest {
@@ -86,6 +93,9 @@ public final class ComandaDtos {
     public BigDecimal quantidade;
     public BigDecimal precoUnitario;
     public BigDecimal total;
+
+    /** AGENDAMENTO ou MANUAL (V132): a tela mostra de onde a linha veio. */
+    public String origem;
   }
 
   public static class ComandaPagamentoResponse {

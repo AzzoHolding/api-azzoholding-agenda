@@ -154,6 +154,25 @@ public class SettingsController {
     return servicoSettings.atualizarCancellationPolicy(request);
   }
 
+  // ---- Teto de desconto do PDV — V131 ----
+
+  /**
+   * A LEITURA do teto e aberta a quem opera o PDV (OWNER, PROFESSIONAL, STAFF): a tela da comanda
+   * precisa dizer o limite ANTES de a pessoa digitar um desconto que o servidor vai recusar.
+   * Escrever continua so do dono — e o dono que decide quanto a equipe pode dar.
+   */
+  @GetMapping("/discount-policy")
+  @PreAuthorize("hasAnyRole('OWNER', 'PROFESSIONAL', 'STAFF')")
+  public SettingsDtos.DiscountPolicyResponse obterDiscountPolicy() {
+    return servicoSettings.obterDiscountPolicy();
+  }
+
+  @PutMapping("/discount-policy")
+  public SettingsDtos.DiscountPolicyResponse atualizarDiscountPolicy(
+      @Valid @RequestBody SettingsDtos.DiscountPolicyRequest request) {
+    return servicoSettings.atualizarDiscountPolicy(request);
+  }
+
   // ---- Regua de lembretes de agendamento — F03 ----
 
   @GetMapping("/reminders")

@@ -38,6 +38,38 @@ public interface ComandaRepository extends JpaRepository<Comanda, UUID> {
       UUID tenantId, String status, Pageable pageable);
 
   /**
+   * As comandas que UM PROFISSIONAL pode ver: as que ele abriu, as que tem item dele e as do
+   * agendamento dele. O resto do salao nao e assunto dele (achado do teste de ponta a ponta de
+   * 2026-09-16 — um profissional lia e mexia na comanda de qualquer colega).
+   *
+   * <p>A recepcao (STAFF) e o dono continuam vendo tudo: e o trabalho deles.
+   */
+  @Query(
+      """
+      select c from Comanda c
+      where c.tenantId = :tenantId
+        and (:status is null or c.status = :status)
+        and (
+          c.abertaPor = :userId
+          or exists (
+            select 1 from ComandaItem i
+            where i.comandaId = c.id and i.professionalId = :professionalId
+          )
+          or exists (
+            select 1 from Agendamento a
+            where a.id = c.appointmentId and a.professionalId = :professionalId
+          )
+        )
+      order by c.openedAt desc
+      """)
+  Page<Comanda> listarDoProfissional(
+      @Param("tenantId") UUID tenantId,
+      @Param("status") String status,
+      @Param("userId") UUID userId,
+      @Param("professionalId") UUID professionalId,
+      Pageable pageable);
+
+  /**
    * Usado para checar se um agendamento ja teve comanda aberta (idempotencia da abertura
    * automatica) e para evitar duplicar receita entre Agendamento e Comanda.
    */
