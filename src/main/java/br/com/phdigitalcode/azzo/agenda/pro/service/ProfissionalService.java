@@ -1,5 +1,6 @@
 package br.com.phdigitalcode.azzo.agenda.pro.service;
 
+import java.math.BigDecimal;
 import java.security.SecureRandom;
 import java.time.Instant;
 import java.time.LocalTime;
@@ -347,7 +348,15 @@ public class ProfissionalService {
     p.setPhone(req.phone);
     p.setAvatar(req.avatar);
     p.setSpecialties(resolveSpecialties(tenantId, req.specialties));
-    p.setCommissionRate(req.commissionRate);
+    // A coluna `commission_rate` e NOT NULL (como no original Quarkus): "sem comissao" se
+    // grava como ZERO, nao como ausente. Cliente que manda `null` — a tela manda quando o campo
+    // fica em branco — derrubava o cadastro com 400 generico ("null value in column
+    // commission_rate", producao 2026-09-16). Ausente na edicao MANTEM o que ja estava.
+    if (req.commissionRate != null) {
+      p.setCommissionRate(req.commissionRate);
+    } else if (p.getCommissionRate() == null) {
+      p.setCommissionRate(BigDecimal.ZERO);
+    }
     p.setActive(req.isActive);
     // Ausente mantem o que ja estava (e o cadastro nasce com o padrao da entidade, TRUE): um
     // cliente antigo que nao conhece o campo nao pode tirar ninguem da agenda.
