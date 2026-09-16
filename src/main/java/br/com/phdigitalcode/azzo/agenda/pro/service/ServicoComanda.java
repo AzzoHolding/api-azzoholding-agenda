@@ -925,8 +925,9 @@ public class ServicoComanda {
    * — mesmo padrao de {@code ServicoFinanceiro.deletar}, preserva o lancamento original para
    * auditoria), devolve estoque de itens PRODUTO e insumo consumido por itens SERVICO, reverte a
    * comissao gerada por cada item e o credito de fidelidade daquela venda (usa o numero exato de
-   * pontos guardado no fechamento, nao recalcula), e remove pacote/saldo vendido junto. Nao existe
-   * caminho de volta: uma comanda ESTORNADA fica assim para sempre.
+   * pontos guardado no fechamento, nao recalcula), solta o SINAL usado como credito (o deposito
+   * volta a valer para o agendamento) e remove pacote/saldo vendido junto. Nao existe caminho de
+   * volta: uma comanda ESTORNADA fica assim para sempre.
    */
   @Transactional
   public ComandaDtos.ComandaResponse estornar(
@@ -961,6 +962,20 @@ public class ServicoComanda {
         // Comissao de SERVICO avulso usa o proprio item como chave de origem (ver fechar()).
         commissionService.reverseEntryForOrigin(tenantId, "SERVICE", item.getId(), motivo);
         reverterConsumoInsumoItem(tenantId, item, motivo);
+      }
+    }
+
+    // O SINAL volta a valer. O `cancelar` ja soltava o deposito; o estorno nao — e o cliente que
+    // pagou sinal e teve a comanda estornada ficava sem a venda E sem o credito, com o deposito
+    // preso numa comanda que nao existe mais (achado do roteiro de ponta a ponta de 2026-09-16).
+    for (ComandaPagamento pagamento :
+        comandaPagamentoRepository.findByComandaIdOrderByCreatedAt(comanda.getId())) {
+      if (ComandaPagamento.MEIO_CREDITO_SINAL.equals(pagamento.getMeio())
+          && pagamento.getAppointmentDepositId() != null) {
+        appointmentDepositRepository
+            .findById(pagamento.getAppointmentDepositId())
+            .filter(deposito -> comanda.getId().equals(deposito.getUsedInComandaId()))
+            .ifPresent(deposito -> deposito.setUsedInComandaId(null));
       }
     }
 
