@@ -874,6 +874,43 @@ class ServicoComandaTest {
     assertThat(comanda.getEstornadoPor()).isEqualTo(usuarioId);
   }
 
+  /**
+   * O SINAL volta a valer no estorno.
+   *
+   * O `cancelar` ja soltava o deposito; o estorno nao — e o cliente que pagou sinal e teve a
+   * comanda estornada ficava sem a venda E sem o credito, com o deposito preso numa comanda que nao
+   * existe mais (achado do roteiro de ponta a ponta de 2026-09-16).
+   */
+  @Test
+  void estornarSoltaOSinalUsadoComoCredito() {
+    Comanda comanda = comanda(Comanda.STATUS_FECHADA);
+    when(transacaoRepository.listarAtivasPorComanda(any(), any())).thenReturn(List.of());
+
+    AppointmentDeposit deposito = new AppointmentDeposit();
+    deposito.setId(UUID.randomUUID());
+    deposito.setTenantId(tenantId);
+    deposito.setUsedInComandaId(comandaId);
+    when(appointmentDepositRepository.findById(eq(deposito.getId())))
+        .thenReturn(Optional.of(deposito));
+
+    ComandaPagamento comSinal = new ComandaPagamento();
+    comSinal.setId(UUID.randomUUID());
+    comSinal.setComandaId(comandaId);
+    comSinal.setMeio(ComandaPagamento.MEIO_CREDITO_SINAL);
+    comSinal.setValor(new BigDecimal("50.00"));
+    comSinal.setAppointmentDepositId(deposito.getId());
+    when(comandaPagamentoRepository.findByComandaIdOrderByCreatedAt(eq(comandaId)))
+        .thenReturn(List.of(comSinal));
+
+    ComandaDtos.EstornarComandaRequest req = new ComandaDtos.EstornarComandaRequest();
+    req.motivo = "cobranca duplicada";
+
+    service.estornar(comandaId, req);
+
+    assertThat(deposito.getUsedInComandaId()).isNull();
+    assertThat(comanda.getStatus()).isEqualTo(Comanda.STATUS_ESTORNADA);
+  }
+
   @Test
   void estornarRemoveCompraDePacoteESeusSaldos() {
     comanda(Comanda.STATUS_FECHADA);
