@@ -27,6 +27,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.repository.SpecialtyRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.UsuarioRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.security.ContextoTenant;
 import br.com.phdigitalcode.azzo.agenda.pro.security.PasswordPolicyValidator;
+import java.math.BigDecimal;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -162,5 +163,29 @@ class ProfissionalAceitaAgendamentoTest {
         .countFutureActiveForProfessional(eq(TENANT), eq(p.getId()), status.capture(), any(), anyString());
     assertThat(status.getValue())
         .containsExactlyInAnyOrder(StatusAgendamento.PENDING, StatusAgendamento.CONFIRMED);
+  }
+
+  /**
+   * A tela manda `commissionRate: null` quando o campo fica em branco, e a coluna e NOT NULL: em
+   * producao (2026-09-16) todo cadastro sem comissao morria com "null value in column
+   * commission_rate" e a mensagem generica de erro inesperado.
+   */
+  @Test
+  @DisplayName("comissao ausente vira zero no cadastro e mantem o valor na edicao")
+  void comissaoAusenteNaoViraNula() {
+    Profissional novo = profissional("Ana", true);
+    novo.setCommissionRate(null);
+    when(profissionalRepository.findByIdAndTenantId(novo.getId(), TENANT)).thenReturn(Optional.of(novo));
+
+    service.atualizar(novo.getId(), edicao("Ana"));
+    assertThat(novo.getCommissionRate()).isEqualByComparingTo(BigDecimal.ZERO);
+
+    Profissional comComissao = profissional("Bia", true);
+    comComissao.setCommissionRate(new BigDecimal("40.00"));
+    when(profissionalRepository.findByIdAndTenantId(comComissao.getId(), TENANT))
+        .thenReturn(Optional.of(comComissao));
+
+    service.atualizar(comComissao.getId(), edicao("Bia"));
+    assertThat(comComissao.getCommissionRate()).isEqualByComparingTo(new BigDecimal("40.00"));
   }
 }
