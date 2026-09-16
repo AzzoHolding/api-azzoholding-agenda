@@ -2152,7 +2152,9 @@ public class ServicoAgendamentos {
           agendamento.getProfessionalId() != null ? agendamento.getProfessionalId().toString() : null;
       itemRequest.quantidade = BigDecimal.valueOf(item.getQuantity());
       itemRequest.precoUnitario = item.getUnitPrice();
-      servicoComanda.adicionarItem(UUID.fromString(comanda.id), itemRequest);
+      // Caminho interno: aqui o preco do pedido VALE — e o acordado com o cliente naquele
+      // atendimento. A rota HTTP do PDV usa o preco de tabela (ver ServicoComanda).
+      servicoComanda.adicionarItemDoAgendamento(UUID.fromString(comanda.id), itemRequest);
     }
 
     LOG.info(

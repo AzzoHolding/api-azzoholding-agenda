@@ -28,6 +28,8 @@ import br.com.phdigitalcode.azzo.agenda.pro.entity.ClientPackageBalance;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.ClientPackagePurchase;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.Cliente;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.Comanda;
+import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditEventCommand;
+import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditService;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.ComandaItem;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.ComandaPagamento;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.ItemEstoque;
@@ -85,6 +87,7 @@ class ServicoComandaTest {
   private ClientPackageBalanceRepository clientPackageBalanceRepository;
   private TenantLoyaltySettingsRepository tenantLoyaltySettingsRepository;
   private MovimentacaoEstoqueRepository movimentacaoEstoqueRepository;
+  private AuditService auditService;
   private ServicoComanda service;
 
   private final UUID tenantId = UUID.randomUUID();
@@ -116,6 +119,7 @@ class ServicoComandaTest {
     clientPackageBalanceRepository = mock(ClientPackageBalanceRepository.class);
     tenantLoyaltySettingsRepository = mock(TenantLoyaltySettingsRepository.class);
     movimentacaoEstoqueRepository = mock(MovimentacaoEstoqueRepository.class);
+    auditService = mock(AuditService.class);
 
     ContextoTenant contextoTenant = mock(ContextoTenant.class);
     when(contextoTenant.obterTenantIdOuFalhar()).thenReturn(tenantId);
@@ -190,7 +194,8 @@ class ServicoComandaTest {
             clientPackagePurchaseRepository,
             clientPackageBalanceRepository,
             tenantLoyaltySettingsRepository,
-            movimentacaoEstoqueRepository);
+            movimentacaoEstoqueRepository,
+            auditService);
   }
 
   // ---------------------------------------------------------------- helpers
@@ -971,5 +976,116 @@ class ServicoComandaTest {
     assertThatThrownBy(() -> service.resgatarFidelidade(comandaId, req))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessage("Programa de fidelidade nao esta ativo.");
+  }
+
+  // ─── Preco de tabela e trilha de auditoria (achados do E2E de 2026-09-16) ───
+
+  /**
+   * O preco do servico e o do CATALOGO: aceitar o do pedido permitia lancar um servico de R$ 70 por
+   * R$ 1 — sem aparecer como desconto em relatorio nenhum.
+   */
+  @Test
+  void precoDeServicoIgnoraOQueVeioNoPedido() {
+    comanda(Comanda.STATUS_ABERTA);
+    servicoDeTabela();
+
+    ComandaDtos.AdicionarItemRequest req = new ComandaDtos.AdicionarItemRequest();
+    req.tipo = ComandaItem.TIPO_SERVICO;
+    req.referenciaId = serviceId.toString();
+    req.precoUnitario = new BigDecimal("1.00");
+
+    service.adicionarItem(comandaId, req);
+
+    ArgumentCaptor<ComandaItem> captor = ArgumentCaptor.forClass(ComandaItem.class);
+    verify(comandaItemRepository).save(captor.capture());
+    assertThat(captor.getValue().getPrecoUnitario()).isEqualByComparingTo("70.00");
+  }
+
+  /** No fluxo interno do agendamento o preco do pedido VALE: e o acordado com o cliente. */
+  @Test
+  void precoDoAgendamentoContinuaValendoNoFluxoInterno() {
+    comanda(Comanda.STATUS_ABERTA);
+    servicoDeTabela();
+
+    ComandaDtos.AdicionarItemRequest req = new ComandaDtos.AdicionarItemRequest();
+    req.tipo = ComandaItem.TIPO_SERVICO;
+    req.referenciaId = serviceId.toString();
+    req.precoUnitario = new BigDecimal("55.00");
+
+    service.adicionarItemDoAgendamento(comandaId, req);
+
+    ArgumentCaptor<ComandaItem> captor = ArgumentCaptor.forClass(ComandaItem.class);
+    verify(comandaItemRepository).save(captor.capture());
+    assertThat(captor.getValue().getPrecoUnitario()).isEqualByComparingTo("55.00");
+  }
+
+  /** Produto por R$ 0,00 seria brinde sem registro: sai do estoque e nao entra no caixa. */
+  @Test
+  void produtoComPrecoZeroEhRecusado() {
+    comanda(Comanda.STATUS_ABERTA);
+    ItemEstoque produto = new ItemEstoque();
+    produto.setId(serviceId);
+    produto.setTenantId(tenantId);
+    produto.setNome("Shampoo");
+    when(itemEstoqueRepository.findByIdAndTenantId(eq(serviceId), eq(tenantId)))
+        .thenReturn(Optional.of(produto));
+
+    ComandaDtos.AdicionarItemRequest req = new ComandaDtos.AdicionarItemRequest();
+    req.tipo = ComandaItem.TIPO_PRODUTO;
+    req.referenciaId = serviceId.toString();
+    req.precoUnitario = BigDecimal.ZERO;
+
+    assertThatThrownBy(() -> service.adicionarItem(comandaId, req))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("Preco de venda do produto precisa ser maior que zero.");
+    verify(comandaItemRepository, never()).save(any());
+  }
+
+  /**
+   * O PDV era o unico lugar do sistema onde dinheiro mudava de mao sem trilha. Desconto e o caso
+   * mais sensivel: e por ele que se zera uma conta.
+   */
+  @Test
+  void descontoDeixaTrilhaDeQuemDeu() {
+    Comanda aberta = comanda(Comanda.STATUS_ABERTA);
+    aberta.setSubtotal(new BigDecimal("100.00"));
+
+    ComandaDtos.AplicarDescontoRequest req = new ComandaDtos.AplicarDescontoRequest();
+    req.percentual = new BigDecimal("100");
+    req.motivo = "cortesia";
+
+    service.aplicarDesconto(comandaId, req);
+
+    ArgumentCaptor<AuditEventCommand> captor = ArgumentCaptor.forClass(AuditEventCommand.class);
+    verify(auditService).recordSuccess(captor.capture());
+    AuditEventCommand evento = captor.getValue();
+    assertThat(evento.action).isEqualTo("POS_DISCOUNT_APPLY");
+    assertThat(evento.entityType).isEqualTo("COMANDA");
+    assertThat(evento.entityId).isEqualTo(comandaId.toString());
+  }
+
+  @Test
+  void pagamentoDeixaTrilha() {
+    comanda(Comanda.STATUS_ABERTA);
+
+    ComandaDtos.RegistrarPagamentoRequest req = new ComandaDtos.RegistrarPagamentoRequest();
+    req.meio = ComandaPagamento.MEIO_DINHEIRO;
+    req.valor = new BigDecimal("50.00");
+
+    service.registrarPagamento(comandaId, req);
+
+    ArgumentCaptor<AuditEventCommand> captor = ArgumentCaptor.forClass(AuditEventCommand.class);
+    verify(auditService).recordSuccess(captor.capture());
+    assertThat(captor.getValue().action).isEqualTo("POS_PAYMENT_ADD");
+  }
+
+  private void servicoDeTabela() {
+    Servico servico = new Servico();
+    servico.setId(serviceId);
+    servico.setTenantId(tenantId);
+    servico.setName("Corte");
+    servico.setPrice(new BigDecimal("70.00"));
+    when(servicoRepository.findByIdAndTenantId(eq(serviceId), eq(tenantId)))
+        .thenReturn(Optional.of(servico));
   }
 }
