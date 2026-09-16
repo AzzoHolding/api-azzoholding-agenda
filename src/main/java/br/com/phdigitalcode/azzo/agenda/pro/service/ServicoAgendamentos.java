@@ -1738,11 +1738,39 @@ public class ServicoAgendamentos {
                   ? BigDecimal.ZERO
                   : NumericUtil.maxZero(item.discountAmount).min(grossAmount));
       BigDecimal totalPrice = NumericUtil.normalize(NumericUtil.subtract(grossAmount, discountAmount));
+      exigirTetoDeDesconto(tenantId, grossAmount, discountAmount);
       resolvedItems.add(
           new ResolvedAppointmentItem(
               serviceId, quantity, unitPrice, grossAmount, discountAmount, totalPrice, servico));
     }
     return resolvedItems;
+  }
+
+  /**
+   * O teto de desconto da equipe tambem vale AQUI (V131).
+   *
+   * Sem isto o teto do PDV era contornavel pela agenda: bastava marcar o atendimento com
+   * {@code discountAmount} igual ao valor do servico e o item ja nascia a R$0 — e a comanda
+   * automatica herda o preco acordado no agendamento, entao o desconto entrava sem passar pelo
+   * limite. O DONO continua sem teto; padrao 100 = sem teto.
+   */
+  private void exigirTetoDeDesconto(
+      UUID tenantId, BigDecimal grossAmount, BigDecimal discountAmount) {
+    if (discountAmount == null || discountAmount.signum() <= 0) return;
+    if (grossAmount == null || grossAmount.signum() <= 0) return;
+    if (authenticatedUser.temRole("OWNER")) return;
+
+    int teto = tenantOperationalSettingsService.getDiscountPolicy(tenantId).maxDiscountPercent;
+    if (teto >= 100) return;
+
+    BigDecimal percentual =
+        discountAmount
+            .multiply(BigDecimal.valueOf(100))
+            .divide(grossAmount, 2, java.math.RoundingMode.HALF_UP);
+    if (percentual.compareTo(new BigDecimal(teto)) <= 0) return;
+
+    throw new IllegalArgumentException(
+        "O desconto maximo sem o dono e de " + teto + "%. Chame o dono para dar mais que isso.");
   }
 
   private List<AgendamentoRequest.ItemRequest> fallbackSingleItem(AgendamentoRequest req) {
