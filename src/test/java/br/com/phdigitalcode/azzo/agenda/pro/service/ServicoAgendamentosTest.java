@@ -35,6 +35,7 @@ import org.springframework.data.domain.Pageable;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import br.com.phdigitalcode.azzo.agenda.pro.dto.ComandaDtos;
+import br.com.phdigitalcode.azzo.agenda.pro.dto.SettingsDtos;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.SchedulingDtos.AgendamentoRequest;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.SchedulingDtos.AgendamentoResponse;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.SchedulingDtos.AppointmentCustomerNoteRequest;
@@ -269,9 +270,24 @@ class ServicoAgendamentosTest {
     return a;
   }
 
+  /** O padrao do backend: 100% = sem teto de desconto para a equipe. */
+  private SettingsDtos.DiscountPolicyResponse semTetoDeDesconto() {
+    return tetoDeDesconto(100);
+  }
+
+  private SettingsDtos.DiscountPolicyResponse tetoDeDesconto(int percentual) {
+    SettingsDtos.DiscountPolicyResponse politica = new SettingsDtos.DiscountPolicyResponse();
+    politica.maxDiscountPercent = percentual;
+    return politica;
+  }
+
   /** Stubs comuns do caminho feliz de {@code criar}. */
   private void stubCriacaoSemConflito() {
     when(tenantOperationalSettingsService.isClosedOnSpecialDate(eq(tenantId), any())).thenReturn(false);
+    // Sem teto de desconto (100%) e o padrao do backend — e o que a maioria dos casos daqui exercita.
+    lenient()
+        .when(tenantOperationalSettingsService.getDiscountPolicy(eq(tenantId)))
+        .thenReturn(semTetoDeDesconto());
     when(profissionalRepository.findByIdAndTenantIdAndIsActiveTrue(professionalId, tenantId))
         .thenReturn(Optional.of(profissional()));
     when(servicoRepository.findByIdAndTenantId(serviceId, tenantId))
@@ -641,6 +657,45 @@ class ServicoAgendamentosTest {
       AgendamentoItem gravado = itemGravado();
       assertThat(gravado.getDiscountAmount()).isEqualByComparingTo("100.00");
       assertThat(gravado.getTotalPrice()).isEqualByComparingTo("0.00");
+    }
+
+    /**
+     * O teto de desconto da equipe vale TAMBEM na agenda.
+     *
+     * Sem isto o teto do PDV era contornavel: bastava marcar o atendimento com desconto igual ao
+     * preco do servico e o item ja nascia a R$0 — e a comanda automatica herda o preco acordado no
+     * agendamento (achado do roteiro de ponta a ponta de 2026-09-16).
+     */
+    @Test
+    void descontoDaAgendaRespeitaOTetoDaEquipe() {
+      // So o necessario: o pedido morre na checagem do teto, antes de olhar agenda e expediente.
+      when(profissionalRepository.findByIdAndTenantIdAndIsActiveTrue(professionalId, tenantId))
+          .thenReturn(Optional.of(profissional()));
+      when(servicoRepository.findByIdAndTenantId(serviceId, tenantId))
+          .thenReturn(Optional.of(servico(30, "100.00")));
+      when(tenantOperationalSettingsService.getDiscountPolicy(eq(tenantId)))
+          .thenReturn(tetoDeDesconto(20));
+      AgendamentoRequest req = requestValido();
+      req.items = List.of(item(null, "100.00")); // servico de R$100 zerado pelo desconto
+
+      assertThatThrownBy(() -> service.criar(req))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("desconto maximo sem o dono e de 20%");
+    }
+
+    @Test
+    void donoDaODescontoQueQuiserNaAgenda() {
+      stubCriacaoSemConflito();
+      lenient()
+          .when(tenantOperationalSettingsService.getDiscountPolicy(eq(tenantId)))
+          .thenReturn(tetoDeDesconto(20));
+      when(authenticatedUser.temRole("OWNER")).thenReturn(true);
+      AgendamentoRequest req = requestValido();
+      req.items = List.of(item(null, "100.00"));
+
+      service.criar(req);
+
+      assertThat(itemGravado().getTotalPrice()).isEqualByComparingTo("0.00");
     }
 
     private AgendamentoRequest.ItemRequest item(String precoDoPedido, String desconto) {
