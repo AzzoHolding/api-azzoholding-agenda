@@ -23,6 +23,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import br.com.phdigitalcode.azzo.agenda.pro.dto.ComandaDtos;
+import br.com.phdigitalcode.azzo.agenda.pro.exception.ApiClientErrorException;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.AppointmentDeposit;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.ClientPackageBalance;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.ClientPackagePurchase;
@@ -33,14 +34,17 @@ import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditService;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.ComandaItem;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.ComandaPagamento;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.ItemEstoque;
+import br.com.phdigitalcode.azzo.agenda.pro.entity.Profissional;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.Servico;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.TenantLoyaltySettings;
+import br.com.phdigitalcode.azzo.agenda.pro.entity.TenantOperationalSettings;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.Transacao;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.TransactionCategory;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.MetodoPagamento;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.TipoTransacao;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.AsaasClient;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.TenantAsaasChargeService;
+import br.com.phdigitalcode.azzo.agenda.pro.repository.AgendamentoRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.AppointmentDepositRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.ClientPackageBalanceRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.ClientPackagePurchaseRepository;
@@ -55,6 +59,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.repository.ServicePackageItemReposit
 import br.com.phdigitalcode.azzo.agenda.pro.repository.ServicePackageRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.ServicoRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.TenantLoyaltySettingsRepository;
+import br.com.phdigitalcode.azzo.agenda.pro.repository.TenantOperationalSettingsRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.TransacaoRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.TransactionCategoryRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.security.AuthenticatedUser;
@@ -88,6 +93,10 @@ class ServicoComandaTest {
   private TenantLoyaltySettingsRepository tenantLoyaltySettingsRepository;
   private MovimentacaoEstoqueRepository movimentacaoEstoqueRepository;
   private AuditService auditService;
+  private TenantOperationalSettingsRepository tenantOperationalSettingsRepository;
+  private AgendamentoRepository agendamentoRepository;
+  private AuthenticatedUser authenticatedUser;
+  private TenantOperationalSettings configuracoes;
   private ServicoComanda service;
 
   private final UUID tenantId = UUID.randomUUID();
@@ -120,11 +129,21 @@ class ServicoComandaTest {
     tenantLoyaltySettingsRepository = mock(TenantLoyaltySettingsRepository.class);
     movimentacaoEstoqueRepository = mock(MovimentacaoEstoqueRepository.class);
     auditService = mock(AuditService.class);
+    tenantOperationalSettingsRepository = mock(TenantOperationalSettingsRepository.class);
+    agendamentoRepository = mock(AgendamentoRepository.class);
 
     ContextoTenant contextoTenant = mock(ContextoTenant.class);
     when(contextoTenant.obterTenantIdOuFalhar()).thenReturn(tenantId);
-    AuthenticatedUser authenticatedUser = mock(AuthenticatedUser.class);
+    authenticatedUser = mock(AuthenticatedUser.class);
     when(authenticatedUser.idOuNulo()).thenReturn(usuarioId);
+
+    // Sem teto configurado (100%) e sem papel nenhum: e o comportamento de antes da V131, que e o
+    // que a maioria dos testes daqui exercita.
+    configuracoes = new TenantOperationalSettings();
+    configuracoes.setTenantId(tenantId);
+    when(tenantOperationalSettingsRepository.findByTenantIdOrCreate(any()))
+        .thenReturn(configuracoes);
+    when(agendamentoRepository.findByIdAndTenantId(any(), any())).thenReturn(Optional.empty());
 
     when(comandaItemRepository.findByComandaIdOrderByCreatedAt(any())).thenReturn(List.of());
     when(comandaPagamentoRepository.findByComandaIdOrderByCreatedAt(any())).thenReturn(List.of());
@@ -195,6 +214,8 @@ class ServicoComandaTest {
             clientPackageBalanceRepository,
             tenantLoyaltySettingsRepository,
             movimentacaoEstoqueRepository,
+            tenantOperationalSettingsRepository,
+            agendamentoRepository,
             auditService);
   }
 
@@ -1087,5 +1108,172 @@ class ServicoComandaTest {
     servico.setPrice(new BigDecimal("70.00"));
     when(servicoRepository.findByIdAndTenantId(eq(serviceId), eq(tenantId)))
         .thenReturn(Optional.of(servico));
+  }
+
+  // ─── Teto de desconto configuravel (V131) ──────────────────────────────────
+
+  /** Com teto de 20%, a equipe nao passa disso — quem passa e o dono. */
+  @Test
+  void descontoAcimaDoTetoEhRecusado() {
+    Comanda aberta = comanda(Comanda.STATUS_ABERTA);
+    aberta.setSubtotal(new BigDecimal("500.00"));
+    configuracoes.setPosMaxDiscountPercent(20);
+
+    ComandaDtos.AplicarDescontoRequest req = new ComandaDtos.AplicarDescontoRequest();
+    req.percentual = new BigDecimal("100");
+    req.motivo = "cortesia";
+
+    assertThatThrownBy(() -> service.aplicarDesconto(comandaId, req))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("O desconto maximo sem o dono e de 20%. Chame o dono para dar mais que isso.");
+    assertThat(aberta.getDesconto()).isEqualByComparingTo("0");
+  }
+
+  @Test
+  void descontoDentroDoTetoPassa() {
+    Comanda aberta = comanda(Comanda.STATUS_ABERTA);
+    aberta.setSubtotal(new BigDecimal("500.00"));
+    configuracoes.setPosMaxDiscountPercent(20);
+    when(comandaItemRepository.findByComandaIdOrderByCreatedAt(eq(comandaId)))
+        .thenReturn(List.of(item(ComandaItem.TIPO_SERVICO, "500.00", professionalId)));
+
+    ComandaDtos.AplicarDescontoRequest req = new ComandaDtos.AplicarDescontoRequest();
+    req.percentual = new BigDecimal("20");
+    req.motivo = "cliente antigo";
+
+    service.aplicarDesconto(comandaId, req);
+
+    assertThat(aberta.getDesconto()).isEqualByComparingTo("100.00");
+  }
+
+  /** O dinheiro e do dono: o teto e para a equipe, nao para ele. */
+  @Test
+  void donoNaoTemTetoDeDesconto() {
+    Comanda aberta = comanda(Comanda.STATUS_ABERTA);
+    aberta.setSubtotal(new BigDecimal("500.00"));
+    configuracoes.setPosMaxDiscountPercent(10);
+    when(comandaItemRepository.findByComandaIdOrderByCreatedAt(eq(comandaId)))
+        .thenReturn(List.of(item(ComandaItem.TIPO_SERVICO, "500.00", professionalId)));
+    when(authenticatedUser.temRole("OWNER")).thenReturn(true);
+
+    ComandaDtos.AplicarDescontoRequest req = new ComandaDtos.AplicarDescontoRequest();
+    req.percentual = new BigDecimal("100");
+    req.motivo = "cortesia da casa";
+
+    service.aplicarDesconto(comandaId, req);
+
+    assertThat(aberta.getDesconto()).isEqualByComparingTo("500.00");
+  }
+
+  // ─── Origem do item e duplicidade (V132) ───────────────────────────────────
+
+  @Test
+  void itemLancadoNaTelaNasceManualEODoAgendamentoNasceComOrigem() {
+    comanda(Comanda.STATUS_ABERTA);
+    servicoDeTabela();
+
+    service.adicionarItem(comandaId, itemDeServico());
+    ArgumentCaptor<ComandaItem> captor = ArgumentCaptor.forClass(ComandaItem.class);
+    verify(comandaItemRepository).save(captor.capture());
+    assertThat(captor.getValue().getOrigem()).isEqualTo(ComandaItem.ORIGEM_MANUAL);
+
+    service.adicionarItemDoAgendamento(comandaId, itemDeServico());
+    verify(comandaItemRepository, org.mockito.Mockito.times(2)).save(captor.capture());
+    assertThat(captor.getValue().getOrigem()).isEqualTo(ComandaItem.ORIGEM_AGENDAMENTO);
+  }
+
+  /** Lancar de novo o servico que o agendamento trouxe cobrava o cliente duas vezes, calado. */
+  @Test
+  void itemRepetidoPedeConfirmacao() {
+    comanda(Comanda.STATUS_ABERTA);
+    servicoDeTabela();
+    ComandaItem jaLancado = item(ComandaItem.TIPO_SERVICO, "70.00", professionalId);
+    jaLancado.setOrigem(ComandaItem.ORIGEM_AGENDAMENTO);
+    when(comandaItemRepository.findByComandaIdOrderByCreatedAt(eq(comandaId)))
+        .thenReturn(List.of(jaLancado));
+
+    assertThatThrownBy(() -> service.adicionarItem(comandaId, itemDeServico()))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("ja tem")
+        .hasMessageContaining("veio do agendamento");
+    verify(comandaItemRepository, never()).save(any());
+  }
+
+  /** Dois cortes na mesma conta existem: confirmado, passa. */
+  @Test
+  void itemRepetidoConfirmadoPassa() {
+    comanda(Comanda.STATUS_ABERTA);
+    servicoDeTabela();
+    when(comandaItemRepository.findByComandaIdOrderByCreatedAt(eq(comandaId)))
+        .thenReturn(List.of(item(ComandaItem.TIPO_SERVICO, "70.00", professionalId)));
+
+    ComandaDtos.AdicionarItemRequest req = itemDeServico();
+    req.confirmarDuplicado = true;
+    service.adicionarItem(comandaId, req);
+
+    verify(comandaItemRepository).save(any(ComandaItem.class));
+  }
+
+  // ─── Profissional so na propria comanda (2026-09-16) ───────────────────────
+
+  @Test
+  void profissionalNaoEnxergaComandaDeOutro() {
+    Comanda deOutro = comanda(Comanda.STATUS_ABERTA);
+    deOutro.setAbertaPor(UUID.randomUUID());
+    souProfissional();
+
+    assertThatThrownBy(() -> service.obter(comandaId))
+        .isInstanceOf(ApiClientErrorException.class)
+        .hasMessageContaining("nao encontrada");
+  }
+
+  @Test
+  void profissionalEnxergaAComandaQueEleAbriu() {
+    Comanda minha = comanda(Comanda.STATUS_ABERTA);
+    minha.setAbertaPor(usuarioId);
+    souProfissional();
+
+    assertThat(service.obter(comandaId).id).isEqualTo(comandaId.toString());
+  }
+
+  @Test
+  void profissionalEnxergaAComandaComItemDele() {
+    Comanda comItemMeu = comanda(Comanda.STATUS_ABERTA);
+    comItemMeu.setAbertaPor(UUID.randomUUID());
+    UUID meuId = souProfissional();
+    when(comandaItemRepository.findByComandaIdOrderByCreatedAt(eq(comandaId)))
+        .thenReturn(List.of(item(ComandaItem.TIPO_SERVICO, "70.00", meuId)));
+
+    assertThat(service.obter(comandaId).id).isEqualTo(comandaId.toString());
+  }
+
+  /** A recepcao (STAFF) ve o salao inteiro: e o trabalho dela. */
+  @Test
+  void recepcaoEnxergaComandaDeQualquerUm() {
+    Comanda deOutro = comanda(Comanda.STATUS_ABERTA);
+    deOutro.setAbertaPor(UUID.randomUUID());
+    souProfissional();
+    when(authenticatedUser.temRole("STAFF")).thenReturn(true);
+
+    assertThat(service.obter(comandaId).id).isEqualTo(comandaId.toString());
+  }
+
+  /** Marca o usuario logado como profissional do salao e devolve o id do cadastro dele. */
+  private UUID souProfissional() {
+    UUID profissionalDoLogin = UUID.randomUUID();
+    when(authenticatedUser.temRole("PROFESSIONAL")).thenReturn(true);
+    Profissional eu = new Profissional();
+    eu.setId(profissionalDoLogin);
+    eu.setTenantId(tenantId);
+    when(profissionalRepository.findByTenantIdAndUserId(eq(tenantId), eq(usuarioId)))
+        .thenReturn(Optional.of(eu));
+    return profissionalDoLogin;
+  }
+
+  private ComandaDtos.AdicionarItemRequest itemDeServico() {
+    ComandaDtos.AdicionarItemRequest req = new ComandaDtos.AdicionarItemRequest();
+    req.tipo = ComandaItem.TIPO_SERVICO;
+    req.referenciaId = serviceId.toString();
+    return req;
   }
 }

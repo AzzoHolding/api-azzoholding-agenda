@@ -416,6 +416,39 @@ class TenantOperationalSettingsServiceTest {
   }
 
   @Test
+  @DisplayName("teto de desconto: padrao 100 (sem teto) e grava o que o dono escolheu")
+  void tetoDeDescontoGravaEDefaultEhSemTeto() {
+    TenantOperationalSettings entidade = novaEntidade();
+    when(repository.findById(tenantId)).thenReturn(Optional.of(entidade));
+
+    assertThat(service.getDiscountPolicy(tenantId).maxDiscountPercent).isEqualTo(100);
+
+    SettingsDtos.DiscountPolicyRequest request = new SettingsDtos.DiscountPolicyRequest();
+    request.maxDiscountPercent = 15;
+    assertThat(service.updateDiscountPolicy(tenantId, request).maxDiscountPercent).isEqualTo(15);
+    assertThat(entidade.getPosMaxDiscountPercent()).isEqualTo(15);
+  }
+
+  /**
+   * Fora de 0..100 o pedido e RECUSADO, e nao ignorado como nos campos antigos daqui: um teto que a
+   * tela acha que salvou e o servidor descartou seria pior que nao ter teto.
+   */
+  @Test
+  @DisplayName("teto de desconto fora de 0..100 e recusado")
+  void tetoDeDescontoForaDaFaixaEhRecusado() {
+    TenantOperationalSettings entidade = novaEntidade();
+    entidade.setPosMaxDiscountPercent(15);
+    when(repository.findById(tenantId)).thenReturn(Optional.of(entidade));
+    SettingsDtos.DiscountPolicyRequest request = new SettingsDtos.DiscountPolicyRequest();
+    request.maxDiscountPercent = 150;
+
+    assertThatThrownBy(() -> service.updateDiscountPolicy(tenantId, request))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("0% a 100%");
+    assertThat(entidade.getPosMaxDiscountPercent()).isEqualTo(15);
+  }
+
+  @Test
   @DisplayName("regua de lembretes valida HH:mm e a faixa 1..12 de horasAntes")
   void reminderSettingsValidaFormatoEFaixa() {
     TenantOperationalSettings entidade = novaEntidade();

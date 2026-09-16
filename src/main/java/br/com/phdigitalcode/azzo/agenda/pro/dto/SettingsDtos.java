@@ -130,6 +130,17 @@ public final class SettingsDtos {
     public int cancellationFeePercent;
   }
 
+  // --- Teto de desconto do PDV (V131) ---
+
+  public static class DiscountPolicyRequest {
+    /** 0 a 100. 100 significa sem teto. */
+    public Integer maxDiscountPercent;
+  }
+
+  public static class DiscountPolicyResponse {
+    public int maxDiscountPercent;
+  }
+
   // --- Regua de lembretes (F03 — V120) ---
 
   public static class ReminderSettingsRequest {
