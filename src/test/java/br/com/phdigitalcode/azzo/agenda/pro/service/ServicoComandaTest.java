@@ -95,6 +95,7 @@ class ServicoComandaTest {
   private AuditService auditService;
   private TenantOperationalSettingsRepository tenantOperationalSettingsRepository;
   private AgendamentoRepository agendamentoRepository;
+  private TravaFinanceira travaFinanceira;
   private AuthenticatedUser authenticatedUser;
   private TenantOperationalSettings configuracoes;
   private ServicoComanda service;
@@ -131,6 +132,7 @@ class ServicoComandaTest {
     auditService = mock(AuditService.class);
     tenantOperationalSettingsRepository = mock(TenantOperationalSettingsRepository.class);
     agendamentoRepository = mock(AgendamentoRepository.class);
+    travaFinanceira = mock(TravaFinanceira.class);
 
     ContextoTenant contextoTenant = mock(ContextoTenant.class);
     when(contextoTenant.obterTenantIdOuFalhar()).thenReturn(tenantId);
@@ -216,7 +218,8 @@ class ServicoComandaTest {
             movimentacaoEstoqueRepository,
             tenantOperationalSettingsRepository,
             agendamentoRepository,
-            auditService);
+            auditService,
+            travaFinanceira);
   }
 
   // ---------------------------------------------------------------- helpers
@@ -1312,5 +1315,67 @@ class ServicoComandaTest {
     req.tipo = ComandaItem.TIPO_SERVICO;
     req.referenciaId = serviceId.toString();
     return req;
+  }
+
+  // ─── Dia com caixa fechado (2026-09-16) ────────────────────────────────────
+
+  /**
+   * Fecha certinho hoje, estorna amanha e leva o dinheiro: o estorno apagaria a receita de um dia
+   * cujo caixa ja foi contado e assinado.
+   */
+  @Test
+  void estornoDeVendaDeDiaComCaixaFechadoNaoAcontece() {
+    Comanda fechada = comanda(Comanda.STATUS_FECHADA);
+    fechada.setClosedAt(Instant.now().minusSeconds(86_400));
+    Transacao receita = new Transacao();
+    receita.setId(UUID.randomUUID());
+    when(transacaoRepository.listarAtivasPorComanda(any(), any())).thenReturn(List.of(receita));
+    org.mockito.Mockito.doThrow(new IllegalArgumentException("O caixa de ontem ja foi fechado"))
+        .when(travaFinanceira)
+        .exigirDiaAberto(
+            eq(tenantId), eq(fechada.getClosedAt()), eq("POS_COMANDA_REVERSE"), eq("COMANDA"),
+            eq(comandaId.toString()), any());
+
+    ComandaDtos.EstornarComandaRequest req = new ComandaDtos.EstornarComandaRequest();
+    req.motivo = "cliente desistiu";
+
+    assertThatThrownBy(() -> service.estornar(comandaId, req))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("ja foi fechado");
+    assertThat(fechada.getStatus()).isEqualTo(Comanda.STATUS_FECHADA);
+    assertThat(receita.getDeletedAt()).isNull();
+  }
+
+  /** Venda fechada depois do caixa de hoje contado ficaria fora da conferencia. */
+  @Test
+  void fecharComandaConfereQueOCaixaDeHojeEstaAberto() {
+    comanda(Comanda.STATUS_ABERTA);
+    when(comandaItemRepository.findByComandaIdOrderByCreatedAt(eq(comandaId)))
+        .thenReturn(List.of(item(ComandaItem.TIPO_SERVICO, "70.00", professionalId)));
+    org.mockito.Mockito.doThrow(new IllegalArgumentException("O caixa de hoje ja foi fechado"))
+        .when(travaFinanceira)
+        .exigirDiaAberto(eq(tenantId), any(), eq("POS_COMANDA_CLOSE"), eq("COMANDA"), any(), any());
+
+    assertThatThrownBy(() -> service.fechar(comandaId))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("ja foi fechado");
+    verify(transacaoRepository, never()).save(any());
+  }
+
+  @Test
+  void descontoAcimaDoTetoFicaNaTrilhaComoTentativa() {
+    Comanda aberta = comanda(Comanda.STATUS_ABERTA);
+    aberta.setSubtotal(new BigDecimal("500.00"));
+    configuracoes.setPosMaxDiscountPercent(20);
+
+    ComandaDtos.AplicarDescontoRequest req = new ComandaDtos.AplicarDescontoRequest();
+    req.percentual = new BigDecimal("100");
+    req.motivo = "cortesia";
+
+    assertThatThrownBy(() -> service.aplicarDesconto(comandaId, req))
+        .isInstanceOf(IllegalArgumentException.class);
+    verify(travaFinanceira)
+        .registrarTentativaBloqueada(
+            eq(tenantId), eq("POS_DISCOUNT_APPLY"), eq("COMANDA"), any(), any(), any());
   }
 }

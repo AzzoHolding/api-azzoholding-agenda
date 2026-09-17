@@ -166,6 +166,10 @@ public class ServicoAgendamentos {
   private final ContextoTenant contextoTenant;
   private final AuthenticatedUser authenticatedUser;
 
+  /** Registra a tentativa de desconto acima do teto. Campo, e nao construtor: e opcional. */
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  private TravaFinanceira travaFinanceira;
+
   public ServicoAgendamentos(
       AgendamentoRepository agendamentoRepository,
       AgendamentoQueryRepository agendamentoQueryRepository,
@@ -1769,8 +1773,15 @@ public class ServicoAgendamentos {
             .divide(grossAmount, 2, java.math.RoundingMode.HALF_UP);
     if (percentual.compareTo(new BigDecimal(teto)) <= 0) return;
 
-    throw new IllegalArgumentException(
-        "O desconto maximo sem o dono e de " + teto + "%. Chame o dono para dar mais que isso.");
+    String mensagem =
+        "O desconto maximo sem o dono e de " + teto + "%. Chame o dono para dar mais que isso.";
+    if (travaFinanceira != null) {
+      travaFinanceira.registrarTentativaBloqueada(
+          tenantId, "APPOINTMENT_DISCOUNT", "APPOINTMENT", null,
+          java.util.Map.of("desconto", discountAmount, "bruto", grossAmount, "teto", teto),
+          mensagem);
+    }
+    throw new IllegalArgumentException(mensagem);
   }
 
   private List<AgendamentoRequest.ItemRequest> fallbackSingleItem(AgendamentoRequest req) {
