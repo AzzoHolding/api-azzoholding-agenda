@@ -69,6 +69,19 @@ class ServicoRelatoriosTest {
             commissionEntryRepository);
     tenantId = UUID.randomUUID();
     lenient().when(contextoTenant.obterTenantIdOuFalhar()).thenReturn(tenantId);
+    entityManager = org.mockito.Mockito.mock(jakarta.persistence.EntityManager.class);
+    consulta = org.mockito.Mockito.mock(jakarta.persistence.Query.class);
+    lenient().when(entityManager.createNativeQuery(org.mockito.ArgumentMatchers.anyString())).thenReturn(consulta);
+    lenient().when(consulta.setParameter(org.mockito.ArgumentMatchers.anyString(), any())).thenReturn(consulta);
+    org.springframework.test.util.ReflectionTestUtils.setField(service, "entityManager", entityManager);
+  }
+
+  private jakarta.persistence.EntityManager entityManager;
+  private jakarta.persistence.Query consulta;
+
+  /** A receita do periodo vem da consulta de ReceitaDeServicosSql (o que a comanda cobrou). */
+  private void receitaDaComanda(String valor) {
+    lenient().when(consulta.getSingleResult()).thenReturn(new BigDecimal(valor));
   }
 
   @Nested
@@ -117,8 +130,7 @@ class ServicoRelatoriosTest {
     void resolveTaxaUnica() {
       UUID profissionalId = UUID.randomUUID();
 
-      when(agendamentoRepository.listByTenantAndProfessional(eq(tenantId), eq(profissionalId), any(Pageable.class)))
-          .thenReturn(List.of());
+      receitaDaComanda("0.00");
 
       CommissionEntry entry1 = new CommissionEntry();
       entry1.setEntryStatus("OPEN");
@@ -151,8 +163,7 @@ class ServicoRelatoriosTest {
     void taxaNulaComPercentuaisDivergentes() {
       UUID profissionalId = UUID.randomUUID();
 
-      when(agendamentoRepository.listByTenantAndProfessional(eq(tenantId), eq(profissionalId), any(Pageable.class)))
-          .thenReturn(List.of());
+      receitaDaComanda("0.00");
 
       CommissionEntry entry1 = new CommissionEntry();
       entry1.setEntryStatus("OPEN");
@@ -173,34 +184,28 @@ class ServicoRelatoriosTest {
       assertThat(response.commissionRate).isNull();
     }
 
+    /**
+     * A receita do relatorio de comissao e a mesma que gerou a comissao: o que a COMANDA cobrou
+     * (ReceitaDeServicosSql), filtrada pelo profissional e periodo — e nao mais todos os
+     * agendamentos dele carregados em memoria (analise de 2026-09-16, M8).
+     */
     @Test
-    @DisplayName("soma apenas a receita de agendamentos concluidos dentro do periodo")
-    void somaReceitaApenasConcluidosNoPeriodo() {
+    @DisplayName("a receita vem do que a comanda cobrou, filtrada pelo profissional e pelo periodo")
+    void receitaVemDoQueAComandaCobrou() {
       UUID profissionalId = UUID.randomUUID();
-
-      Agendamento concluidoDentro = agendamentoComPreco(LocalDate.of(2026, 2, 5), StatusAgendamento.COMPLETED, "100.00");
-      Agendamento concluidoForaPeriodo = agendamentoComPreco(LocalDate.of(2026, 3, 1), StatusAgendamento.COMPLETED, "999.00");
-      Agendamento canceladoDentro = agendamentoComPreco(LocalDate.of(2026, 2, 6), StatusAgendamento.CANCELLED, "50.00");
-
-      when(agendamentoRepository.listByTenantAndProfessional(eq(tenantId), eq(profissionalId), any(Pageable.class)))
-          .thenReturn(List.of(concluidoDentro, concluidoForaPeriodo, canceladoDentro));
+      receitaDaComanda("80.00");
       when(commissionEntryRepository.listByTenantAndProfessionalAndCreatedAtRange(
               eq(tenantId), eq(profissionalId), any(Instant.class), any(Instant.class)))
           .thenReturn(List.of());
 
       RelatorioComissaoResponse response = service.comissoes("2026-02-01", "2026-02-28", profissionalId.toString(), null);
 
-      assertThat(response.totalRevenue).isEqualByComparingTo("100.00");
-    }
-
-    private Agendamento agendamentoComPreco(LocalDate date, StatusAgendamento status, String price) {
-      Agendamento agendamento = new Agendamento();
-      agendamento.setDate(date);
-      agendamento.setStatus(status);
-      AgendamentoItem item = new AgendamentoItem();
-      item.setTotalPrice(new BigDecimal(price));
-      agendamento.setItems(new java.util.ArrayList<>(List.of(item)));
-      return agendamento;
+      assertThat(response.totalRevenue).isEqualByComparingTo("80.00");
+      org.mockito.Mockito.verify(entityManager)
+          .createNativeQuery(org.mockito.ArgumentMatchers.contains("receita_servicos"));
+      org.mockito.Mockito.verify(consulta).setParameter("profId", profissionalId);
+      org.mockito.Mockito.verify(agendamentoRepository, org.mockito.Mockito.never())
+          .listByTenantAndProfessional(any(), any(), any(Pageable.class));
     }
   }
 

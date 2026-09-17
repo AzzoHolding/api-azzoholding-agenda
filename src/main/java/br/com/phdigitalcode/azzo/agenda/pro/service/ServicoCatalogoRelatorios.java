@@ -165,20 +165,18 @@ public class ServicoCatalogoRelatorios {
       case "faturamento-servico" -> new ReportDefinition(
           key,
           "Faturamento por servico",
-          List.of("agenda"),
+          List.of("comanda", "agenda"),
           List.of("servico_id", "servico", "quantidade", "receita", "ticket_medio"),
           true,
-          """
-          SELECT s.id::text, s.name, COUNT(DISTINCT a.id)::int,
-                 COALESCE(SUM(ai.total_price), 0),
-                 CASE WHEN COUNT(DISTINCT a.id) > 0 THEN ROUND(COALESCE(SUM(ai.total_price), 0) / COUNT(DISTINCT a.id), 2) ELSE 0 END
-          FROM appointments a
-          JOIN appointment_items ai ON ai.appointment_id = a.id AND ai.tenant_id = a.tenant_id
-          JOIN services s ON s.id = ai.service_id AND s.tenant_id = a.tenant_id
-          WHERE a.tenant_id = :tenantId
-            AND a.date BETWEEN :dataInicio AND :dataFim
-            AND a.status = 'Concluido'
-            AND (CAST(:professionalId AS uuid) IS NULL OR a.professional_id = CAST(:professionalId AS uuid))
+          // Receita = o que a COMANDA cobrou (ReceitaDeServicosSql), e nao o preco do agendamento.
+          "WITH " + br.com.phdigitalcode.azzo.agenda.pro.util.ReceitaDeServicosSql.CTE + """
+          SELECT s.id::text, s.name, COUNT(DISTINCT r.venda_id)::int,
+                 COALESCE(SUM(r.valor), 0),
+                 CASE WHEN COUNT(DISTINCT r.venda_id) > 0 THEN ROUND(COALESCE(SUM(r.valor), 0) / COUNT(DISTINCT r.venda_id), 2) ELSE 0 END
+          FROM receita_servicos r
+          JOIN services s ON s.id = r.service_id AND s.tenant_id = :tenantId
+          WHERE r.dia BETWEEN :dataInicio AND :dataFim
+            AND (CAST(:professionalId AS uuid) IS NULL OR r.professional_id = CAST(:professionalId AS uuid))
           GROUP BY s.id, s.name
           ORDER BY 4 DESC
           LIMIT :limit OFFSET :offset
@@ -186,17 +184,20 @@ public class ServicoCatalogoRelatorios {
       case "faturamento-profissional" -> new ReportDefinition(
           key,
           "Faturamento por profissional",
-          List.of("agenda", "comissoes"),
+          List.of("comanda", "agenda", "comissoes"),
           List.of("profissional_id", "profissional", "quantidade", "receita", "comissao_gerada"),
           true,
-          """
-          SELECT p.id::text, p.name, COUNT(DISTINCT a.id)::int,
-                 COALESCE(SUM(ai.total_price), 0),
+          "WITH " + br.com.phdigitalcode.azzo.agenda.pro.util.ReceitaDeServicosSql.CTE + """
+          SELECT p.id::text, p.name, COALESCE(MAX(pp.quantidade), 0)::int,
+                 COALESCE(MAX(pp.receita), 0),
                  COALESCE(MAX(ce.comissao), 0)
           FROM professionals p
-          LEFT JOIN appointments a ON a.professional_id = p.id AND a.tenant_id = p.tenant_id
-            AND a.date BETWEEN :dataInicio AND :dataFim AND a.status = 'Concluido'
-          LEFT JOIN appointment_items ai ON ai.appointment_id = a.id AND ai.tenant_id = a.tenant_id
+          LEFT JOIN (
+            SELECT r.professional_id, COUNT(DISTINCT r.venda_id) AS quantidade, SUM(r.valor) AS receita
+            FROM receita_servicos r
+            WHERE r.dia BETWEEN :dataInicio AND :dataFim
+            GROUP BY r.professional_id
+          ) pp ON pp.professional_id = p.id
           LEFT JOIN (
             SELECT professional_id, SUM(total_amount_cents) / 100.0 AS comissao
             FROM commission_entries

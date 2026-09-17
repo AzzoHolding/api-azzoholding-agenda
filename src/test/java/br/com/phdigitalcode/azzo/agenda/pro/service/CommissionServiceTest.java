@@ -256,18 +256,85 @@ class CommissionServiceTest {
     assertThat(entry.getReversedAt()).isNull();
   }
 
+  /**
+   * Venda desfeita com a comissao JA PAGA: a entrada paga fica como esta (o pagamento aconteceu), e
+   * nasce um DESCONTO aberto do mesmo valor para o proximo ciclo (analise de 2026-09-16, M4). Antes,
+   * o estorno ignorava a comissao paga e nao havia como descontar.
+   */
   @Test
-  @DisplayName("Entrada ja PAID nunca e revertida")
-  void entradaPagaNaoEhRevertida() {
-    CommissionEntry entry = entradaAberta();
-    entry.setEntryStatus("PAID");
+  @DisplayName("Entrada PAID nao e revertida: vira desconto no proximo ciclo")
+  void entradaPagaViraDescontoNoProximoCiclo() {
+    CommissionEntry paga = entradaAberta();
+    paga.setEntryStatus("PAID");
+    paga.setTotalAmountCents(2000L);
     when(entryRepository.findByTenantAndOrigin(TENANT_ID, "PRODUCT", APPOINTMENT_ID))
-        .thenReturn(Optional.of(entry));
+        .thenReturn(Optional.of(paga));
 
     commissionService.reverseProductCommissionIfApplicable(TENANT_ID, APPOINTMENT_ID, "Transacao excluida");
 
-    assertThat(entry.getEntryStatus()).isEqualTo("PAID");
-    assertThat(entry.getReversedAt()).isNull();
+    assertThat(paga.getEntryStatus()).isEqualTo("PAID");
+    ArgumentCaptor<CommissionEntry> captor = ArgumentCaptor.forClass(CommissionEntry.class);
+    verify(entryRepository).save(captor.capture());
+    CommissionEntry desconto = captor.getValue();
+    assertThat(desconto.getTotalAmountCents()).isEqualTo(-2000L);
+    assertThat(desconto.getEntryStatus()).isEqualTo("OPEN");
+    assertThat(desconto.getOriginType()).isEqualTo("MANUAL_ADJUSTMENT");
+    assertThat(desconto.getOriginId()).isEqualTo(paga.getId());
+    assertThat(desconto.getProfessionalId()).isEqualTo(PROFESSIONAL_ID);
+    assertThat(paga.getReversalEntryId()).isEqualTo(desconto.getId());
+  }
+
+  @Test
+  @DisplayName("Comissao paga ja descontada nao e descontada de novo")
+  void descontoDeComissaoPagaNaoDuplica() {
+    CommissionEntry paga = entradaAberta();
+    paga.setEntryStatus("PAID");
+    paga.setTotalAmountCents(2000L);
+    paga.setReversalEntryId(UUID.randomUUID());
+    when(entryRepository.findByTenantAndOrigin(TENANT_ID, "PRODUCT", APPOINTMENT_ID))
+        .thenReturn(Optional.of(paga));
+
+    commissionService.reverseProductCommissionIfApplicable(TENANT_ID, APPOINTMENT_ID, "de novo");
+
+    verify(entryRepository, never()).save(any());
+  }
+
+  /**
+   * Pagar o ciclo com um profissional de saldo NEGATIVO (desconto maior que o que ganhou): ele nao
+   * recebe agora e as entradas dele passam para o proximo ciclo — o desconto nao some.
+   */
+  @Test
+  @DisplayName("Pagar ciclo adia quem ficou com saldo zerado ou negativo")
+  void pagarCicloAdiaSaldoNegativo() {
+    UUID cycleId = UUID.randomUUID();
+    br.com.phdigitalcode.azzo.agenda.pro.entity.CommissionCycle ciclo =
+        new br.com.phdigitalcode.azzo.agenda.pro.entity.CommissionCycle();
+    ciclo.setId(cycleId);
+    ciclo.setTenantId(TENANT_ID);
+    ciclo.setStatus("CLOSED");
+    ciclo.setTotalAmountCents(3000L - 500L);
+    ciclo.setPeriodStart(LocalDate.of(2026, 9, 1));
+    ciclo.setPeriodEnd(LocalDate.of(2026, 9, 15));
+    UUID devedor = UUID.randomUUID();
+    when(contextoTenant.obterTenantIdOuFalhar()).thenReturn(TENANT_ID);
+    when(cycleRepository.findByTenantIdAndId(TENANT_ID, cycleId)).thenReturn(Optional.of(ciclo));
+    when(entryRepository.sumTotalCentsByProfessionalForCycle(TENANT_ID, cycleId))
+        .thenReturn(List.of(new Object[] {PROFESSIONAL_ID, 3000L}, new Object[] {devedor, -500L}));
+    lenient().when(profissionalRepository.findById(any())).thenReturn(Optional.of(profissional()));
+    lenient().when(transactionCategoryRepository.findByTenantAndName(any(), any())).thenReturn(Optional.empty());
+    lenient()
+        .when(transactionCategoryRepository.save(any()))
+        .thenAnswer(inv -> {
+          var categoria = (br.com.phdigitalcode.azzo.agenda.pro.entity.TransactionCategory) inv.getArgument(0);
+          categoria.setId(UUID.randomUUID());
+          return categoria;
+        });
+
+    commissionService.payCycle(cycleId, null);
+
+    verify(entryRepository).releaseProfessionalFromCycle(TENANT_ID, cycleId, devedor);
+    verify(entryRepository, never()).releaseProfessionalFromCycle(TENANT_ID, cycleId, PROFESSIONAL_ID);
+    assertThat(ciclo.getTotalAmountCents()).isEqualTo(3000L);
   }
 
   // ─── helpers ─────────────────────────────────────────────────────────────
