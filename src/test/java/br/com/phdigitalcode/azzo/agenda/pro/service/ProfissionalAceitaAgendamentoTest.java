@@ -188,4 +188,39 @@ class ProfissionalAceitaAgendamentoTest {
     service.atualizar(comComissao.getId(), edicao("Bia"));
     assertThat(comComissao.getCommissionRate()).isEqualByComparingTo(new BigDecimal("40.00"));
   }
+
+  // ─── Desativar com agendamentos futuros (2026-09-16, M9) ───────────────────
+
+  /** Os clientes ficariam com um profissional que nao trabalha mais ali, e ninguem avisado. */
+  @Test
+  @DisplayName("nao desativa profissional com agendamentos marcados")
+  void naoDesativaComAgendamentosFuturos() {
+    Profissional p = profissional("Ana", true);
+    when(profissionalRepository.findByIdAndTenantId(p.getId(), TENANT)).thenReturn(Optional.of(p));
+    when(agendamentoRepository.countFutureActiveForProfessional(eq(TENANT), eq(p.getId()), any(), any(), anyString()))
+        .thenReturn(2L);
+
+    assertThatThrownBy(() -> service.toggleStatus(p.getId(), false))
+        .hasMessageContaining("2 agendamentos marcados");
+    assertThatThrownBy(() -> service.deletar(p.getId()))
+        .hasMessageContaining("Realoque ou cancele");
+    ProfissionalRequest desativar = edicao("Ana");
+    desativar.isActive = false;
+    assertThatThrownBy(() -> service.atualizar(p.getId(), desativar))
+        .hasMessageContaining("agendamentos marcados");
+    assertThat(p.isActive()).isTrue();
+  }
+
+  @Test
+  @DisplayName("sem agendamento marcado, desativa")
+  void desativaSemAgendamentosFuturos() {
+    Profissional p = profissional("Ana", true);
+    when(profissionalRepository.findByIdAndTenantId(p.getId(), TENANT)).thenReturn(Optional.of(p));
+    when(agendamentoRepository.countFutureActiveForProfessional(eq(TENANT), eq(p.getId()), any(), any(), anyString()))
+        .thenReturn(0L);
+
+    service.toggleStatus(p.getId(), false);
+
+    assertThat(p.isActive()).isFalse();
+  }
 }

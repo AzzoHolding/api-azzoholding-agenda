@@ -40,24 +40,14 @@ public class ClienteStatsRepository {
     if (tenantId == null || clientId == null) return ClienteStats.EMPTY;
     Object[] row = (Object[]) entityManager
         .createNativeQuery(
-            """
-            WITH appointment_totals AS (
-              SELECT
-                a.id,
-                a.date,
-                COALESCE(SUM(ai.total_price), 0) AS total_price
-              FROM appointments a
-              LEFT JOIN appointment_items ai ON ai.appointment_id = a.id
-              WHERE a.tenant_id = :tenantId
-                AND a.client_id = :clientId
-                AND a.status = 'Concluido'
-              GROUP BY a.id, a.date
-            )
+            // O que o cliente PAGOU (ReceitaDeClientesSql), e nao o preco dos agendamentos.
+            "WITH " + br.com.phdigitalcode.azzo.agenda.pro.util.ReceitaDeClientesSql.CTE + """
             SELECT
-              COUNT(*)::int AS total_visits,
-              COALESCE(SUM(at.total_price), 0) AS total_spent,
-              MAX(at.date) AS last_visit
-            FROM appointment_totals at
+              COUNT(DISTINCT v.visita_id)::int AS total_visits,
+              COALESCE(SUM(v.valor), 0) AS total_spent,
+              MAX(v.dia) AS last_visit
+            FROM visitas_clientes v
+            WHERE v.client_id = :clientId
             """)
         .setParameter("tenantId", tenantId)
         .setParameter("clientId", clientId)
@@ -72,26 +62,14 @@ public class ClienteStatsRepository {
 
     List<Object[]> rows = entityManager
         .createNativeQuery(
-            """
-            WITH appointment_totals AS (
-              SELECT
-                a.id,
-                a.client_id,
-                a.date,
-                COALESCE(SUM(ai.total_price), 0) AS total_price
-              FROM appointments a
-              LEFT JOIN appointment_items ai ON ai.appointment_id = a.id
-              WHERE a.tenant_id = :tenantId
-                AND a.status = 'Concluido'
-              GROUP BY a.id, a.client_id, a.date
-            )
+            "WITH " + br.com.phdigitalcode.azzo.agenda.pro.util.ReceitaDeClientesSql.CTE + """
             SELECT
-              at.client_id,
-              COUNT(*)::int AS total_visits,
-              COALESCE(SUM(at.total_price), 0) AS total_spent,
-              MAX(at.date) AS last_visit
-            FROM appointment_totals at
-            GROUP BY at.client_id
+              v.client_id,
+              COUNT(DISTINCT v.visita_id)::int AS total_visits,
+              COALESCE(SUM(v.valor), 0) AS total_spent,
+              MAX(v.dia) AS last_visit
+            FROM visitas_clientes v
+            GROUP BY v.client_id
             """)
         .setParameter("tenantId", tenantId)
         .getResultList();
@@ -117,28 +95,16 @@ public class ClienteStatsRepository {
       placeholders.append(":clientId").append(i);
     }
 
-    String sql = """
-        WITH appointment_totals AS (
-          SELECT
-            a.id,
-            a.client_id,
-            a.date,
-            COALESCE(SUM(ai.total_price), 0) AS total_price
-          FROM appointments a
-          LEFT JOIN appointment_items ai ON ai.appointment_id = a.id
-          WHERE a.tenant_id = :tenantId
-            AND a.status = 'Concluido'
-            AND a.client_id IN (%s)
-          GROUP BY a.id, a.client_id, a.date
-        )
+    String sql = ("WITH " + br.com.phdigitalcode.azzo.agenda.pro.util.ReceitaDeClientesSql.CTE + """
         SELECT
-          at.client_id,
-          COUNT(*)::int AS total_visits,
-          COALESCE(SUM(at.total_price), 0) AS total_spent,
-          MAX(at.date) AS last_visit
-        FROM appointment_totals at
-        GROUP BY at.client_id
-        """.formatted(placeholders);
+          v.client_id,
+          COUNT(DISTINCT v.visita_id)::int AS total_visits,
+          COALESCE(SUM(v.valor), 0) AS total_spent,
+          MAX(v.dia) AS last_visit
+        FROM visitas_clientes v
+        WHERE v.client_id IN (%s)
+        GROUP BY v.client_id
+        """).formatted(placeholders);
 
     var query = entityManager.createNativeQuery(sql).setParameter("tenantId", tenantId);
     for (int i = 0; i < filtered.size(); i++) {

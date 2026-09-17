@@ -523,20 +523,18 @@ public class ServicoRelatorios {
     LocalDate inicio = from != null && !from.isBlank() ? DataUtil.parseDataISO(from) : LocalDate.now().minusDays(180);
     LocalDate fim = to != null && !to.isBlank() ? DataUtil.parseDataISO(to) : LocalDate.now();
 
+    // O que o cliente PAGOU e quando veio (ReceitaDeClientesSql), e nao o preco dos agendamentos.
     String sql =
-        """
+        "WITH " + br.com.phdigitalcode.azzo.agenda.pro.util.ReceitaDeClientesSql.CTE + """
         SELECT c.id::text, c.name, c.phone, c.email,
-               COUNT(a.id)::int AS total_visitas,
-               COALESCE(SUM(ai.total_price), 0) AS receita_total,
-               MAX(a.date)::text AS ultima_visita,
-               COALESCE(CURRENT_DATE - MAX(a.date), 999) AS dias_sem_visita
+               COUNT(DISTINCT v.visita_id)::int AS total_visitas,
+               COALESCE(SUM(v.valor), 0) AS receita_total,
+               MAX(v.dia)::text AS ultima_visita,
+               COALESCE(CURRENT_DATE - MAX(v.dia), 999) AS dias_sem_visita
         FROM clients c
-        LEFT JOIN appointments a
-          ON a.client_id = c.id
-         AND a.tenant_id = c.tenant_id
-         AND a.status = 'Concluido'
-         AND a.date BETWEEN :from AND :to
-        LEFT JOIN appointment_items ai ON ai.appointment_id = a.id AND ai.tenant_id = a.tenant_id
+        LEFT JOIN visitas_clientes v
+          ON v.client_id = c.id
+         AND v.dia BETWEEN :from AND :to
         WHERE c.tenant_id = :tenantId
         GROUP BY c.id, c.name, c.phone, c.email
         ORDER BY receita_total DESC, total_visitas DESC

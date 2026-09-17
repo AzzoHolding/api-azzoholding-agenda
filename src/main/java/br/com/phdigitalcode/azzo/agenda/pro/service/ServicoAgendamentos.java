@@ -420,6 +420,10 @@ public class ServicoAgendamentos {
       estornarReceitaConclusaoSeNecessario(tenantId, a);
       commissionService.reverseServiceCommissionIfApplicable(
           tenantId, a.getId(), "Agendamento saiu do status COMPLETED");
+      // O insumo consumido na conclusao volta ao estoque (M2). Com comanda, quem consumiu foi ela, e
+      // o estorno dela e que devolve — aqui so ha movimento pelo agendamento no caminho sem comanda.
+      estoqueMovimentacaoService.devolverInsumosDoAgendamento(
+          tenantId, a.getId(), "agendamento saiu de concluido");
     }
     UUID comandaAbertaId = null;
     if (statusAnterior != StatusAgendamento.IN_PROGRESS
@@ -2138,10 +2142,28 @@ public class ServicoAgendamentos {
     transacaoRepository.save(transacao);
   }
 
+  /**
+   * Estorna a receita lancada pela conclusao — com SOFT DELETE e respeitando o dia com caixa fechado.
+   *
+   * <p>Antes era remocao fisica e ignorava a trava: tirar o agendamento de concluido apagava de vez
+   * uma receita de um dia ja conferido (analise de 2026-09-16, M2). Agora o lancamento fica, marcado
+   * como excluido (como em todo o financeiro), e dia com caixa fechado recusa.
+   */
   private void estornarReceitaConclusaoSeNecessario(UUID tenantId, Agendamento agendamento) {
     if (agendamento == null || agendamento.getId() == null) return;
-    transacaoRepository.deleteByTenantAndAppointmentAndTypeAndCategoryName(
-        tenantId, agendamento.getId(), TipoTransacao.INCOME, "APPOINTMENT");
+    java.util.List<Transacao> receitas =
+        transacaoRepository.listarAtivasDoAgendamentoPorCategoria(
+            tenantId, agendamento.getId(), TipoTransacao.INCOME, "APPOINTMENT");
+    Instant agora = Instant.now();
+    for (Transacao receita : receitas) {
+      if (travaFinanceira != null) {
+        travaFinanceira.exigirDiaAberto(
+            tenantId, receita.getDate(), "APPOINTMENT_REVENUE_REVERSE", "TRANSACTION",
+            receita.getId() != null ? receita.getId().toString() : null, null);
+      }
+      receita.setDeletedAt(agora);
+      receita.setDeletedBy(authenticatedUser.idOuNulo());
+    }
   }
 
   /**

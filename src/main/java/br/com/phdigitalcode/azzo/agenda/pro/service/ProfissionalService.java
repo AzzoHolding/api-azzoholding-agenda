@@ -243,6 +243,7 @@ public class ProfissionalService {
     req.email = p.getEmail();
     req.phone = p.getPhone();
     boolean estavaAtivo = p.isActive();
+    exigirSemAgendamentosFuturosAoDesativar(estavaAtivo, req.isActive, p.getId());
     syncLinkedUserOnUpdate(tenantId, p, req);
     aplicar(req, p, tenantId);
     p = profissionalRepository.save(p);
@@ -262,6 +263,7 @@ public class ProfissionalService {
 
     ProfissionalResponse before = toResponse(p);
     boolean estavaAtivo = p.isActive();
+    exigirSemAgendamentosFuturosAoDesativar(estavaAtivo, isActive, p.getId());
     p.setActive(isActive);
     p = profissionalRepository.save(p);
     encerrarSessoesSeFoiDesativado(estavaAtivo, p);
@@ -293,6 +295,23 @@ public class ProfissionalService {
     refreshTokenService.revokeAllForUser(profissional.getUserId());
   }
 
+  /**
+   * Desativar quem tem atendimento marcado deixava os clientes com um profissional que nao trabalha
+   * mais ali — e ninguem avisado (analise de 2026-09-16, M9). Agora recusa, dizendo quantos sao: o
+   * salao realoca (ou cancela) antes.
+   */
+  private void exigirSemAgendamentosFuturosAoDesativar(
+      boolean estavaAtivo, boolean ficaAtivo, UUID profissionalId) {
+    if (!estavaAtivo || ficaAtivo) return;
+    long futuros = contarAgendamentosFuturos(profissionalId);
+    if (futuros <= 0) return;
+    throw new IllegalArgumentException(
+        "Este profissional tem "
+            + futuros
+            + (futuros == 1 ? " agendamento marcado" : " agendamentos marcados")
+            + ". Realoque ou cancele antes de desativar.");
+  }
+
   /** Soft delete: marca {@code isActive=false}, igual ao original (nunca apaga a linha). */
   @Transactional
   public void deletar(UUID id) {
@@ -309,6 +328,7 @@ public class ProfissionalService {
     }
 
     boolean estavaAtivo = profissional.isActive();
+    exigirSemAgendamentosFuturosAoDesativar(estavaAtivo, false, profissional.getId());
     profissional.setActive(false);
     profissionalRepository.save(profissional);
     encerrarSessoesSeFoiDesativado(estavaAtivo, profissional);

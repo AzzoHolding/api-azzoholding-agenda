@@ -664,7 +664,7 @@ class ServicoEstoqueSuprimentosTest {
     prepararPedido(10, 4);
 
     PedidoCompraEstoqueResponse response =
-        service.receberPedidoCompra(PEDIDO_ID, recebimentoRequest(4, null));
+        service.receberPedidoCompra(PEDIDO_ID, recebimentoRequest(4, "material de limpeza"));
 
     assertThat(response.quantidadePendente).isZero();
     assertThat(response.status).isEqualTo("RECEBIDO");
@@ -675,9 +675,11 @@ class ServicoEstoqueSuprimentosTest {
   void receberPedidoComObservacaoNulaApagaAObservacaoGravada() {
     EstoquePedidoCompra pedido = prepararPedido(10, 10);
     pedido.setObservacao("observacao anterior");
+    // Com item e a mesma quantidade no estoque, a observacao continua opcional.
+    PedidoCompraRecebimentoRequest request = recebimentoRequest(1, null);
+    request.itemEstoqueId = ITEM_ID.toString();
 
-    assertThat(service.receberPedidoCompra(PEDIDO_ID, recebimentoRequest(1, null)).observacao)
-        .isNull();
+    assertThat(service.receberPedidoCompra(PEDIDO_ID, request).observacao).isNull();
   }
 
   /** A validacao de bean so exige {@code @NotNull}; o zero e barrado no service, com 400. */
@@ -698,7 +700,7 @@ class ServicoEstoqueSuprimentosTest {
   @Test
   void receberPedidoComItemDaEntradaNoEstoque() {
     prepararPedido(10, 10);
-    PedidoCompraRecebimentoRequest request = recebimentoRequest(4, null);
+    PedidoCompraRecebimentoRequest request = recebimentoRequest(4, "4 frascos de 500 ml");
     request.itemEstoqueId = ITEM_ID.toString();
     request.quantidadeEstoque = new BigDecimal("2000");
 
@@ -715,7 +717,7 @@ class ServicoEstoqueSuprimentosTest {
   void receberPedidoSemItemNaoMexeNoEstoque() {
     prepararPedido(10, 10);
 
-    service.receberPedidoCompra(PEDIDO_ID, recebimentoRequest(4, null));
+    service.receberPedidoCompra(PEDIDO_ID, recebimentoRequest(4, "papel toalha, nao controlado"));
 
     verifyNoInteractions(estoqueMovimentacaoService);
   }
@@ -1056,5 +1058,32 @@ class ServicoEstoqueSuprimentosTest {
       if (transferencia.getUpdatedAt() == null) transferencia.setUpdatedAt(agora);
     }
     return entidade;
+  }
+
+  // ─── Recebimento com desvio exige explicacao (2026-09-16, M6) ──────────────
+
+  /** Receber sem dar entrada em nada e o jeito de "receber" sem mercadoria: pede explicacao. */
+  @Test
+  void receberSemEntradaNoEstoqueExigeExplicacao() {
+    prepararPedido(10, 10);
+
+    assertThatThrownBy(() -> service.receberPedidoCompra(PEDIDO_ID, recebimentoRequest(4, "  ")))
+        .isInstanceOf(ApiClientErrorException.class)
+        .hasMessageContaining("sem entrada no estoque");
+    verify(estoquePedidoCompraRepository, never()).save(any());
+  }
+
+  /** Receber 1 e lancar 1.000 no saldo infla o estoque: pede a explicacao da conversao. */
+  @Test
+  void quantidadeDiferenteNoEstoqueExigeExplicacao() {
+    prepararPedido(10, 10);
+    PedidoCompraRecebimentoRequest request = recebimentoRequest(1, null);
+    request.itemEstoqueId = ITEM_ID.toString();
+    request.quantidadeEstoque = new BigDecimal("1000");
+
+    assertThatThrownBy(() -> service.receberPedidoCompra(PEDIDO_ID, request))
+        .isInstanceOf(ApiClientErrorException.class)
+        .hasMessageContaining("explique a conversao");
+    verifyNoInteractions(estoqueMovimentacaoService);
   }
 }

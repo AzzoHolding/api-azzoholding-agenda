@@ -29,6 +29,9 @@ public interface MovimentacaoEstoqueRepository
 
   List<MovimentacaoEstoque> findByTenantIdAndComandaItemId(UUID tenantId, UUID comandaItemId);
 
+  /** O que um agendamento movimentou no estoque — para devolver o insumo quando ele sai de concluido. */
+  List<MovimentacaoEstoque> findByTenantIdAndAppointmentId(UUID tenantId, UUID appointmentId);
+
   /** O agendamento ja consumiu insumo pela regra antiga (conclusao)? Ver ServicoComanda.fechar. */
   boolean existsByTenantIdAndAppointmentId(UUID tenantId, UUID appointmentId);
 

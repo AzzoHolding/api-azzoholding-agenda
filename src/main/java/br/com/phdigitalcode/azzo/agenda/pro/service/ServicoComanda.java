@@ -321,6 +321,21 @@ public class ServicoComanda {
       if (NumericUtil.isZeroOrNegative(request.precoUnitario)) {
         throw new IllegalArgumentException("Preco de venda do produto precisa ser maior que zero.");
       }
+      // Sem estoque (com o bloqueio de saida ligado), recusa AGORA — e nao so ao fechar, depois de o
+      // cliente pagar (M5). Conta tambem o que a comanda ja tem desse produto.
+      BigDecimal quantidadeNaComanda =
+          comandaItemRepository.findByComandaIdOrderByCreatedAt(comanda.getId()).stream()
+              .filter(
+                  existente ->
+                      ComandaItem.TIPO_PRODUTO.equals(existente.getTipo())
+                          && referenciaId.equals(existente.getReferenciaId()))
+              .map(ComandaItem::getQuantidade)
+              .reduce(item.getQuantidade(), NumericUtil::add);
+      if (estoqueMovimentacaoService.faltaSaldoParaVender(tenantId, referenciaId, quantidadeNaComanda)) {
+        throw new IllegalArgumentException(
+            "Sem estoque de " + produto.getNome() + " para esta venda (saldo "
+                + NumericUtil.normalize(produto.getSaldoAtual()) + ").");
+      }
       item.setDescricao(produto.getNome());
       item.setPrecoUnitario(request.precoUnitario);
     } else {

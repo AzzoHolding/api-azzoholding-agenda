@@ -1257,6 +1257,28 @@ public class ServicoEstoque {
       throw conflito("Quantidade recebida maior que a pendente.");
     }
 
+    // Receber sem dar entrada em item nenhum, ou lancar no saldo quantidade diferente da recebida,
+    // tem motivo legitimo (material que nao se controla; caixa com 12 unidades) — e tambem e o jeito
+    // de "receber" sem mercadoria ou inflar o estoque (analise de 2026-09-16, M6). Os dois casos
+    // passam a exigir a explicacao, que fica na trilha do recebimento.
+    boolean semEntradaNoEstoque = request.itemEstoqueId == null || request.itemEstoqueId.isBlank();
+    boolean quantidadeDiferente =
+        !semEntradaNoEstoque
+            && request.quantidadeEstoque != null
+            && request.quantidadeEstoque.compareTo(BigDecimal.valueOf(quantidadeRecebida)) != 0;
+    String explicacao = EstoqueTextoUtil.normalizarTextoBase(request.observacao);
+    if ((semEntradaNoEstoque || quantidadeDiferente) && (explicacao == null || explicacao.isBlank())) {
+      throw new ApiClientErrorException(
+          semEntradaNoEstoque
+              ? "Recebimento sem entrada no estoque: explique na observacao o que foi recebido."
+              : "A quantidade que entra no estoque ("
+                  + request.quantidadeEstoque.stripTrailingZeros().toPlainString()
+                  + ") e diferente da recebida ("
+                  + quantidadeRecebida
+                  + "): explique a conversao na observacao.",
+          HttpStatus.BAD_REQUEST.value());
+    }
+
     MovimentacaoEstoqueResponse entrada = null;
     if (request.itemEstoqueId != null && !request.itemEstoqueId.isBlank()) {
       BigDecimal quantidadeEstoque =
