@@ -91,6 +91,13 @@ public class ProfissionalService {
   private final PasswordPolicyValidator passwordPolicyValidator;
   private final AgendamentoRepository agendamentoRepository;
 
+  /**
+   * Derruba as sessoes de quem e desativado. Campo, e nao construtor: sem ele (teste) o
+   * login e a renovacao continuam barrando; so a sessao ja aberta dura ate o token vencer.
+   */
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  private br.com.phdigitalcode.azzo.agenda.pro.security.RefreshTokenService refreshTokenService;
+
   public ProfissionalService(
       ProfissionalRepository profissionalRepository,
       ProfissionalWorkingHourRepository profissionalWorkingHourRepository,
@@ -235,9 +242,11 @@ public class ProfissionalService {
     // (ServicoProfissionais.atualizar sobrescreve req.email/req.phone com os valores atuais).
     req.email = p.getEmail();
     req.phone = p.getPhone();
+    boolean estavaAtivo = p.isActive();
     syncLinkedUserOnUpdate(tenantId, p, req);
     aplicar(req, p, tenantId);
     p = profissionalRepository.save(p);
+    encerrarSessoesSeFoiDesativado(estavaAtivo, p);
     replaceWorkingHours(p, tenantId, req.workingHours);
 
     ProfissionalResponse after = toResponse(p);
@@ -252,11 +261,36 @@ public class ProfissionalService {
         .orElseThrow(() -> new IllegalArgumentException("Profissional nao encontrado"));
 
     ProfissionalResponse before = toResponse(p);
+    boolean estavaAtivo = p.isActive();
     p.setActive(isActive);
     p = profissionalRepository.save(p);
+    encerrarSessoesSeFoiDesativado(estavaAtivo, p);
     ProfissionalResponse after = toResponse(p);
     registrarAuditoriaProfissional(tenantId, "PROFESSIONAL_UPDATE", before, after, p.getId().toString());
     return after;
+  }
+
+  /**
+   * Quem acabou de ser desativado sai do sistema AGORA.
+   *
+   * <p>Barrar so o login deixava a sessao aberta viva: o access token vale 15 minutos e o refresh,
+   * 30 dias. {@code revokeAllForUser} revoga os refresh tokens e marca {@code tokensRevokedBefore},
+   * que o filtro do JWT ja confere a cada requisicao. O dono nunca e desconectado por aqui.
+   */
+  private void encerrarSessoesSeFoiDesativado(boolean estavaAtivo, Profissional profissional) {
+    if (!estavaAtivo || profissional.isActive() || profissional.getUserId() == null) return;
+    if (refreshTokenService == null) return;
+    boolean ehDono =
+        usuarioRepository
+            .findById(profissional.getUserId())
+            .map(
+                usuario ->
+                    usuario.getRole() == br.com.phdigitalcode.azzo.agenda.pro.entity.enums.PapelUsuario.OWNER
+                        || usuario.getRole()
+                            == br.com.phdigitalcode.azzo.agenda.pro.entity.enums.PapelUsuario.ADMIN)
+            .orElse(false);
+    if (ehDono) return;
+    refreshTokenService.revokeAllForUser(profissional.getUserId());
   }
 
   /** Soft delete: marca {@code isActive=false}, igual ao original (nunca apaga a linha). */
@@ -274,8 +308,10 @@ public class ProfissionalService {
       throw new IllegalArgumentException("Nao e permitido remover o proprio usuario");
     }
 
+    boolean estavaAtivo = profissional.isActive();
     profissional.setActive(false);
     profissionalRepository.save(profissional);
+    encerrarSessoesSeFoiDesativado(estavaAtivo, profissional);
     registrarAuditoriaProfissional(tenantId, "PROFESSIONAL_DELETE", before, null, profissional.getId().toString());
   }
 

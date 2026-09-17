@@ -57,6 +57,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.repository.RbacUserRoleRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.TenantRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.UsuarioRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.security.EncryptionService;
+import br.com.phdigitalcode.azzo.agenda.pro.security.AcessoDeProfissional;
 import br.com.phdigitalcode.azzo.agenda.pro.security.JwtService;
 import br.com.phdigitalcode.azzo.agenda.pro.security.PasswordPolicyValidator;
 import br.com.phdigitalcode.azzo.agenda.pro.security.RefreshTokenService;
@@ -128,6 +129,7 @@ public class AuthServiceImpl implements AuthService {
   private final CheckoutIntentRepository checkoutIntentRepository;
   private final CheckoutOrderRepository checkoutOrderRepository;
   private final LicenseEventRepository licenseEventRepository;
+  private final AcessoDeProfissional acessoDeProfissional;
 
   @Value("${app.public.booking.base-url:http://localhost:5173}")
   private String publicFrontendBaseUrl;
@@ -151,7 +153,8 @@ public class AuthServiceImpl implements AuthService {
       ProductRepository productRepository,
       CheckoutIntentRepository checkoutIntentRepository,
       CheckoutOrderRepository checkoutOrderRepository,
-      LicenseEventRepository licenseEventRepository) {
+      LicenseEventRepository licenseEventRepository,
+      AcessoDeProfissional acessoDeProfissional) {
     this.tenantRepository = tenantRepository;
     this.usuarioRepository = usuarioRepository;
     this.rbacRoleRepository = rbacRoleRepository;
@@ -171,6 +174,7 @@ public class AuthServiceImpl implements AuthService {
     this.checkoutIntentRepository = checkoutIntentRepository;
     this.checkoutOrderRepository = checkoutOrderRepository;
     this.licenseEventRepository = licenseEventRepository;
+    this.acessoDeProfissional = acessoDeProfissional;
   }
 
   @Override
@@ -266,8 +270,17 @@ public class AuthServiceImpl implements AuthService {
     }
     emailLoginAttempts.remove(normalizedEmail);
 
-    // NOTA: verificacao de profissional inativo (modulo professionals) fica pendente ate esse
-    // modulo ser migrado — ver JavaDoc da classe.
+    // Quem saiu da equipe nao entra mais. A checagem vem DEPOIS da senha, de proposito: antes
+    // dela, a resposta diria a um estranho que aquele e-mail existe e foi desligado.
+    if (acessoDeProfissional.desativado(usuario)) {
+      LOG.warn(CorrelatedLogging.context(
+          "Login recusado", "tenantId", usuario.getTenantId(), "userId", usuario.getId(),
+          "email", usuario.getEmail(), "reason", "professional_inactive"));
+      registrarAuditoriaAuth(
+          usuario.getTenantId(), usuario.getId(), AuditConstants.Status.DENIED, "AUTH_LOGIN",
+          null, Map.of("email", usuario.getEmail(), "reason", "PROFESSIONAL_INACTIVE"));
+      throw new ApiClientErrorException(AcessoDeProfissional.MENSAGEM, 403);
+    }
 
     if (requiresMfaForLogin(usuario) && !isMfaCodePresent(request)) {
       LOG.warn(CorrelatedLogging.context(

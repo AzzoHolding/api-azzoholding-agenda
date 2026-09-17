@@ -103,7 +103,8 @@ class AuthServiceImplRegistrarTest {
         rbacAuthorizationRepository, passwordResetTokenRepository, jwtService, refreshTokenService,
         encryptionService, totpService, auditService, passwordPolicyValidator, emailJobService,
         usuarioMapper, termsService, productRepository, checkoutIntentRepository,
-        checkoutOrderRepository, licenseEventRepository);
+        checkoutOrderRepository, licenseEventRepository,
+        org.mockito.Mockito.mock(br.com.phdigitalcode.azzo.agenda.pro.security.AcessoDeProfissional.class));
 
     termosDeUso = versao(AuditConstants.TermsDocumentType.TERMS_OF_USE);
     politicaDePrivacidade = versao(AuditConstants.TermsDocumentType.PRIVACY_POLICY);
