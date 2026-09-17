@@ -100,6 +100,10 @@ public class ServicoFechamentoCaixa {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     LocalDate businessDate = parseBusinessDateOrToday(request != null ? request.businessDate : null);
     if (businessDate.isAfter(LocalDate.now(ZONA_BR))) {
+      registrarTentativa(
+          tenantId, "FINANCE_CASH_CLOSING_OPEN", null,
+          Map.of("businessDate", businessDate.toString()),
+          "Nao e possivel abrir caixa para uma data futura.");
       throw new IllegalArgumentException("Nao e possivel abrir caixa para uma data futura.");
     }
     if (fechamentoCaixaRepository.findByTenantIdAndBusinessDate(tenantId, businessDate).isPresent()) {
@@ -146,6 +150,15 @@ public class ServicoFechamentoCaixa {
     boolean temDiferenca =
         difference.values().stream().anyMatch(valor -> valor != null && valor.signum() != 0);
     if (temDiferenca && observacoes == null) {
+      // Tentar fechar com falta e sem explicar e exatamente o que o dono quer ver na trilha.
+      Map<String, Object> tentativa = new LinkedHashMap<>();
+      tentativa.put("businessDate", String.valueOf(fechamento.getBusinessDate()));
+      tentativa.put("expectedTotals", writeAmountMapAsStrings(expected));
+      tentativa.put("countedTotals", writeAmountMapAsStrings(counted));
+      tentativa.put("differenceTotals", writeAmountMapAsStrings(difference));
+      registrarTentativa(
+          tenantId, "FINANCE_CASH_CLOSING_CLOSE", fechamento.getId(), tentativa,
+          "Explique a diferenca entre o esperado e o contado antes de fechar o caixa.");
       throw new IllegalArgumentException(
           "Explique a diferenca entre o esperado e o contado antes de fechar o caixa.");
     }
@@ -415,6 +428,26 @@ public class ServicoFechamentoCaixa {
       auditService.recordSuccess(command);
     } catch (Exception ignored) {
       // Auditoria nao deve quebrar o fluxo principal.
+    }
+  }
+
+  /** Tentativa barrada no caixa — gravada numa transacao propria, para sobreviver ao rollback. */
+  private void registrarTentativa(
+      UUID tenantId, String action, UUID entityId, Object tentativa, String motivo) {
+    try {
+      AuditEventCommand command = new AuditEventCommand();
+      command.tenantId = tenantId;
+      command.module = AuditConstants.Module.FINANCE;
+      command.action = action;
+      command.entityType = "CASH_CLOSING";
+      command.entityId = entityId != null ? entityId.toString() : null;
+      command.sourceChannel = AuditConstants.SourceChannel.API;
+      command.errorCode = "BLOQUEADO";
+      command.errorMessage = motivo;
+      command.after = tentativa;
+      auditService.recordDeniedIsolated(command);
+    } catch (Exception ignored) {
+      // A trilha nunca decide a resposta.
     }
   }
 

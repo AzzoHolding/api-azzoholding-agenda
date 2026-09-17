@@ -897,7 +897,26 @@ public class TenantOperationalSettingsService {
       if (teto < 0 || teto > 100) {
         throw new IllegalArgumentException("O teto de desconto vai de 0% a 100%.");
       }
+      int anterior = entity.getPosMaxDiscountPercent();
       entity.setPosMaxDiscountPercent(teto);
+      if (anterior != teto) {
+        try {
+          br.com.phdigitalcode.azzo.agenda.pro.integration.AuditEventCommand command =
+              new br.com.phdigitalcode.azzo.agenda.pro.integration.AuditEventCommand();
+          command.tenantId = tenantId;
+          command.module = br.com.phdigitalcode.azzo.agenda.pro.integration.AuditConstants.Module.FINANCE;
+          command.action = "FINANCE_DISCOUNT_POLICY_UPDATE";
+          command.entityType = "DISCOUNT_POLICY";
+          command.entityId = tenantId.toString();
+          command.sourceChannel =
+              br.com.phdigitalcode.azzo.agenda.pro.integration.AuditConstants.SourceChannel.API;
+          command.before = java.util.Map.of("maxDiscountPercent", anterior);
+          command.after = java.util.Map.of("maxDiscountPercent", teto);
+          auditService.recordSuccess(command);
+        } catch (Exception ignored) {
+          // Auditoria nao deve quebrar o fluxo principal.
+        }
+      }
     }
     return toDiscountPolicyResponse(entity);
   }

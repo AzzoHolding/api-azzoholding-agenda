@@ -108,6 +108,7 @@ public class ServicoComanda {
   private final MovimentacaoEstoqueRepository movimentacaoEstoqueRepository;
   private final TenantOperationalSettingsRepository tenantOperationalSettingsRepository;
   private final AgendamentoRepository agendamentoRepository;
+  private final TravaFinanceira travaFinanceira;
 
   private final AuditService auditService;
 
@@ -136,7 +137,8 @@ public class ServicoComanda {
       MovimentacaoEstoqueRepository movimentacaoEstoqueRepository,
       TenantOperationalSettingsRepository tenantOperationalSettingsRepository,
       AgendamentoRepository agendamentoRepository,
-      AuditService auditService) {
+      AuditService auditService,
+      TravaFinanceira travaFinanceira) {
     this.contextoTenant = contextoTenant;
     this.authenticatedUser = authenticatedUser;
     this.comandaRepository = comandaRepository;
@@ -162,6 +164,7 @@ public class ServicoComanda {
     this.tenantOperationalSettingsRepository = tenantOperationalSettingsRepository;
     this.agendamentoRepository = agendamentoRepository;
     this.auditService = auditService;
+    this.travaFinanceira = travaFinanceira;
   }
 
   @Transactional
@@ -395,8 +398,12 @@ public class ServicoComanda {
     if (teto >= 100) return;
     if (percentual.compareTo(new BigDecimal(teto)) <= 0) return;
 
-    throw new IllegalArgumentException(
-        "O desconto maximo sem o dono e de " + teto + "%. Chame o dono para dar mais que isso.");
+    String mensagem =
+        "O desconto maximo sem o dono e de " + teto + "%. Chame o dono para dar mais que isso.";
+    travaFinanceira.registrarTentativaBloqueada(
+        tenantId, "POS_DISCOUNT_APPLY", "COMANDA", null,
+        Map.of("percentual", percentual, "teto", teto), mensagem);
+    throw new IllegalArgumentException(mensagem);
   }
 
   @Transactional
@@ -531,6 +538,11 @@ public class ServicoComanda {
             .orElseThrow(() -> new ApiClientErrorException("Comanda nao encontrada.", 404));
     exigirComandaDoProfissional(tenantId, comanda);
     exigirAberta(comanda);
+    // A receita desta venda entra HOJE. Com o caixa de hoje ja fechado, ela ficaria fora do que foi
+    // contado — o dinheiro entra na gaveta depois da conferencia e ninguem confere.
+    travaFinanceira.exigirDiaAberto(
+        tenantId, Instant.now(), "POS_COMANDA_CLOSE", "COMANDA", comanda.getId().toString(),
+        dadosDaComanda(comanda));
 
     List<ComandaItem> itens = comandaItemRepository.findByComandaIdOrderByCreatedAt(comanda.getId());
     if (itens.isEmpty()) {
@@ -938,6 +950,12 @@ public class ServicoComanda {
             .findByIdAndTenantParaAtualizacao(id, tenantId)
             .orElseThrow(() -> new ApiClientErrorException("Comanda nao encontrada.", 404));
     exigirFechada(comanda);
+    // O estorno apaga a receita do dia em que a venda FECHOU. Se esse caixa ja foi contado e
+    // fechado, estornar tiraria dinheiro de um dia assinado — fecha certinho hoje, estorna amanha e
+    // leva o dinheiro, e o caixa fechado nunca mais e revisitado (analise de 2026-09-16).
+    travaFinanceira.exigirDiaAberto(
+        tenantId, comanda.getClosedAt(), "POS_COMANDA_REVERSE", "COMANDA",
+        comanda.getId().toString(), Map.of("motivo", request.motivo == null ? "" : request.motivo));
     String motivo = request.motivo.trim();
 
     List<ComandaItem> itens = comandaItemRepository.findByComandaIdOrderByCreatedAt(comanda.getId());
@@ -1153,6 +1171,10 @@ public class ServicoComanda {
             .orElse(false)) {
       return;
     }
+    travaFinanceira.registrarTentativaBloqueada(
+        tenantId, "POS_COMANDA_ACCESS", "COMANDA", comanda.getId().toString(),
+        Map.of("profissionalId", profissionalId.toString()),
+        "Profissional tentou acessar a comanda de outro profissional.");
     throw new ApiClientErrorException("Comanda nao encontrada.", 404);
   }
 

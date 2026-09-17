@@ -6,6 +6,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -63,6 +65,7 @@ class ServicoFinanceiroTest {
   @Mock private AuthenticatedUser authenticatedUser;
   @Mock private AuditService auditService;
   @Mock private CommissionService commissionService;
+  @Mock private TravaFinanceira travaFinanceira;
 
   private ServicoFinanceiro servicoFinanceiro;
 
@@ -79,7 +82,8 @@ class ServicoFinanceiroTest {
             contextoTenant,
             authenticatedUser,
             auditService,
-            commissionService);
+            commissionService,
+            travaFinanceira);
   }
 
   @Test
@@ -368,5 +372,96 @@ class ServicoFinanceiroTest {
     rt.setDayOfMonth(dayOfMonth);
     rt.setActive(true);
     return rt;
+  }
+
+  // ─── Travas do dinheiro conferido (2026-09-16) ─────────────────────────────
+
+  /**
+   * A fraude que isto fecha: a comanda lanca R$ 200 em dinheiro hoje, alguem muda a data para 2031
+   * (ou exclui), o esperado de hoje cai R$ 200 e o caixa bate com o dinheiro fora da gaveta.
+   */
+  @Test
+  @DisplayName("Lancamento que veio de comanda nao se edita")
+  void lancamentoDeComandaNaoSeEdita() {
+    UUID transacaoId = UUID.randomUUID();
+    Transacao daComanda = transacaoExistente(transacaoId);
+    daComanda.setComandaId(UUID.randomUUID());
+    Instant dataOriginal = daComanda.getDate();
+    when(contextoTenant.obterTenantIdOuFalhar()).thenReturn(TENANT_ID);
+    when(transacaoRepository.findAtivaByIdAndTenant(transacaoId, TENANT_ID))
+        .thenReturn(Optional.of(daComanda));
+
+    TransacaoRequest req = new TransacaoRequest();
+    req.type = "income";
+    req.category = "Vendas";
+    req.amount = new BigDecimal("200");
+    req.paymentMethod = "cash";
+    req.date = "2031-01-01";
+
+    assertThatThrownBy(() -> servicoFinanceiro.atualizar(transacaoId, req))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("veio de uma comanda");
+    assertThat(daComanda.getDate()).isEqualTo(dataOriginal);
+    verify(travaFinanceira)
+        .registrarTentativaBloqueada(
+            eq(TENANT_ID), eq("FINANCE_TRANSACTION_UPDATE"), eq("TRANSACTION"),
+            eq(transacaoId.toString()), any(), anyString());
+  }
+
+  @Test
+  @DisplayName("Lancamento que veio de comanda nao se exclui")
+  void lancamentoDeComandaNaoSeExclui() {
+    UUID transacaoId = UUID.randomUUID();
+    Transacao daComanda = transacaoExistente(transacaoId);
+    daComanda.setComandaId(UUID.randomUUID());
+    when(contextoTenant.obterTenantIdOuFalhar()).thenReturn(TENANT_ID);
+    when(transacaoRepository.findAtivaByIdAndTenant(transacaoId, TENANT_ID))
+        .thenReturn(Optional.of(daComanda));
+
+    assertThatThrownBy(() -> servicoFinanceiro.deletar(transacaoId))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("estorna a comanda");
+    assertThat(daComanda.getDeletedAt()).isNull();
+  }
+
+  @Test
+  @DisplayName("Dia com caixa fechado: a exclusao nao acontece")
+  void diaFechadoImpedeExclusao() {
+    UUID transacaoId = UUID.randomUUID();
+    Transacao manual = transacaoExistente(transacaoId);
+    when(contextoTenant.obterTenantIdOuFalhar()).thenReturn(TENANT_ID);
+    when(transacaoRepository.findAtivaByIdAndTenant(transacaoId, TENANT_ID))
+        .thenReturn(Optional.of(manual));
+    doThrow(new IllegalArgumentException("O caixa de 01/01/2026 ja foi fechado"))
+        .when(travaFinanceira)
+        .exigirDiaAberto(eq(TENANT_ID), any(), eq("FINANCE_TRANSACTION_DELETE"), anyString(), anyString(), isNull());
+
+    assertThatThrownBy(() -> servicoFinanceiro.deletar(transacaoId))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("ja foi fechado");
+    assertThat(manual.getDeletedAt()).isNull();
+  }
+
+  @Test
+  @DisplayName("Criar passa pelas travas de data e de dia fechado ANTES de gravar")
+  void criarPassaPelasTravas() {
+    when(contextoTenant.obterTenantIdOuFalhar()).thenReturn(TENANT_ID);
+    when(transactionCategoryRepository.findByTenantAndName(TENANT_ID, "Vendas"))
+        .thenReturn(Optional.of(categoria("Vendas")));
+    doThrow(new IllegalArgumentException("Data do lancamento muito distante"))
+        .when(travaFinanceira)
+        .exigirDataDeLancamentoManual(eq(TENANT_ID), any(), eq("FINANCE_TRANSACTION_CREATE"), isNull(), any());
+
+    TransacaoRequest req = new TransacaoRequest();
+    req.type = "expense";
+    req.category = "Vendas";
+    req.amount = new BigDecimal("200");
+    req.paymentMethod = "cash";
+    req.date = "2031-01-01";
+
+    assertThatThrownBy(() -> servicoFinanceiro.criar(req))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("muito distante");
+    verify(transacaoRepository, never()).save(any());
   }
 }

@@ -80,6 +80,7 @@ public class ServicoFinanceiro {
   private final AuthenticatedUser authenticatedUser;
   private final AuditService auditService;
   private final CommissionService commissionService;
+  private final TravaFinanceira travaFinanceira;
 
   public ServicoFinanceiro(
       TransacaoRepository transacaoRepository,
@@ -91,7 +92,8 @@ public class ServicoFinanceiro {
       ContextoTenant contextoTenant,
       AuthenticatedUser authenticatedUser,
       AuditService auditService,
-      CommissionService commissionService) {
+      CommissionService commissionService,
+      TravaFinanceira travaFinanceira) {
     this.transacaoRepository = transacaoRepository;
     this.transacaoQueryRepository = transacaoQueryRepository;
     this.transactionCategoryRepository = transactionCategoryRepository;
@@ -102,6 +104,7 @@ public class ServicoFinanceiro {
     this.authenticatedUser = authenticatedUser;
     this.auditService = auditService;
     this.commissionService = commissionService;
+    this.travaFinanceira = travaFinanceira;
   }
 
   // ─── LISTAGEM COM PAGINACAO E FILTROS (F0.3) ─────────────────────────────
@@ -182,6 +185,8 @@ public class ServicoFinanceiro {
     CategoriaResponse r = new CategoriaResponse();
     r.id = cat.getId().toString();
     r.name = cat.getName();
+    registrarAuditoriaFinanceiro(
+        tenantId, "FINANCE_CATEGORY_CREATE", "CATEGORY", null, Map.of("name", cat.getName()), r.id);
     return r;
   }
 
@@ -204,7 +209,15 @@ public class ServicoFinanceiro {
       throw new IllegalArgumentException("Ja existe uma categoria com este nome");
     }
 
+    String nomeAnterior = cat.getName();
     cat.setName(normalized);
+    registrarAuditoriaFinanceiro(
+        tenantId,
+        "FINANCE_CATEGORY_RENAME",
+        "CATEGORY",
+        Map.of("name", nomeAnterior),
+        Map.of("name", normalized),
+        id.toString());
     CategoriaResponse r = new CategoriaResponse();
     r.id = cat.getId().toString();
     r.name = cat.getName();
@@ -227,6 +240,13 @@ public class ServicoFinanceiro {
           "Nao e possivel excluir: existem " + vinculadas + " lancamento(s) vinculado(s) a esta categoria");
     }
 
+    registrarAuditoriaFinanceiro(
+        tenantId,
+        "FINANCE_CATEGORY_DELETE",
+        "CATEGORY",
+        Map.of("name", cat.getName()),
+        null,
+        id.toString());
     transactionCategoryRepository.delete(cat);
   }
 
@@ -254,6 +274,13 @@ public class ServicoFinanceiro {
     t.setPaymentMethod(resolveMetodoPagamento(req.paymentMethod));
     t.setDate(DataUtil.parseInstantISO(req.date));
 
+    // Data fora de hoje so o dono, nunca mais de um ano a frente, e nunca num dia com caixa
+    // fechado — ver TravaFinanceira.
+    travaFinanceira.exigirDataDeLancamentoManual(
+        tenantId, t.getDate(), "FINANCE_TRANSACTION_CREATE", null, buildAuditPayload(req));
+    travaFinanceira.exigirDiaAberto(
+        tenantId, t.getDate(), "FINANCE_TRANSACTION_CREATE", "TRANSACTION", null, buildAuditPayload(req));
+
     transacaoRepository.save(t);
     String resolvedProductCategory =
         t.getProductCategoryRef() != null
@@ -272,11 +299,12 @@ public class ServicoFinanceiro {
           t.getDate(),
           t.getDescription());
     }
+    // O evento guarda o que FOI gravado (categoria e forma resolvidas), e nao o pedido cru.
     registrarAuditoriaFinanceiro(
         tenantId,
         "FINANCE_TRANSACTION_CREATE",
         null,
-        buildAuditPayload(req),
+        buildAuditPayloadFromTransacao(t),
         t.getId() != null ? t.getId().toString() : null);
     return toResponse(t);
   }
@@ -292,6 +320,18 @@ public class ServicoFinanceiro {
 
     // Snapshot para auditoria e deteccao de mudancas que afetam a comissao.
     Map<String, Object> before = buildAuditPayloadFromTransacao(t);
+
+    exigirLancamentoManual(tenantId, t, "FINANCE_TRANSACTION_UPDATE", buildAuditPayload(req));
+    // O dia de ORIGEM e o de DESTINO: tirar dinheiro de um dia fechado e tao grave quanto por.
+    travaFinanceira.exigirDiaAberto(
+        tenantId, t.getDate(), "FINANCE_TRANSACTION_UPDATE", "TRANSACTION", id.toString(),
+        buildAuditPayload(req));
+    Instant novaData = DataUtil.parseInstantISO(req.date);
+    travaFinanceira.exigirDataDeLancamentoManual(
+        tenantId, novaData, "FINANCE_TRANSACTION_UPDATE", id.toString(), buildAuditPayload(req));
+    travaFinanceira.exigirDiaAberto(
+        tenantId, novaData, "FINANCE_TRANSACTION_UPDATE", "TRANSACTION", id.toString(),
+        buildAuditPayload(req));
 
     UUID newProfessionalId = parseUuidNullable(req.professionalId);
     UUID newStockItemId = parseUuidNullable(req.productId);
@@ -344,7 +384,7 @@ public class ServicoFinanceiro {
     }
 
     registrarAuditoriaFinanceiro(
-        tenantId, "FINANCE_TRANSACTION_UPDATE", before, buildAuditPayload(req), id.toString());
+        tenantId, "FINANCE_TRANSACTION_UPDATE", before, buildAuditPayloadFromTransacao(t), id.toString());
     return toResponse(t);
   }
 
@@ -357,6 +397,10 @@ public class ServicoFinanceiro {
             .orElseThrow(() -> new ApiClientErrorException("Transacao nao encontrada", 404));
 
     Map<String, Object> before = buildAuditPayloadFromTransacao(t);
+
+    exigirLancamentoManual(tenantId, t, "FINANCE_TRANSACTION_DELETE", null);
+    travaFinanceira.exigirDiaAberto(
+        tenantId, t.getDate(), "FINANCE_TRANSACTION_DELETE", "TRANSACTION", id.toString(), null);
 
     // Soft delete (F2.3)
     t.setDeletedAt(Instant.now());
@@ -380,8 +424,15 @@ public class ServicoFinanceiro {
             .findAtivaByIdAndTenant(id, tenantId)
             .orElseThrow(() -> new ApiClientErrorException("Transacao nao encontrada", 404));
 
-    t.setReconciled(!t.isReconciled());
+    boolean antes = t.isReconciled();
+    t.setReconciled(!antes);
     t.setReconciledAt(t.isReconciled() ? Instant.now() : null);
+    registrarAuditoriaFinanceiro(
+        tenantId,
+        "FINANCE_TRANSACTION_RECONCILE",
+        Map.of("reconciled", antes),
+        Map.of("reconciled", t.isReconciled()),
+        id.toString());
     return toResponse(t);
   }
 
@@ -547,7 +598,15 @@ public class ServicoFinanceiro {
     rt.setDayOfMonth(req.dayOfMonth != null ? req.dayOfMonth.shortValue() : null);
     rt.setDayOfWeek(req.dayOfWeek != null ? req.dayOfWeek.shortValue() : null);
     recurringTransactionRepository.save(rt);
-    return toRecurringResponse(rt);
+    RecurringTransactionResponse criada = toRecurringResponse(rt);
+    registrarAuditoriaFinanceiro(
+        tenantId,
+        "FINANCE_RECURRING_CREATE",
+        "RECURRING_TRANSACTION",
+        null,
+        criada,
+        rt.getId() != null ? rt.getId().toString() : null);
+    return criada;
   }
 
   @Transactional
@@ -558,7 +617,15 @@ public class ServicoFinanceiro {
             .findByIdAndTenantId(id, tenantId)
             .filter(RecurringTransaction::isActive)
             .orElseThrow(() -> new ApiClientErrorException("Recorrencia nao encontrada", 404));
+    RecurringTransactionResponse antes = toRecurringResponse(rt);
     rt.setActive(false);
+    registrarAuditoriaFinanceiro(
+        tenantId,
+        "FINANCE_RECURRING_DEACTIVATE",
+        "RECURRING_TRANSACTION",
+        antes,
+        toRecurringResponse(rt),
+        id.toString());
   }
 
   /**
@@ -634,14 +701,46 @@ public class ServicoFinanceiro {
 
   // ─── UTILITARIOS PRIVADOS ────────────────────────────────────────────────
 
+  /**
+   * So o lancamento feito A MAO se edita ou exclui.
+   *
+   * <p>O que nasceu de uma venda (comanda) ou de um atendimento e a receita que o caixa confere:
+   * mudar a data dele para 2031, ou exclui-lo, tirava o valor do dia e fazia o caixa bater com o
+   * dinheiro fora da gaveta. A correcao desses passa pelo ESTORNO da comanda, que e so do dono e
+   * desfaz tudo junto (receita, estoque, comissao, fidelidade).
+   */
+  private void exigirLancamentoManual(
+      UUID tenantId, Transacao t, String acao, Object tentativa) {
+    if (t.getComandaId() == null && t.getAppointmentId() == null) return;
+    String motivo =
+        t.getComandaId() != null
+            ? "Este lancamento veio de uma comanda e nao pode ser alterado nem excluido. Para"
+                + " desfazer a venda, o dono estorna a comanda."
+            : "Este lancamento veio de um atendimento e nao pode ser alterado nem excluido.";
+    travaFinanceira.registrarTentativaBloqueada(
+        tenantId, acao, "TRANSACTION", t.getId() != null ? t.getId().toString() : null,
+        tentativa, motivo);
+    throw new IllegalArgumentException(motivo);
+  }
+
   private void registrarAuditoriaFinanceiro(
       UUID tenantId, String action, Object before, Object after, String entityId) {
+    registrarAuditoriaFinanceiro(tenantId, action, "TRANSACTION", before, after, entityId);
+  }
+
+  private void registrarAuditoriaFinanceiro(
+      UUID tenantId,
+      String action,
+      String entityType,
+      Object before,
+      Object after,
+      String entityId) {
     try {
       AuditEventCommand command = new AuditEventCommand();
       command.tenantId = tenantId;
       command.module = AuditConstants.Module.FINANCE;
       command.action = action;
-      command.entityType = "TRANSACTION";
+      command.entityType = entityType;
       command.entityId = entityId;
       command.sourceChannel = AuditConstants.SourceChannel.API;
       command.before = before;
@@ -792,6 +891,12 @@ public class ServicoFinanceiro {
     payload.put("amount", t.getAmount());
     payload.put("paymentMethod", t.getPaymentMethod() != null ? t.getPaymentMethod().name() : null);
     payload.put("date", t.getDate() != null ? t.getDate().toString() : null);
+    payload.put(
+        "origin",
+        t.getComandaId() != null ? "COMANDA" : t.getAppointmentId() != null ? "APPOINTMENT" : "MANUAL");
+    if (t.getComandaId() != null) payload.put("comandaId", t.getComandaId().toString());
+    if (t.getAppointmentId() != null) payload.put("appointmentId", t.getAppointmentId().toString());
+    payload.put("reconciled", t.isReconciled());
     if (t.getProfessionalId() != null) payload.put("professionalId", t.getProfessionalId().toString());
     if (t.getStockItemId() != null) payload.put("productId", t.getStockItemId().toString());
     if (t.getProductCategoryRef() != null) {

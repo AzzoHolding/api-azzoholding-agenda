@@ -15,6 +15,10 @@ import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -25,6 +29,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import br.com.phdigitalcode.azzo.agenda.pro.entity.AuditEvent;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.AuditEventRepository;
+import br.com.phdigitalcode.azzo.agenda.pro.security.JwtPrincipal;
 import br.com.phdigitalcode.azzo.agenda.pro.security.RequestAuditContext;
 import br.com.phdigitalcode.azzo.agenda.pro.util.LogSanitizer;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -111,6 +116,18 @@ public class AuditService {
 
   @Transactional
   public AuditEvent recordDenied(AuditEventCommand command) {
+    return persist(command, AuditConstants.Status.DENIED);
+  }
+
+  /**
+   * Tentativa barrada, gravada numa transacao PROPRIA.
+   *
+   * <p>Quem barra uma operacao lanca excecao, e a transacao dela faz rollback. Com o
+   * {@code recordDenied} comum o evento entraria na mesma transacao e sumiria junto — justamente a
+   * prova de que alguem tentou. {@code REQUIRES_NEW} faz o registro sobreviver.
+   */
+  @Transactional(propagation = Propagation.REQUIRES_NEW)
+  public AuditEvent recordDeniedIsolated(AuditEventCommand command) {
     return persist(command, AuditConstants.Status.DENIED);
   }
 
@@ -361,6 +378,7 @@ public class AuditService {
   }
 
   private void enrichWithRequestContext(AuditEventCommand command) {
+    enrichWithAuthenticatedActor(command);
     if (requestAuditContext == null) return;
     RequestAuditContext context;
     try {
@@ -380,6 +398,37 @@ public class AuditService {
     }
     if ((command.userAgent == null || command.userAgent.isBlank()) && context.getUserAgent() != null) {
       command.userAgent = context.getUserAgent();
+    }
+  }
+
+  /**
+   * QUEM fez, quando o chamador nao disse.
+   *
+   * <p>Ate 2026-09-16 os eventos de comanda, lancamento financeiro e fechamento de caixa eram
+   * gravados SEM ator: nenhum desses pontos preenchia {@code actorUserId}, e a trilha dizia o que
+   * mudou no dinheiro mas nao quem mudou — o que tira dela o valor de prova. O usuario autenticado
+   * da requisicao passa a ser o ator sempre que o evento nao trouxer um. Fora de requisicao
+   * (scheduler, webhook) nao ha autenticacao, e o evento segue sem ator, como antes.
+   */
+  private void enrichWithAuthenticatedActor(AuditEventCommand command) {
+    try {
+      Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+      if (authentication == null) return;
+      if (command.actorUserId == null
+          && authentication.getPrincipal() instanceof JwtPrincipal principal) {
+        command.actorUserId = principal.userId();
+      }
+      if (command.actorRole == null || command.actorRole.isBlank()) {
+        command.actorRole =
+            authentication.getAuthorities().stream()
+                .map(GrantedAuthority::getAuthority)
+                .filter(authority -> authority.startsWith("ROLE_"))
+                .map(authority -> authority.substring("ROLE_".length()))
+                .findFirst()
+                .orElse(null);
+      }
+    } catch (Exception ignored) {
+      // Sem contexto de seguranca: o evento segue como veio.
     }
   }
 

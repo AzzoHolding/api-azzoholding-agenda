@@ -217,4 +217,43 @@ class AuditServiceTest {
         .isInstanceOf(RuntimeException.class)
         .hasMessage("falha no banco");
   }
+
+  /**
+   * Ate 2026-09-16 os eventos de comanda, lancamento e caixa eram gravados SEM ator — a trilha dizia
+   * o que mudou no dinheiro, mas nao quem mudou.
+   */
+  @Test
+  void semAtorInformado_usaOUsuarioAutenticadoDaRequisicao() {
+    when(auditEventRepository.findLastByTenant(tenantId)).thenReturn(java.util.Optional.empty());
+    UUID usuario = UUID.randomUUID();
+    org.springframework.security.core.context.SecurityContextHolder.getContext()
+        .setAuthentication(
+            new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(
+                new br.com.phdigitalcode.azzo.agenda.pro.security.JwtPrincipal(
+                    usuario, tenantId, "recepcao@salao.test", "Carla", 0L),
+                null,
+                java.util.List.of(
+                    new org.springframework.security.core.authority.SimpleGrantedAuthority(
+                        "ROLE_STAFF"))));
+    try {
+      AuditEvent saved = service.recordSuccess(baseCommand());
+
+      assertThat(saved.getActorUserId()).isEqualTo(usuario);
+      assertThat(saved.getActorRole()).isEqualTo("STAFF");
+    } finally {
+      org.springframework.security.core.context.SecurityContextHolder.clearContext();
+    }
+  }
+
+  @Test
+  void atorInformadoPeloChamadorNaoESobrescrito() {
+    when(auditEventRepository.findLastByTenant(tenantId)).thenReturn(java.util.Optional.empty());
+    UUID informado = UUID.randomUUID();
+    AuditEventCommand command = baseCommand();
+    command.actorUserId = informado;
+
+    AuditEvent saved = service.recordSuccess(command);
+
+    assertThat(saved.getActorUserId()).isEqualTo(informado);
+  }
 }

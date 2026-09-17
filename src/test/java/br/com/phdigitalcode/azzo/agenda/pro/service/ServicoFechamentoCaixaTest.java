@@ -123,6 +123,8 @@ class ServicoFechamentoCaixaTest {
     assertThat(caixa.getStatus()).isEqualTo(StatusFechamentoCaixa.OPEN);
     assertThat(caixa.getClosedAt()).isNull();
     verify(auditService, never()).recordSuccess(any());
+    // A tentativa de fechar com falta e sem explicar fica na trilha, mesmo com o rollback.
+    verify(auditService).recordDeniedIsolated(any());
   }
 
   @Test
