@@ -61,6 +61,11 @@ class ServicoPublicBookingTest {
   private UUID tenantId;
   private Tenant tenant;
 
+  private br.com.phdigitalcode.azzo.agenda.pro.repository.ProfissionalWorkingHourRepository
+      profissionalWorkingHourRepository;
+  private br.com.phdigitalcode.azzo.agenda.pro.repository.AgendamentoQueryRepository
+      agendamentoQueryRepository;
+
   @BeforeEach
   void setUp() {
     tenantRepository = mock(TenantRepository.class);
@@ -75,12 +80,17 @@ class ServicoPublicBookingTest {
     specialClosureService = mock(SpecialClosureService.class);
     notificationService = mock(NotificationService.class);
     tenantDepositPaymentService = mock(TenantDepositPaymentService.class);
+    profissionalWorkingHourRepository =
+        mock(br.com.phdigitalcode.azzo.agenda.pro.repository.ProfissionalWorkingHourRepository.class);
+    agendamentoQueryRepository =
+        mock(br.com.phdigitalcode.azzo.agenda.pro.repository.AgendamentoQueryRepository.class);
 
     service = new ServicoPublicBooking(
         tenantRepository, servicoRepository, serviceCategoryRepository, profissionalRepository,
         agendamentoRepository, agendamentoItemRepository, clienteRepository,
         appointmentBookingFunnelEventRepository, tenantOperationalSettingsService,
-        specialClosureService, notificationService, tenantDepositPaymentService);
+        specialClosureService, notificationService, tenantDepositPaymentService,
+        profissionalWorkingHourRepository, agendamentoQueryRepository);
 
     tenantId = UUID.randomUUID();
     tenant = new Tenant();
@@ -295,9 +305,13 @@ class ServicoPublicBookingTest {
     Profissional profissional = profissionalAtivo(professionalId);
     when(profissionalRepository.findByIdAndTenantIdAndIsActiveTrue(professionalId, tenantId))
         .thenReturn(Optional.of(profissional));
-    when(agendamentoRepository.findFirstByTenantIdAndProfessionalIdAndDateAndStartTimeAndStatusNot(
-            eq(tenantId), eq(professionalId), any(), eq("10:00"), eq(StatusAgendamento.CANCELLED)))
-        .thenReturn(Optional.of(new Agendamento()));
+    // Ja existe 09:45-10:15: o 10:00 pedido SOBREPOE, mesmo sem comecar no mesmo minuto.
+    Agendamento existente = new Agendamento();
+    existente.setStatus(StatusAgendamento.CONFIRMED);
+    existente.setStartTime("09:45");
+    existente.setEndTime("10:15");
+    when(agendamentoRepository.findByTenantIdAndDateAndProfessionalId(eq(tenantId), any(), eq(professionalId)))
+        .thenReturn(List.of(existente));
 
     PublicBookingDtos.PublicAppointmentRequest request = requestValido(professionalId, serviceId);
 
@@ -490,5 +504,130 @@ class ServicoPublicBookingTest {
     List<LocalDate> result = service.listarDatasIndisponiveis("salao-teste", from, to);
 
     assertThat(result).isEqualTo(esperado);
+  }
+
+  // ─── Analise de 2026-09-16: A3 (sobreposicao, passado, jornada) e A4 (cadastro) ───
+
+  /** Stubs do caminho feliz ate a checagem de conflito. */
+  private Profissional stubsAteConflito(UUID professionalId, Servico servico) {
+    when(servicoRepository.findByIdAndTenantId(servico.getId(), tenantId)).thenReturn(Optional.of(servico));
+    when(tenantOperationalSettingsService.isBusinessOpenAt(eq(tenantId), any(), any(), any())).thenReturn(true);
+    when(specialClosureService.isClosedAt(eq(tenantId), eq(professionalId), any(), any(), any())).thenReturn(false);
+    Profissional profissional = profissionalAtivo(professionalId);
+    when(profissionalRepository.findByIdAndTenantIdAndIsActiveTrue(professionalId, tenantId))
+        .thenReturn(Optional.of(profissional));
+    when(clienteRepository.save(any(Cliente.class))).thenAnswer(invocation -> {
+      Cliente c = invocation.getArgument(0);
+      if (c.getId() == null) c.setId(UUID.randomUUID());
+      return c;
+    });
+    when(agendamentoRepository.save(any(Agendamento.class))).thenAnswer(invocation -> {
+      Agendamento a = invocation.getArgument(0);
+      if (a.getId() == null) a.setId(UUID.randomUUID());
+      return a;
+    });
+    return profissional;
+  }
+
+  @Test
+  void agendamentoPublicoNoPassadoEhRecusado() {
+    UUID professionalId = UUID.randomUUID();
+    Servico servico = servicoAtivo(UUID.randomUUID(), 30, BigDecimal.TEN);
+    stubsAteConflito(professionalId, servico);
+
+    PublicBookingDtos.PublicAppointmentRequest request = requestValido(professionalId, servico.getId());
+    request.date = LocalDate.now().minusDays(1).toString();
+
+    assertThatThrownBy(() -> service.criarAgendamentoPublico("salao-teste", request))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("ja passou");
+    verify(agendamentoRepository, org.mockito.Mockito.never()).save(any(Agendamento.class));
+  }
+
+  /** Terca de folga: a jornada so tem segunda. O link aceitava marcar no dia de folga. */
+  @Test
+  void agendamentoPublicoForaDaJornadaDoProfissionalEhRecusado() {
+    UUID professionalId = UUID.randomUUID();
+    Servico servico = servicoAtivo(UUID.randomUUID(), 30, BigDecimal.TEN);
+    stubsAteConflito(professionalId, servico);
+    LocalDate diaDoPedido = LocalDate.now().plusDays(5);
+    br.com.phdigitalcode.azzo.agenda.pro.entity.ProfissionalWorkingHour folga =
+        new br.com.phdigitalcode.azzo.agenda.pro.entity.ProfissionalWorkingHour();
+    folga.setDayOfWeek(diaDoPedido.getDayOfWeek().getValue());
+    folga.setWorking(false);
+    when(profissionalWorkingHourRepository.listByProfessional(tenantId, professionalId))
+        .thenReturn(List.of(folga));
+
+    PublicBookingDtos.PublicAppointmentRequest request = requestValido(professionalId, servico.getId());
+
+    assertThatThrownBy(() -> service.criarAgendamentoPublico("salao-teste", request))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("nao atende neste horario");
+  }
+
+  /** Quem esta no link nao tem login: nao pode trocar nome, e-mail e CPF de um cliente existente. */
+  @Test
+  void clienteExistenteNaoEhReescritoPeloLink() {
+    UUID professionalId = UUID.randomUUID();
+    Servico servico = servicoAtivo(UUID.randomUUID(), 30, BigDecimal.TEN);
+    stubsAteConflito(professionalId, servico);
+    Cliente existente = new Cliente();
+    existente.setId(UUID.randomUUID());
+    existente.setTenantId(tenantId);
+    existente.setName("Marina Alves");
+    existente.setPhone("11999998888");
+    existente.setEmail("marina@cliente.test");
+    existente.setCpfCnpj("52998224725");
+    when(clienteRepository.findByTenantIdOrderByName(tenantId)).thenReturn(List.of(existente));
+
+    PublicBookingDtos.PublicAppointmentRequest request = requestValido(professionalId, servico.getId());
+    request.customerName = "Outra Pessoa";
+    request.customerEmail = "golpe@exemplo.test";
+    request.customerCpfCnpj = "11111111111";
+
+    service.criarAgendamentoPublico("salao-teste", request);
+
+    assertThat(existente.getName()).isEqualTo("Marina Alves");
+    assertThat(existente.getEmail()).isEqualTo("marina@cliente.test");
+    assertThat(existente.getCpfCnpj()).isEqualTo("52998224725");
+    verify(clienteRepository, org.mockito.Mockito.never()).save(existente);
+  }
+
+  /** O que estava em branco no cadastro pode ser completado. */
+  @Test
+  void clienteExistenteGanhaSoOQueFaltava() {
+    UUID professionalId = UUID.randomUUID();
+    Servico servico = servicoAtivo(UUID.randomUUID(), 30, BigDecimal.TEN);
+    stubsAteConflito(professionalId, servico);
+    Cliente existente = new Cliente();
+    existente.setId(UUID.randomUUID());
+    existente.setTenantId(tenantId);
+    existente.setName("Marina Alves");
+    existente.setPhone("11999998888");
+    when(clienteRepository.findByTenantIdOrderByName(tenantId)).thenReturn(List.of(existente));
+
+    PublicBookingDtos.PublicAppointmentRequest request = requestValido(professionalId, servico.getId());
+    request.customerName = "Outra Pessoa";
+    request.customerEmail = "marina@cliente.test";
+
+    service.criarAgendamentoPublico("salao-teste", request);
+
+    assertThat(existente.getName()).isEqualTo("Marina Alves");
+    assertThat(existente.getEmail()).isEqualTo("marina@cliente.test");
+  }
+
+  /** Duas pessoas no link ao mesmo tempo: o lock serializa antes de conferir o conflito. */
+  @Test
+  void criacaoPublicaTravaOProfissionalNoDia() {
+    UUID professionalId = UUID.randomUUID();
+    Servico servico = servicoAtivo(UUID.randomUUID(), 30, BigDecimal.TEN);
+    stubsAteConflito(professionalId, servico);
+    when(clienteRepository.findByTenantIdOrderByName(tenantId)).thenReturn(List.of());
+
+    PublicBookingDtos.PublicAppointmentRequest request = requestValido(professionalId, servico.getId());
+    service.criarAgendamentoPublico("salao-teste", request);
+
+    verify(agendamentoQueryRepository)
+        .lockProfessionalDateForWrite(eq(tenantId), eq(professionalId), eq(LocalDate.parse(request.date)));
   }
 }

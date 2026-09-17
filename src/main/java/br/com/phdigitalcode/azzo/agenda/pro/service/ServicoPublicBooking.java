@@ -33,14 +33,17 @@ import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.BookingFunnelStage;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.StatusAgendamento;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.TenantDepositPaymentService;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.AgendamentoItemRepository;
+import br.com.phdigitalcode.azzo.agenda.pro.repository.AgendamentoQueryRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.AgendamentoRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.AppointmentBookingFunnelEventRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.ClienteRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.ProfissionalRepository;
+import br.com.phdigitalcode.azzo.agenda.pro.repository.ProfissionalWorkingHourRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.ServiceCategoryRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.ServicoRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.TenantRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.util.DataUtil;
+import br.com.phdigitalcode.azzo.agenda.pro.util.JornadaDoProfissional;
 import br.com.phdigitalcode.azzo.agenda.pro.util.NumericUtil;
 
 /**
@@ -69,6 +72,8 @@ public class ServicoPublicBooking {
   private final SpecialClosureService specialClosureService;
   private final NotificationService notificationService;
   private final TenantDepositPaymentService tenantDepositPaymentService;
+  private final ProfissionalWorkingHourRepository profissionalWorkingHourRepository;
+  private final AgendamentoQueryRepository agendamentoQueryRepository;
 
   public ServicoPublicBooking(
       TenantRepository tenantRepository,
@@ -82,7 +87,9 @@ public class ServicoPublicBooking {
       TenantOperationalSettingsService tenantOperationalSettingsService,
       SpecialClosureService specialClosureService,
       NotificationService notificationService,
-      TenantDepositPaymentService tenantDepositPaymentService) {
+      TenantDepositPaymentService tenantDepositPaymentService,
+      ProfissionalWorkingHourRepository profissionalWorkingHourRepository,
+      AgendamentoQueryRepository agendamentoQueryRepository) {
     this.tenantRepository = tenantRepository;
     this.servicoRepository = servicoRepository;
     this.serviceCategoryRepository = serviceCategoryRepository;
@@ -95,6 +102,8 @@ public class ServicoPublicBooking {
     this.specialClosureService = specialClosureService;
     this.notificationService = notificationService;
     this.tenantDepositPaymentService = tenantDepositPaymentService;
+    this.profissionalWorkingHourRepository = profissionalWorkingHourRepository;
+    this.agendamentoQueryRepository = agendamentoQueryRepository;
   }
 
   @Transactional(readOnly = true)
@@ -193,6 +202,11 @@ public class ServicoPublicBooking {
     LocalTime cursor = janela[0];
     LocalTime fim = janela[1];
     long totalDuration = selectedServices.stream().mapToLong(Servico::getDuration).sum();
+    // A jornada do profissional escolhido: o link nao pode oferecer o dia de folga dele.
+    List<br.com.phdigitalcode.azzo.agenda.pro.entity.ProfissionalWorkingHour> jornada =
+        profissionalUuid == null
+            ? List.of()
+            : profissionalWorkingHourRepository.listByProfessional(tenant.getId(), profissionalUuid);
     // Para o dia atual, nao exibe horarios que ja passaram
     LocalTime agora = data.isEqual(LocalDate.now(ZONE_BR)) ? LocalTime.now(ZONE_BR) : null;
     while (!cursor.plusMinutes(totalDuration).isAfter(fim)) {
@@ -201,7 +215,9 @@ public class ServicoPublicBooking {
         slot.time = cursor.format(TIME_FMT);
         LocalTime slotStart = cursor;
         LocalTime slotEnd = cursor.plusMinutes(totalDuration);
-        slot.available = ativos.stream().noneMatch(a -> overlaps(a, slotStart, slotEnd));
+        slot.available =
+            ativos.stream().noneMatch(a -> overlaps(a, slotStart, slotEnd))
+                && JornadaDoProfissional.atende(jornada, data, slotStart, slotEnd);
         resp.slots.add(slot);
       }
       cursor = cursor.plusMinutes(30);
@@ -224,6 +240,11 @@ public class ServicoPublicBooking {
         .mapToLong(item -> (long) item.service().getDuration() * item.quantity())
         .sum();
     LocalTime endTime = startTime.plusMinutes(totalDuration);
+    // Horario que ja passou: a tela de horarios nao oferece, mas o POST aceitava — marcar ontem
+    // pelo link criava um atendimento "pendente" no passado (analise de 2026-09-16, A3).
+    if (data.atTime(startTime).atZone(ZONE_BR).isBefore(java.time.ZonedDateTime.now(ZONE_BR))) {
+      throw new IllegalArgumentException("Esse horario ja passou. Escolha outro horario.");
+    }
     if (!tenantOperationalSettingsService.isBusinessOpenAt(tenant.getId(), data, startTime, endTime)) {
       throw new IllegalArgumentException("Salao fechado ou fora do horario de funcionamento informado");
     }
@@ -246,10 +267,33 @@ public class ServicoPublicBooking {
       }
     }
 
-    boolean conflito = agendamentoRepository
-        .findFirstByTenantIdAndProfessionalIdAndDateAndStartTimeAndStatusNot(
-            tenant.getId(), professionalUuid, data, normalizedStartTime, StatusAgendamento.CANCELLED)
-        .isPresent();
+    if (!JornadaDoProfissional.atende(
+        profissionalWorkingHourRepository.listByProfessional(tenant.getId(), professionalUuid),
+        data,
+        startTime,
+        endTime)) {
+      throw new IllegalArgumentException("O profissional nao atende neste horario");
+    }
+
+    // O sinal exige CPF/CNPJ — conferido ANTES de gravar qualquer coisa.
+    BigDecimal depositAmount = calcularValorSinal(selectedItems);
+    String cpfCnpjInformado =
+        request.customerCpfCnpj != null && !request.customerCpfCnpj.isBlank()
+            ? request.customerCpfCnpj.trim()
+            : null;
+
+    // Serializa marcacoes do mesmo profissional no mesmo dia (mesmo lock da agenda interna): duas
+    // pessoas no link ao mesmo tempo nao pegam o mesmo horario.
+    agendamentoQueryRepository.lockProfessionalDateForWrite(tenant.getId(), professionalUuid, data);
+
+    // SOBREPOSICAO, e nao so o mesmo inicio: com 10:00-11:00 marcado, o POST aceitava 10:30
+    // (analise de 2026-09-16, A3). E a mesma conta que a tela de horarios usa.
+    boolean conflito =
+        agendamentoRepository
+            .findByTenantIdAndDateAndProfessionalId(tenant.getId(), data, professionalUuid)
+            .stream()
+            .filter(a -> a.getStatus() != StatusAgendamento.CANCELLED)
+            .anyMatch(a -> overlaps(a, startTime, endTime));
     if (conflito) throw new IllegalArgumentException("Horario indisponivel");
 
     String normalizedPhone = normalizePhone(request.customerPhone);
@@ -268,18 +312,38 @@ public class ServicoPublicBooking {
         .filter(c -> Objects.equals(normalizePhone(c.getPhone()), normalizedPhone))
         .findFirst()
         .orElse(null);
+    if (NumericUtil.isPositive(depositAmount)
+        && cpfCnpjInformado == null
+        && (cliente == null || cliente.getCpfCnpj() == null || cliente.getCpfCnpj().isBlank())) {
+      throw new IllegalArgumentException(
+          "Este agendamento exige sinal: informe o CPF/CNPJ do cliente para gerar o Pix.");
+    }
+
     if (cliente == null) {
       cliente = new Cliente();
       cliente.setTenantId(tenant.getId());
       cliente.setName(request.customerName);
       cliente.setPhone(normalizedPhone);
       cliente.setEmail(request.customerEmail);
+      cliente.setCpfCnpj(cpfCnpjInformado);
       cliente = clienteRepository.save(cliente);
     } else {
-      cliente.setName(request.customerName);
-      cliente.setPhone(normalizedPhone);
-      cliente.setEmail(request.customerEmail);
-      cliente = clienteRepository.save(cliente);
+      // Cliente que JA EXISTE nao e reescrito por quem esta no link, que nao tem login: bastava
+      // saber o telefone de alguem para trocar nome, e-mail e CPF do cadastro (analise de
+      // 2026-09-16, A4). O que o salao ja sabe fica; so se preenche o que esta em branco.
+      boolean completou = false;
+      if ((cliente.getEmail() == null || cliente.getEmail().isBlank())
+          && request.customerEmail != null
+          && !request.customerEmail.isBlank()) {
+        cliente.setEmail(request.customerEmail.trim());
+        completou = true;
+      }
+      if ((cliente.getCpfCnpj() == null || cliente.getCpfCnpj().isBlank())
+          && cpfCnpjInformado != null) {
+        cliente.setCpfCnpj(cpfCnpjInformado);
+        completou = true;
+      }
+      if (completou) cliente = clienteRepository.save(cliente);
     }
 
     Agendamento agendamento = new Agendamento();
@@ -300,17 +364,8 @@ public class ServicoPublicBooking {
     resp.status = agendamento.getStatus().name();
     resp.message = "Agendamento criado com sucesso.";
 
-    BigDecimal depositAmount = calcularValorSinal(selectedItems);
     if (NumericUtil.isPositive(depositAmount)) {
-      if (cliente.getName() != null) cliente.setName(cliente.getName().trim());
-      String cpfCnpj = request.customerCpfCnpj != null ? request.customerCpfCnpj.trim() : null;
-      if (cpfCnpj == null || cpfCnpj.isBlank()) {
-        throw new IllegalArgumentException(
-            "Este agendamento exige sinal: informe o CPF/CNPJ do cliente para gerar o Pix.");
-      }
-      cliente.setCpfCnpj(cpfCnpj);
-      clienteRepository.save(cliente);
-
+      // O CPF ja foi conferido antes de gravar: e o do cadastro, ou o informado para quem nao tinha.
       AppointmentDeposit deposit = tenantDepositPaymentService.criarCobrancaSinal(
           tenant.getId(), agendamento.getId(), cliente, depositAmount,
           "Sinal de reserva - " + tenant.getName());

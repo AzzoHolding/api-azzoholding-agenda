@@ -2069,47 +2069,13 @@ public class ServicoAgendamentos {
   private boolean isProfessionalAvailableAt(
       Profissional profissional, LocalDate date, LocalTime start, LocalTime end) {
     if (profissional == null) return true;
-    List<ProfissionalWorkingHour> workingHours =
+    // A regra mora em JornadaDoProfissional: o agendamento publico usa a mesma.
+    return br.com.phdigitalcode.azzo.agenda.pro.util.JornadaDoProfissional.atende(
         profissionalWorkingHourRepository.listByProfessional(
-            profissional.getTenantId(), profissional.getId());
-    if (workingHours == null || workingHours.isEmpty()) {
-      // Sem horario configurado: sem restricao (nao bloqueia)
-      return true;
-    }
-
-    int targetDayIso = date.getDayOfWeek().getValue(); // ISO: segunda=1 ... domingo=7
-    boolean hasDayConfig = false;
-
-    for (ProfissionalWorkingHour wh : workingHours) {
-      if (wh == null) continue;
-
-      // dayOfWeek pode ser ISO (1-7) ou JS (0=domingo,1=segunda...6=sabado)
-      boolean matchesDay =
-          wh.getDayOfWeek() == targetDayIso || (targetDayIso == 7 && wh.getDayOfWeek() == 0);
-
-      if (!matchesDay) continue;
-
-      if (!wh.isWorking()) {
-        // Dia configurado como nao trabalhado
-        hasDayConfig = true;
-        continue;
-      }
-      if (wh.getStartTime() == null
-          || wh.getEndTime() == null
-          || !wh.getStartTime().isBefore(wh.getEndTime())) {
-        hasDayConfig = true;
-        continue;
-      }
-      // Verifica se o agendamento cabe dentro da janela do profissional
-      if (!start.isBefore(wh.getStartTime()) && !end.isAfter(wh.getEndTime())) {
-        return true;
-      }
-      hasDayConfig = true;
-    }
-
-    // Se havia configuracao para o dia mas nenhuma janela comportou o horario -> nao disponivel
-    // Se nao havia configuracao para o dia -> sem restricao (nao bloqueia)
-    return !hasDayConfig;
+            profissional.getTenantId(), profissional.getId()),
+        date,
+        start,
+        end);
   }
 
   // ─── EFEITOS FINANCEIROS DA CONCLUSAO ─────────────────────────────────────
