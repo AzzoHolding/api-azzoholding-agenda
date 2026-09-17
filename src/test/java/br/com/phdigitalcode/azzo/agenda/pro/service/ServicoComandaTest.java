@@ -96,6 +96,9 @@ class ServicoComandaTest {
   private TenantOperationalSettingsRepository tenantOperationalSettingsRepository;
   private AgendamentoRepository agendamentoRepository;
   private TravaFinanceira travaFinanceira;
+  private br.com.phdigitalcode.azzo.agenda.pro.repository.ClientMembershipRepository clientMembershipRepository;
+  private br.com.phdigitalcode.azzo.agenda.pro.repository.ClientMembershipBalanceRepository
+      clientMembershipBalanceRepository;
   private AuthenticatedUser authenticatedUser;
   private TenantOperationalSettings configuracoes;
   private ServicoComanda service;
@@ -133,6 +136,10 @@ class ServicoComandaTest {
     tenantOperationalSettingsRepository = mock(TenantOperationalSettingsRepository.class);
     agendamentoRepository = mock(AgendamentoRepository.class);
     travaFinanceira = mock(TravaFinanceira.class);
+    clientMembershipRepository =
+        mock(br.com.phdigitalcode.azzo.agenda.pro.repository.ClientMembershipRepository.class);
+    clientMembershipBalanceRepository =
+        mock(br.com.phdigitalcode.azzo.agenda.pro.repository.ClientMembershipBalanceRepository.class);
 
     ContextoTenant contextoTenant = mock(ContextoTenant.class);
     when(contextoTenant.obterTenantIdOuFalhar()).thenReturn(tenantId);
@@ -219,7 +226,9 @@ class ServicoComandaTest {
             tenantOperationalSettingsRepository,
             agendamentoRepository,
             auditService,
-            travaFinanceira);
+            travaFinanceira,
+            clientMembershipRepository,
+            clientMembershipBalanceRepository);
   }
 
   // ---------------------------------------------------------------- helpers
@@ -530,27 +539,6 @@ class ServicoComandaTest {
     assertThat(gorjetas.get(1).getType()).isEqualTo(TipoTransacao.EXPENSE);
     assertThat(gorjetas.get(1).getDescription()).isEqualTo("Repasse de gorjeta ao profissional");
     assertThat(gorjetas).allSatisfy(t -> assertThat(t.getAmount()).isEqualByComparingTo("15.00"));
-  }
-
-  @Test
-  void fecharNaoRegistraComissaoDeServicoQuandoHaAgendamentoVinculado() {
-    Comanda comanda = comanda(Comanda.STATUS_ABERTA);
-    comanda.setAppointmentId(UUID.randomUUID());
-    comanda.setSubtotal(new BigDecimal("100.00"));
-    comanda.setTotal(new BigDecimal("100.00"));
-    itensDaComanda(item(ComandaItem.TIPO_SERVICO, "100.00", professionalId));
-    pagamentosDaComanda(
-        pagamento(ComandaPagamento.MEIO_DINHEIRO, "100.00", ComandaPagamento.STATUS_CONFIRMADO));
-
-    service.fechar(comandaId);
-
-    // ServicoAgendamentos ja registra comissao e consumo ao concluir o atendimento — repetir aqui
-    // lancaria em dobro.
-    verify(commissionService, never())
-        .registerServiceCommissionForComandaItemIfApplicable(
-            any(), any(), any(), any(), any(), any(), any(), any());
-    verify(estoqueMovimentacaoService, never())
-        .consumirInsumosPorItemComanda(any(), any(), any());
   }
 
   @Test
@@ -1377,5 +1365,203 @@ class ServicoComandaTest {
     verify(travaFinanceira)
         .registrarTentativaBloqueada(
             eq(tenantId), eq("POS_DISCOUNT_APPLY"), eq("COMANDA"), any(), any(), any());
+  }
+
+  // ─── A1: comissao pelo que a comanda cobrou (decisao de 2026-09-17) ───────
+
+  /**
+   * Comanda de ATENDIMENTO agora gera a comissao do servico ao fechar, sobre o valor liquido: o
+   * desconto do PDV reduz a base, e o servico extra tambem entra.
+   */
+  @Test
+  void comandaDeAtendimentoGeraComissaoPeloValorCobrado() {
+    Comanda aberta = comanda(Comanda.STATUS_ABERTA);
+    aberta.setAppointmentId(UUID.randomUUID());
+    aberta.setSubtotal(new BigDecimal("150.00"));
+    aberta.setDesconto(new BigDecimal("30.00"));
+    aberta.setTotal(new BigDecimal("120.00"));
+    ComandaItem doAgendamento = item(ComandaItem.TIPO_SERVICO, "100.00", professionalId);
+    ComandaItem extra = item(ComandaItem.TIPO_SERVICO, "50.00", professionalId);
+    itensDaComanda(doAgendamento, extra);
+    pagamentosDaComanda(
+        pagamento(ComandaPagamento.MEIO_DINHEIRO, "120.00", ComandaPagamento.STATUS_CONFIRMADO));
+
+    service.fechar(comandaId);
+
+    // desconto de R$ 30 rateado: 100 -> 80, 50 -> 40
+    verify(commissionService)
+        .registerServiceCommissionForComandaItemIfApplicable(
+            eq(tenantId), eq(comandaId), eq(doAgendamento.getId()), eq(professionalId),
+            eq(serviceId), any(), org.mockito.ArgumentMatchers.argThat(v -> v.compareTo(new BigDecimal("80.00")) == 0), any());
+    verify(commissionService)
+        .registerServiceCommissionForComandaItemIfApplicable(
+            eq(tenantId), eq(comandaId), eq(extra.getId()), eq(professionalId),
+            eq(serviceId), any(), org.mockito.ArgumentMatchers.argThat(v -> v.compareTo(new BigDecimal("40.00")) == 0), any());
+    verify(estoqueMovimentacaoService).consumirInsumosPorItemComanda(tenantId, extra.getId(), serviceId);
+  }
+
+  /** Atendimento concluido pela regra ANTIGA ja tem comissao: a comanda dele nao gera a segunda. */
+  @Test
+  void comandaDeAtendimentoJaComissionadoNaoGeraDeNovo() {
+    Comanda aberta = comanda(Comanda.STATUS_ABERTA);
+    UUID appointmentId = UUID.randomUUID();
+    aberta.setAppointmentId(appointmentId);
+    aberta.setSubtotal(new BigDecimal("100.00"));
+    aberta.setTotal(new BigDecimal("100.00"));
+    itensDaComanda(item(ComandaItem.TIPO_SERVICO, "100.00", professionalId));
+    pagamentosDaComanda(
+        pagamento(ComandaPagamento.MEIO_DINHEIRO, "100.00", ComandaPagamento.STATUS_CONFIRMADO));
+    when(commissionService.possuiComissaoDeServicoDoAgendamento(tenantId, appointmentId)).thenReturn(true);
+
+    service.fechar(comandaId);
+
+    verify(commissionService, never())
+        .registerServiceCommissionForComandaItemIfApplicable(any(), any(), any(), any(), any(), any(), any(), any());
+    verify(estoqueMovimentacaoService, never()).consumirInsumosPorItemComanda(any(), any(), any());
+  }
+
+  // ─── A5: a recepcao escolhe o pacote (decisao de 2026-09-17) ──────────────
+
+  private ClientPackageBalance saldoDePacote(int totais, int usadas, UUID clienteDoPacote) {
+    ClientPackagePurchase compra = new ClientPackagePurchase();
+    compra.setId(UUID.randomUUID());
+    compra.setTenantId(tenantId);
+    compra.setClientId(clienteDoPacote);
+    compra.setPackageNome("5 cortes");
+    compra.setPrecoPago(new BigDecimal("250.00"));
+    ClientPackageBalance saldo = new ClientPackageBalance();
+    saldo.setId(UUID.randomUUID());
+    saldo.setTenantId(tenantId);
+    saldo.setPurchaseId(compra.getId());
+    saldo.setServiceId(serviceId);
+    saldo.setServiceNome("Corte");
+    saldo.setSessoesTotais(totais);
+    saldo.setSessoesUsadas(usadas);
+    when(clientPackageBalanceRepository.findById(saldo.getId())).thenReturn(Optional.of(saldo));
+    when(clientPackagePurchaseRepository.findById(compra.getId())).thenReturn(Optional.of(compra));
+    when(clientPackageBalanceRepository.findByPurchaseId(compra.getId())).thenReturn(List.of(saldo));
+    return saldo;
+  }
+
+  private ComandaDtos.AplicarCoberturaRequest coberturaDoPacote(ClientPackageBalance saldo) {
+    ComandaDtos.AplicarCoberturaRequest req = new ComandaDtos.AplicarCoberturaRequest();
+    req.tipo = ComandaItem.COBERTURA_PACOTE;
+    req.saldoId = saldo.getId().toString();
+    return req;
+  }
+
+  /** O item sai da conta e guarda o valor da sessao: R$ 250 / 5 sessoes = R$ 50. */
+  @Test
+  void pacoteCobreOServicoZerandoAContaEGuardandoOValorDaSessao() {
+    Comanda aberta = comanda(Comanda.STATUS_ABERTA);
+    aberta.setClientId(clientId);
+    ComandaItem corte = item(ComandaItem.TIPO_SERVICO, "70.00", professionalId);
+    when(comandaItemRepository.findByIdAndComandaId(corte.getId(), comandaId)).thenReturn(Optional.of(corte));
+    ClientPackageBalance saldo = saldoDePacote(5, 1, clientId);
+
+    service.aplicarCobertura(comandaId, corte.getId(), coberturaDoPacote(saldo));
+
+    assertThat(corte.getTotal()).isEqualByComparingTo("0");
+    assertThat(corte.getPrecoAntesCobertura()).isEqualByComparingTo("70.00");
+    assertThat(corte.getValorCobertura()).isEqualByComparingTo("50.00");
+    // A sessao so desce quando a comanda fechar.
+    assertThat(saldo.getSessoesUsadas()).isEqualTo(1);
+  }
+
+  @Test
+  void pacoteDeOutroClienteNaoCobre() {
+    Comanda aberta = comanda(Comanda.STATUS_ABERTA);
+    aberta.setClientId(clientId);
+    ComandaItem corte = item(ComandaItem.TIPO_SERVICO, "70.00", professionalId);
+    when(comandaItemRepository.findByIdAndComandaId(corte.getId(), comandaId)).thenReturn(Optional.of(corte));
+    ClientPackageBalance deOutro = saldoDePacote(5, 0, UUID.randomUUID());
+
+    assertThatThrownBy(() -> service.aplicarCobertura(comandaId, corte.getId(), coberturaDoPacote(deOutro)))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("nao e do cliente da comanda");
+  }
+
+  @Test
+  void pacoteSemSessaoNaoCobre() {
+    Comanda aberta = comanda(Comanda.STATUS_ABERTA);
+    aberta.setClientId(clientId);
+    ComandaItem corte = item(ComandaItem.TIPO_SERVICO, "70.00", professionalId);
+    when(comandaItemRepository.findByIdAndComandaId(corte.getId(), comandaId)).thenReturn(Optional.of(corte));
+    ClientPackageBalance esgotado = saldoDePacote(5, 5, clientId);
+
+    assertThatThrownBy(() -> service.aplicarCobertura(comandaId, corte.getId(), coberturaDoPacote(esgotado)))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("nao tem mais sessoes");
+  }
+
+  @Test
+  void comandaSemClienteNaoUsaPacote() {
+    comanda(Comanda.STATUS_ABERTA);
+    ComandaItem corte = item(ComandaItem.TIPO_SERVICO, "70.00", professionalId);
+    when(comandaItemRepository.findByIdAndComandaId(corte.getId(), comandaId)).thenReturn(Optional.of(corte));
+    ClientPackageBalance saldo = saldoDePacote(5, 0, clientId);
+
+    assertThatThrownBy(() -> service.aplicarCobertura(comandaId, corte.getId(), coberturaDoPacote(saldo)))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("identifique o cliente");
+  }
+
+  /** Ao fechar, a sessao desce e o profissional recebe sobre o valor da sessao. */
+  @Test
+  void fecharConsomeASessaoEComissionaPeloValorDaSessao() {
+    Comanda aberta = comanda(Comanda.STATUS_ABERTA);
+    aberta.setClientId(clientId);
+    aberta.setSubtotal(BigDecimal.ZERO);
+    aberta.setTotal(BigDecimal.ZERO);
+    ClientPackageBalance saldo = saldoDePacote(5, 1, clientId);
+    ComandaItem corte = item(ComandaItem.TIPO_SERVICO, "0.00", professionalId);
+    corte.setCoberturaTipo(ComandaItem.COBERTURA_PACOTE);
+    corte.setCoberturaSaldoId(saldo.getId());
+    corte.setValorCobertura(new BigDecimal("50.00"));
+    itensDaComanda(corte);
+    pagamentosDaComanda();
+
+    service.fechar(comandaId);
+
+    assertThat(saldo.getSessoesUsadas()).isEqualTo(2);
+    verify(commissionService)
+        .registerServiceCommissionForComandaItemIfApplicable(
+            eq(tenantId), eq(comandaId), eq(corte.getId()), eq(professionalId), eq(serviceId),
+            any(), org.mockito.ArgumentMatchers.argThat(v -> v.compareTo(new BigDecimal("50.00")) == 0), any());
+    verify(transacaoRepository, never()).save(any());
+  }
+
+  @Test
+  void estornoDevolveASessaoAoPacote() {
+    comanda(Comanda.STATUS_FECHADA);
+    when(transacaoRepository.listarAtivasPorComanda(any(), any())).thenReturn(List.of());
+    ClientPackageBalance saldo = saldoDePacote(5, 3, clientId);
+    ComandaItem corte = item(ComandaItem.TIPO_SERVICO, "0.00", professionalId);
+    corte.setCoberturaTipo(ComandaItem.COBERTURA_PACOTE);
+    corte.setCoberturaSaldoId(saldo.getId());
+    itensDaComanda(corte);
+
+    ComandaDtos.EstornarComandaRequest req = new ComandaDtos.EstornarComandaRequest();
+    req.motivo = "cliente nao foi atendido";
+    service.estornar(comandaId, req);
+
+    assertThat(saldo.getSessoesUsadas()).isEqualTo(2);
+  }
+
+  @Test
+  void retirarACoberturaVoltaOPreco() {
+    Comanda aberta = comanda(Comanda.STATUS_ABERTA);
+    aberta.setClientId(clientId);
+    ComandaItem corte = item(ComandaItem.TIPO_SERVICO, "0.00", professionalId);
+    corte.setCoberturaTipo(ComandaItem.COBERTURA_PACOTE);
+    corte.setCoberturaSaldoId(UUID.randomUUID());
+    corte.setValorCobertura(new BigDecimal("50.00"));
+    corte.setPrecoAntesCobertura(new BigDecimal("70.00"));
+    when(comandaItemRepository.findByIdAndComandaId(corte.getId(), comandaId)).thenReturn(Optional.of(corte));
+
+    service.removerCobertura(comandaId, corte.getId());
+
+    assertThat(corte.getCoberturaTipo()).isNull();
+    assertThat(corte.getTotal()).isEqualByComparingTo("70.00");
   }
 }

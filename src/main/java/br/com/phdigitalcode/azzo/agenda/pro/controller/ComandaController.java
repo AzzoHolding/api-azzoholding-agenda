@@ -71,6 +71,31 @@ public class ComandaController {
     return servicoComanda.adicionarItem(id, request);
   }
 
+  /** Os pacotes e assinaturas do cliente que podem cobrir o servico deste item (V134). */
+  @GetMapping("/{id}/itens/{itemId}/coberturas")
+  @RequiresPermission("pos:view")
+  public java.util.List<ComandaDtos.OpcaoDeCoberturaResponse> opcoesDeCobertura(
+      @PathVariable UUID id, @PathVariable UUID itemId) {
+    return servicoComanda.opcoesDeCobertura(id, itemId);
+  }
+
+  /** A recepcao escolhe: o servico sai do pacote ou da assinatura do cliente. */
+  @PostMapping("/{id}/itens/{itemId}/cobertura")
+  @RequiresPermission("pos:manage")
+  public ComandaDtos.ComandaResponse aplicarCobertura(
+      @PathVariable UUID id,
+      @PathVariable UUID itemId,
+      @Valid @RequestBody ComandaDtos.AplicarCoberturaRequest request) {
+    return servicoComanda.aplicarCobertura(id, itemId, request);
+  }
+
+  @DeleteMapping("/{id}/itens/{itemId}/cobertura")
+  @RequiresPermission("pos:manage")
+  public ComandaDtos.ComandaResponse removerCobertura(
+      @PathVariable UUID id, @PathVariable UUID itemId) {
+    return servicoComanda.removerCobertura(id, itemId);
+  }
+
   @DeleteMapping("/{id}/itens/{itemId}")
   @RequiresPermission("pos:manage")
   public ComandaDtos.ComandaResponse removerItem(
