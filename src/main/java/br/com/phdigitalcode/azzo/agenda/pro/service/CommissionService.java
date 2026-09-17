@@ -537,6 +537,23 @@ public class CommissionService {
     }
   }
 
+  /**
+   * O agendamento ja tem comissao de servico (nao estornada) gerada na CONCLUSAO — a regra antiga.
+   *
+   * <p>Desde 2026-09-17 a comissao sai do que a COMANDA cobrou, ao fechar. Atendimento concluido
+   * antes do deploy, com comanda ainda aberta, ja tem a comissao pela regra antiga; fechar a comanda
+   * nao pode gerar a segunda.
+   */
+  @Transactional(readOnly = true)
+  public boolean possuiComissaoDeServicoDoAgendamento(UUID tenantId, UUID appointmentId) {
+    if (tenantId == null || appointmentId == null) return false;
+    return entryRepository
+        .listByTenantAndOriginReferencePrefix(
+            tenantId, "SERVICE", "APPOINTMENT:" + appointmentId + ":ITEM:")
+        .stream()
+        .anyMatch(entry -> entry != null && !"REVERSED".equals(entry.getEntryStatus()));
+  }
+
   @Transactional
   public void reverseServiceCommissionIfApplicable(UUID tenantId, UUID appointmentId, String reason) {
     reverseServiceEntriesIfApplicable(

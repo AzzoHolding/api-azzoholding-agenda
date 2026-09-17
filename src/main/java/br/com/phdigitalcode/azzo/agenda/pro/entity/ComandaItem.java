@@ -28,6 +28,12 @@ public class ComandaItem {
 
   public static final String ORIGEM_MANUAL = "MANUAL";
 
+  /** O servico saiu do pacote comprado pelo cliente (V134). */
+  public static final String COBERTURA_PACOTE = "PACOTE";
+
+  /** O servico saiu da assinatura mensal do cliente (V134). */
+  public static final String COBERTURA_ASSINATURA = "ASSINATURA";
+
   @Id
   @Column(name = "id", nullable = false)
   private UUID id;
@@ -66,6 +72,25 @@ public class ComandaItem {
    */
   @Column(name = "origem", nullable = false)
   private String origem = ORIGEM_MANUAL;
+
+  /** PACOTE ou ASSINATURA quando a recepcao escolheu cobrir o servico (V134); nulo, cobrado. */
+  @Column(name = "cobertura_tipo")
+  private String coberturaTipo;
+
+  /** O saldo de onde a sessao sai — de pacote ou de assinatura, conforme o tipo. */
+  @Column(name = "cobertura_saldo_id")
+  private UUID coberturaSaldoId;
+
+  /**
+   * O valor da sessao dentro do que o cliente pagou pelo pacote/plano. E a base da comissao do
+   * servico coberto: a conta sai zerada, e o profissional nao pode trabalhar de graca.
+   */
+  @Column(name = "valor_cobertura")
+  private BigDecimal valorCobertura;
+
+  /** O preco que o item tinha antes da cobertura, para voltar se ela for retirada. */
+  @Column(name = "preco_antes_cobertura")
+  private BigDecimal precoAntesCobertura;
 
   @Column(name = "created_at", nullable = false)
   private Instant createdAt;

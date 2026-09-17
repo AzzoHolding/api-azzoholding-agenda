@@ -96,6 +96,35 @@ public final class ComandaDtos {
 
     /** AGENDAMENTO ou MANUAL (V132): a tela mostra de onde a linha veio. */
     public String origem;
+
+    /** PACOTE ou ASSINATURA quando o servico saiu do saldo do cliente (V134). */
+    public String coberturaTipo;
+
+    public String coberturaSaldoId;
+
+    /** Valor da sessao dentro do que o cliente pagou: a base da comissao do item coberto. */
+    public BigDecimal valorCobertura;
+  }
+
+  /** A recepcao escolhe de onde o servico sai (V134). */
+  public static class AplicarCoberturaRequest {
+    @NotBlank
+    @Pattern(regexp = "PACOTE|ASSINATURA")
+    public String tipo;
+
+    @NotBlank public String saldoId;
+  }
+
+  /** Um saldo do cliente que pode cobrir o servico do item. */
+  public static class OpcaoDeCoberturaResponse {
+    public String tipo;
+    public String saldoId;
+    /** Nome do pacote ou do plano. */
+    public String nome;
+    /** Quantas sessoes ainda restam nesse saldo. */
+    public int disponiveis;
+    /** Valor de cada sessao dentro do que foi pago — base da comissao. */
+    public BigDecimal valorDaSessao;
   }
 
   public static class ComandaPagamentoResponse {

@@ -834,6 +834,10 @@ class ServicoAgendamentosTest {
       service.atualizarStatus(a.getId(), "COMPLETED");
 
       verify(transacaoRepository, never()).save(any(Transacao.class));
+      // Com comanda, comissao e insumo saem dela ao FECHAR, pelo que ela cobrou (2026-09-17).
+      verify(commissionService, never())
+          .registerServiceCommissionsIfApplicable(any(), any(), any(), any(), any());
+      verify(estoqueMovimentacaoService, never()).consumirInsumosPorAgendamento(any(), any(), any());
     }
 
     @Test

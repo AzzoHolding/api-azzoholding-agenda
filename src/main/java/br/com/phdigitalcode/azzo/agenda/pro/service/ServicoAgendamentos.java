@@ -400,16 +400,21 @@ public class ServicoAgendamentos {
         pagarComandaAgoraSeNecessario(tenantId, a, paymentMethod);
       }
       registrarReceitaConclusaoSeNecessario(tenantId, a, paymentMethod);
-      commissionService.registerServiceCommissionsIfApplicable(
-          tenantId, a.getId(), a.getProfessionalId(), a.getItems(), a.getDate());
-      List<UUID> serviceIds =
-          a.getItems() == null
-              ? List.of()
-              : a.getItems().stream()
-                  .filter(i -> i.getServiceId() != null)
-                  .map(AgendamentoItem::getServiceId)
-                  .toList();
-      estoqueMovimentacaoService.consumirInsumosPorAgendamento(tenantId, a.getId(), serviceIds);
+      // Com COMANDA, comissao e insumo saem dela, ao fechar, pelo que ela COBROU (decisao do
+      // usuario, 2026-09-17). So o atendimento SEM comanda (a abertura automatica falhou) segue
+      // gerando pelos itens do agendamento — senao ficaria sem comissao nenhuma.
+      if (!comandaRepository.existsByAppointmentIdAndTenantId(a.getId(), tenantId)) {
+        commissionService.registerServiceCommissionsIfApplicable(
+            tenantId, a.getId(), a.getProfessionalId(), a.getItems(), a.getDate());
+        List<UUID> serviceIds =
+            a.getItems() == null
+                ? List.of()
+                : a.getItems().stream()
+                    .filter(i -> i.getServiceId() != null)
+                    .map(AgendamentoItem::getServiceId)
+                    .toList();
+        estoqueMovimentacaoService.consumirInsumosPorAgendamento(tenantId, a.getId(), serviceIds);
+      }
     } else if (statusAnterior == StatusAgendamento.COMPLETED
         && novoStatus != StatusAgendamento.COMPLETED) {
       estornarReceitaConclusaoSeNecessario(tenantId, a);
@@ -2160,6 +2165,14 @@ public class ServicoAgendamentos {
     return criarComandaComItens(tenantId, agendamento);
   }
 
+  /** Total do item do agendamento (preco - desconto) por unidade; cai no preco cheio sem total. */
+  private static BigDecimal precoAcordadoPorUnidade(AgendamentoItem item) {
+    int quantidade = Math.max(item.getQuantity(), 1);
+    if (item.getTotalPrice() == null) return item.getUnitPrice();
+    return item.getTotalPrice()
+        .divide(BigDecimal.valueOf(quantidade), 2, java.math.RoundingMode.HALF_UP);
+  }
+
   private UUID criarComandaComItens(UUID tenantId, Agendamento agendamento) {
     ComandaDtos.AbrirComandaRequest abrirRequest = new ComandaDtos.AbrirComandaRequest();
     abrirRequest.appointmentId = agendamento.getId().toString();
@@ -2177,7 +2190,10 @@ public class ServicoAgendamentos {
       itemRequest.professionalId =
           agendamento.getProfessionalId() != null ? agendamento.getProfessionalId().toString() : null;
       itemRequest.quantidade = BigDecimal.valueOf(item.getQuantity());
-      itemRequest.precoUnitario = item.getUnitPrice();
+      // O preco ACORDADO no agendamento, ja com o desconto dele: a comanda levava o preco cheio e o
+      // desconto combinado na marcacao sumia na hora de cobrar. Como a comissao agora sai do que a
+      // comanda cobra, isso tambem define a base dela.
+      itemRequest.precoUnitario = precoAcordadoPorUnidade(item);
       // Caminho interno: aqui o preco do pedido VALE — e o acordado com o cliente naquele
       // atendimento. A rota HTTP do PDV usa o preco de tabela (ver ServicoComanda).
       servicoComanda.adicionarItemDoAgendamento(UUID.fromString(comanda.id), itemRequest);
@@ -2283,7 +2299,7 @@ public class ServicoAgendamentos {
     if (comanda != null && Comanda.STATUS_FECHADA.equals(comanda.getStatus())) {
       throw new IllegalArgumentException(
           "Nao e possivel alterar o status: a comanda vinculada ja foi fechada com venda registrada no caixa. "
-              + "Estorne a venda manualmente no financeiro antes de alterar o status do agendamento.");
+              + "O dono estorna a comanda no PDV antes de alterar o status do agendamento.");
     }
   }
 

@@ -29,6 +29,9 @@ public interface MovimentacaoEstoqueRepository
 
   List<MovimentacaoEstoque> findByTenantIdAndComandaItemId(UUID tenantId, UUID comandaItemId);
 
+  /** O agendamento ja consumiu insumo pela regra antiga (conclusao)? Ver ServicoComanda.fechar. */
+  boolean existsByTenantIdAndAppointmentId(UUID tenantId, UUID appointmentId);
+
   long countByTenantIdAndAppointmentIdAndItemEstoqueId(
       UUID tenantId, UUID appointmentId, UUID itemEstoqueId);
 

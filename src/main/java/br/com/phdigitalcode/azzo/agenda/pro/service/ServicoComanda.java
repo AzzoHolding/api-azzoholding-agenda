@@ -17,6 +17,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import br.com.phdigitalcode.azzo.agenda.pro.dto.ComandaDtos;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.AppointmentDeposit;
+import br.com.phdigitalcode.azzo.agenda.pro.entity.ClientMembership;
+import br.com.phdigitalcode.azzo.agenda.pro.entity.ClientMembershipBalance;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.ClientPackageBalance;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.ClientPackagePurchase;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.Cliente;
@@ -43,6 +45,8 @@ import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditService;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.TenantAsaasChargeService;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.AgendamentoRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.AppointmentDepositRepository;
+import br.com.phdigitalcode.azzo.agenda.pro.repository.ClientMembershipBalanceRepository;
+import br.com.phdigitalcode.azzo.agenda.pro.repository.ClientMembershipRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.ClientPackageBalanceRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.ClientPackagePurchaseRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.ClienteRepository;
@@ -109,6 +113,8 @@ public class ServicoComanda {
   private final TenantOperationalSettingsRepository tenantOperationalSettingsRepository;
   private final AgendamentoRepository agendamentoRepository;
   private final TravaFinanceira travaFinanceira;
+  private final ClientMembershipRepository clientMembershipRepository;
+  private final ClientMembershipBalanceRepository clientMembershipBalanceRepository;
 
   private final AuditService auditService;
 
@@ -138,7 +144,9 @@ public class ServicoComanda {
       TenantOperationalSettingsRepository tenantOperationalSettingsRepository,
       AgendamentoRepository agendamentoRepository,
       AuditService auditService,
-      TravaFinanceira travaFinanceira) {
+      TravaFinanceira travaFinanceira,
+      ClientMembershipRepository clientMembershipRepository,
+      ClientMembershipBalanceRepository clientMembershipBalanceRepository) {
     this.contextoTenant = contextoTenant;
     this.authenticatedUser = authenticatedUser;
     this.comandaRepository = comandaRepository;
@@ -165,6 +173,8 @@ public class ServicoComanda {
     this.agendamentoRepository = agendamentoRepository;
     this.auditService = auditService;
     this.travaFinanceira = travaFinanceira;
+    this.clientMembershipRepository = clientMembershipRepository;
+    this.clientMembershipBalanceRepository = clientMembershipBalanceRepository;
   }
 
   @Transactional
@@ -354,6 +364,332 @@ public class ServicoComanda {
     recalcular(comanda);
     auditar(tenantId, "POS_ITEM_REMOVE", comanda, antes, null);
     return obter(id);
+  }
+
+  // ─── Cobertura por pacote ou assinatura (V134) ────────────────────────────
+
+  /**
+   * Os saldos do cliente que podem cobrir o servico deste item.
+   *
+   * <p>Decisao do usuario (2026-09-17): a RECEPCAO escolhe se o servico sai do pacote ou da
+   * assinatura — o sistema nao abate sozinho. Antes disso, nenhum atendimento descontava sessao
+   * (analise de 2026-09-16, A5): pacote vendido e cobrado, saldo que nunca descia.
+   */
+  @Transactional(readOnly = true)
+  public List<ComandaDtos.OpcaoDeCoberturaResponse> opcoesDeCobertura(UUID id, UUID itemId) {
+    UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    Comanda comanda = buscarOuFalhar(id, tenantId);
+    exigirComandaDoProfissional(tenantId, comanda);
+    ComandaItem item = buscarItemOuFalhar(comanda, itemId);
+    if (!ComandaItem.TIPO_SERVICO.equals(item.getTipo()) || comanda.getClientId() == null) {
+      return List.of();
+    }
+
+    List<ComandaDtos.OpcaoDeCoberturaResponse> opcoes = new ArrayList<>();
+    for (ClientPackagePurchase compra :
+        clientPackagePurchaseRepository.findByTenantIdAndClientIdOrderByCreatedAtDesc(
+            tenantId, comanda.getClientId())) {
+      for (ClientPackageBalance saldo : clientPackageBalanceRepository.findByPurchaseId(compra.getId())) {
+        int disponiveis = saldo.getSessoesTotais() - saldo.getSessoesUsadas();
+        if (!item.getReferenciaId().equals(saldo.getServiceId()) || disponiveis <= 0) continue;
+        ComandaDtos.OpcaoDeCoberturaResponse opcao = new ComandaDtos.OpcaoDeCoberturaResponse();
+        opcao.tipo = ComandaItem.COBERTURA_PACOTE;
+        opcao.saldoId = saldo.getId().toString();
+        opcao.nome = compra.getPackageNome();
+        opcao.disponiveis = disponiveis;
+        opcao.valorDaSessao = valorDaSessaoDoPacote(compra);
+        opcoes.add(opcao);
+      }
+    }
+    for (ClientMembership assinatura :
+        clientMembershipRepository.findByTenantIdAndClientIdOrderByCreatedAtDesc(
+            tenantId, comanda.getClientId())) {
+      if (!assinaturaValeAgora(assinatura)) continue;
+      for (ClientMembershipBalance saldo :
+          clientMembershipBalanceRepository.findByMembershipId(assinatura.getId())) {
+        int disponiveis = saldo.getQuantidadeMensal() - saldo.getUsadasNoPeriodo();
+        if (!item.getReferenciaId().equals(saldo.getServiceId()) || disponiveis <= 0) continue;
+        ComandaDtos.OpcaoDeCoberturaResponse opcao = new ComandaDtos.OpcaoDeCoberturaResponse();
+        opcao.tipo = ComandaItem.COBERTURA_ASSINATURA;
+        opcao.saldoId = saldo.getId().toString();
+        opcao.nome = assinatura.getPlanNome();
+        opcao.disponiveis = disponiveis;
+        opcao.valorDaSessao = valorDaSessaoDaAssinatura(assinatura);
+        opcoes.add(opcao);
+      }
+    }
+    return opcoes;
+  }
+
+  /**
+   * Cobre o servico com o saldo escolhido: o item sai da conta (preco zero) e guarda de onde a
+   * sessao vai sair. A sessao so e DESCONTADA quando a comanda fechar.
+   */
+  @Transactional
+  public ComandaDtos.ComandaResponse aplicarCobertura(
+      UUID id, UUID itemId, ComandaDtos.AplicarCoberturaRequest request) {
+    UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    Comanda comanda = buscarOuFalhar(id, tenantId);
+    exigirComandaDoProfissional(tenantId, comanda);
+    exigirAberta(comanda);
+    ComandaItem item = buscarItemOuFalhar(comanda, itemId);
+    Map<String, Object> antes = dadosDoItem(item);
+
+    if (!ComandaItem.TIPO_SERVICO.equals(item.getTipo())) {
+      throw new IllegalArgumentException("So servico pode sair de pacote ou assinatura.");
+    }
+    if (comanda.getClientId() == null) {
+      throw new IllegalArgumentException(
+          "Comanda sem cliente nao usa pacote nem assinatura: identifique o cliente primeiro.");
+    }
+    if (item.getCoberturaTipo() != null) {
+      throw new IllegalArgumentException("Este servico ja esta coberto. Retire a cobertura antes.");
+    }
+
+    UUID saldoId = parseUuidOrThrow(request.saldoId, "saldoId invalido.");
+    item.setCoberturaTipo(request.tipo);
+    item.setCoberturaSaldoId(saldoId);
+    int sessoes = sessoesDoItem(item);
+    item.setValorCobertura(
+        valorDaSessaoDoSaldo(tenantId, comanda, item).multiply(BigDecimal.valueOf(sessoes)));
+    exigirSaldoDaCobertura(tenantId, comanda, item);
+
+    item.setPrecoAntesCobertura(item.getPrecoUnitario());
+    item.setPrecoUnitario(BigDecimal.ZERO);
+    item.setTotal(BigDecimal.ZERO);
+    comandaItemRepository.saveAndFlush(item);
+    recalcular(comanda);
+
+    auditar(tenantId, "POS_COVERAGE_APPLY", comanda, antes, dadosDoItem(item));
+    return obter(id);
+  }
+
+  @Transactional
+  public ComandaDtos.ComandaResponse removerCobertura(UUID id, UUID itemId) {
+    UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    Comanda comanda = buscarOuFalhar(id, tenantId);
+    exigirComandaDoProfissional(tenantId, comanda);
+    exigirAberta(comanda);
+    ComandaItem item = buscarItemOuFalhar(comanda, itemId);
+    if (item.getCoberturaTipo() == null) return obter(id);
+    Map<String, Object> antes = dadosDoItem(item);
+
+    BigDecimal preco =
+        item.getPrecoAntesCobertura() != null ? item.getPrecoAntesCobertura() : BigDecimal.ZERO;
+    item.setPrecoUnitario(preco);
+    item.setTotal(preco.multiply(item.getQuantidade()).setScale(2, RoundingMode.HALF_UP));
+    item.setCoberturaTipo(null);
+    item.setCoberturaSaldoId(null);
+    item.setValorCobertura(null);
+    item.setPrecoAntesCobertura(null);
+    comandaItemRepository.saveAndFlush(item);
+    recalcular(comanda);
+
+    auditar(tenantId, "POS_COVERAGE_REMOVE", comanda, antes, dadosDoItem(item));
+    return obter(id);
+  }
+
+  private ComandaItem buscarItemOuFalhar(Comanda comanda, UUID itemId) {
+    return comandaItemRepository
+        .findByIdAndComandaId(itemId, comanda.getId())
+        .orElseThrow(() -> new ApiClientErrorException("Item nao encontrado na comanda.", 404));
+  }
+
+  /** Sessao e unidade inteira: 1,5 corte nao sai de pacote nenhum. */
+  private int sessoesDoItem(ComandaItem item) {
+    BigDecimal quantidade = item.getQuantidade() != null ? item.getQuantidade() : BigDecimal.ONE;
+    if (quantidade.signum() <= 0 || quantidade.stripTrailingZeros().scale() > 0) {
+      throw new IllegalArgumentException(
+          "So quantidade inteira de sessoes sai de pacote ou assinatura.");
+    }
+    return quantidade.intValueExact();
+  }
+
+  /**
+   * O saldo escolhido e do cliente da comanda, do mesmo servico, esta valendo e tem sessoes para o
+   * item? Usado ao escolher e de novo ao fechar.
+   */
+  private void exigirSaldoDaCobertura(UUID tenantId, Comanda comanda, ComandaItem item) {
+    int sessoes = sessoesDoItem(item);
+    if (ComandaItem.COBERTURA_PACOTE.equals(item.getCoberturaTipo())) {
+      ClientPackageBalance saldo = saldoDePacoteDoCliente(tenantId, comanda, item);
+      if (saldo.getSessoesTotais() - saldo.getSessoesUsadas() < sessoes) {
+        throw new IllegalArgumentException(
+            "O pacote nao tem mais sessoes de " + saldo.getServiceNome() + " para este servico.");
+      }
+    } else if (ComandaItem.COBERTURA_ASSINATURA.equals(item.getCoberturaTipo())) {
+      ClientMembershipBalance saldo = saldoDeAssinaturaDoCliente(tenantId, comanda, item);
+      if (saldo.getQuantidadeMensal() - saldo.getUsadasNoPeriodo() < sessoes) {
+        throw new IllegalArgumentException(
+            "A assinatura ja usou todas as sessoes de " + saldo.getServiceNome() + " deste periodo.");
+      }
+    } else {
+      throw new IllegalArgumentException("Tipo de cobertura invalido.");
+    }
+  }
+
+  private ClientPackageBalance saldoDePacoteDoCliente(UUID tenantId, Comanda comanda, ComandaItem item) {
+    ClientPackageBalance saldo =
+        clientPackageBalanceRepository
+            .findById(item.getCoberturaSaldoId())
+            .filter(s -> tenantId.equals(s.getTenantId()))
+            .orElseThrow(() -> new IllegalArgumentException("Saldo de pacote nao encontrado."));
+    ClientPackagePurchase compra =
+        clientPackagePurchaseRepository
+            .findById(saldo.getPurchaseId())
+            .orElseThrow(() -> new IllegalArgumentException("Saldo de pacote nao encontrado."));
+    if (!comanda.getClientId().equals(compra.getClientId())
+        || !item.getReferenciaId().equals(saldo.getServiceId())) {
+      throw new IllegalArgumentException("Este pacote nao e do cliente da comanda ou nao cobre este servico.");
+    }
+    return saldo;
+  }
+
+  private ClientMembershipBalance saldoDeAssinaturaDoCliente(
+      UUID tenantId, Comanda comanda, ComandaItem item) {
+    ClientMembershipBalance saldo =
+        clientMembershipBalanceRepository
+            .findById(item.getCoberturaSaldoId())
+            .filter(s -> tenantId.equals(s.getTenantId()))
+            .orElseThrow(() -> new IllegalArgumentException("Saldo de assinatura nao encontrado."));
+    ClientMembership assinatura =
+        clientMembershipRepository
+            .findByIdAndTenantId(saldo.getMembershipId(), tenantId)
+            .orElseThrow(() -> new IllegalArgumentException("Saldo de assinatura nao encontrado."));
+    if (!comanda.getClientId().equals(assinatura.getClientId())
+        || !item.getReferenciaId().equals(saldo.getServiceId())) {
+      throw new IllegalArgumentException(
+          "Esta assinatura nao e do cliente da comanda ou nao cobre este servico.");
+    }
+    if (!assinaturaValeAgora(assinatura)) {
+      throw new IllegalArgumentException("A assinatura do cliente nao esta valendo agora.");
+    }
+    return saldo;
+  }
+
+  /** So assinatura ATIVA e dentro do periodo pago cobre servico. */
+  private boolean assinaturaValeAgora(ClientMembership assinatura) {
+    if (!ClientMembership.STATUS_ATIVA.equals(assinatura.getStatus())) return false;
+    Instant agora = Instant.now();
+    if (assinatura.getPeriodStart() != null && agora.isBefore(assinatura.getPeriodStart())) return false;
+    return assinatura.getPeriodEnd() == null || !agora.isAfter(assinatura.getPeriodEnd());
+  }
+
+  private BigDecimal valorDaSessaoDoSaldo(UUID tenantId, Comanda comanda, ComandaItem item) {
+    if (ComandaItem.COBERTURA_PACOTE.equals(item.getCoberturaTipo())) {
+      ClientPackageBalance saldo = saldoDePacoteDoCliente(tenantId, comanda, item);
+      return clientPackagePurchaseRepository
+          .findById(saldo.getPurchaseId())
+          .map(this::valorDaSessaoDoPacote)
+          .orElse(BigDecimal.ZERO);
+    }
+    if (ComandaItem.COBERTURA_ASSINATURA.equals(item.getCoberturaTipo())) {
+      ClientMembershipBalance saldo = saldoDeAssinaturaDoCliente(tenantId, comanda, item);
+      return clientMembershipRepository
+          .findByIdAndTenantId(saldo.getMembershipId(), tenantId)
+          .map(this::valorDaSessaoDaAssinatura)
+          .orElse(BigDecimal.ZERO);
+    }
+    throw new IllegalArgumentException("Tipo de cobertura invalido.");
+  }
+
+  /** O que o cliente pagou pelo pacote dividido pelo total de sessoes dele. */
+  private BigDecimal valorDaSessaoDoPacote(ClientPackagePurchase compra) {
+    int sessoes =
+        clientPackageBalanceRepository.findByPurchaseId(compra.getId()).stream()
+            .mapToInt(ClientPackageBalance::getSessoesTotais)
+            .sum();
+    if (sessoes <= 0 || compra.getPrecoPago() == null) return BigDecimal.ZERO;
+    return compra.getPrecoPago().divide(BigDecimal.valueOf(sessoes), 2, RoundingMode.HALF_UP);
+  }
+
+  /** A mensalidade dividida pelas sessoes do mes que o plano da. */
+  private BigDecimal valorDaSessaoDaAssinatura(ClientMembership assinatura) {
+    int sessoes =
+        clientMembershipBalanceRepository.findByMembershipId(assinatura.getId()).stream()
+            .mapToInt(ClientMembershipBalance::getQuantidadeMensal)
+            .sum();
+    if (sessoes <= 0 || assinatura.getPrecoMensal() == null) return BigDecimal.ZERO;
+    return assinatura.getPrecoMensal().divide(BigDecimal.valueOf(sessoes), 2, RoundingMode.HALF_UP);
+  }
+
+  /** Desconta a sessao do saldo — so no fechamento. */
+  private void consumirCobertura(UUID tenantId, ComandaItem item) {
+    int sessoes = sessoesDoItem(item);
+    if (ComandaItem.COBERTURA_PACOTE.equals(item.getCoberturaTipo())) {
+      clientPackageBalanceRepository.findById(item.getCoberturaSaldoId()).ifPresent(saldo -> {
+        saldo.setSessoesUsadas(saldo.getSessoesUsadas() + sessoes);
+        clientPackageBalanceRepository.save(saldo);
+      });
+    } else if (ComandaItem.COBERTURA_ASSINATURA.equals(item.getCoberturaTipo())) {
+      clientMembershipBalanceRepository.findById(item.getCoberturaSaldoId()).ifPresent(saldo -> {
+        saldo.setUsadasNoPeriodo(saldo.getUsadasNoPeriodo() + sessoes);
+        clientMembershipBalanceRepository.save(saldo);
+      });
+    }
+  }
+
+  /** O estorno devolve a sessao ao saldo (nunca abaixo de zero). */
+  private void devolverCobertura(ComandaItem item) {
+    int sessoes = sessoesDoItem(item);
+    if (ComandaItem.COBERTURA_PACOTE.equals(item.getCoberturaTipo())) {
+      clientPackageBalanceRepository.findById(item.getCoberturaSaldoId()).ifPresent(saldo -> {
+        saldo.setSessoesUsadas(Math.max(0, saldo.getSessoesUsadas() - sessoes));
+        clientPackageBalanceRepository.save(saldo);
+      });
+    } else if (ComandaItem.COBERTURA_ASSINATURA.equals(item.getCoberturaTipo())) {
+      clientMembershipBalanceRepository.findById(item.getCoberturaSaldoId()).ifPresent(saldo -> {
+        saldo.setUsadasNoPeriodo(Math.max(0, saldo.getUsadasNoPeriodo() - sessoes));
+        clientMembershipBalanceRepository.save(saldo);
+      });
+    }
+  }
+
+  // ─── Servico executado: comissao e insumo pelo que a comanda cobrou ──────
+
+  /**
+   * Comissao e insumo de um SERVICO, ao fechar a comanda.
+   *
+   * <p>Decisao do usuario (2026-09-17): a comissao sai do que a COMANDA cobrou. Antes, a comanda de
+   * um atendimento nao gerava nada, e a comissao saia dos itens do AGENDAMENTO na conclusao — o
+   * servico extra lancado na comanda ficava sem comissao e sem baixa de insumo, o desconto do PDV
+   * nao reduzia a base, a comissao saia mesmo com a conta nunca paga, e o estorno nao a revertia
+   * (analise de 2026-09-16, A1). Agora todo servico da comanda — avulsa ou de atendimento — gera
+   * comissao sobre o valor liquido cobrado (ou sobre o valor da sessao, se veio de pacote), no
+   * fechamento, e o estorno reverte pela mesma chave.
+   *
+   * <p>{@code jaRegistradoPeloAgendamento}: atendimento concluido pela regra ANTIGA (antes do
+   * deploy) ja tem comissao e insumo — a comanda dele nao gera de novo.
+   */
+  private void registrarServicoExecutado(
+      UUID tenantId,
+      Comanda comanda,
+      ComandaItem item,
+      BigDecimal baseDaComissao,
+      boolean jaRegistradoPeloAgendamento) {
+    if (jaRegistradoPeloAgendamento) return;
+    estoqueMovimentacaoService.consumirInsumosPorItemComanda(
+        tenantId, item.getId(), item.getReferenciaId());
+    if (item.getProfessionalId() != null) {
+      BigDecimal base = baseDaComissao != null ? baseDaComissao : BigDecimal.ZERO;
+      commissionService.registerServiceCommissionForComandaItemIfApplicable(
+          tenantId,
+          comanda.getId(),
+          item.getId(),
+          item.getProfessionalId(),
+          item.getReferenciaId(),
+          item.getCoberturaTipo() != null ? base : item.getTotal(),
+          base,
+          Instant.now());
+    }
+  }
+
+  /** O atendimento da comanda ja gerou comissao ou consumiu insumo pela regra antiga? */
+  private boolean servicosJaRegistradosPeloAgendamento(UUID tenantId, Comanda comanda) {
+    if (comanda.getAppointmentId() == null) return false;
+    return commissionService.possuiComissaoDeServicoDoAgendamento(tenantId, comanda.getAppointmentId())
+        || movimentacaoEstoqueRepository.existsByTenantIdAndAppointmentId(
+            tenantId, comanda.getAppointmentId());
   }
 
   @Transactional
@@ -574,9 +910,26 @@ public class ServicoComanda {
     List<BigDecimal> valoresLiquidosPorItem =
         ratearDesconto(itens, comanda.getSubtotal(), comanda.getTotal());
 
+    // A sessao so e descontada do pacote/assinatura AGORA: conferir de novo, porque outra comanda
+    // pode ter usado o saldo entre a escolha e o fechamento.
+    for (ComandaItem item : itens) {
+      if (item.getCoberturaTipo() != null) exigirSaldoDaCobertura(tenantId, comanda, item);
+    }
+    boolean servicosJaRegistradosPeloAgendamento = servicosJaRegistradosPeloAgendamento(tenantId, comanda);
+
     for (int i = 0; i < itens.size(); i++) {
       ComandaItem item = itens.get(i);
       BigDecimal valorLiquido = valoresLiquidosPorItem.get(i);
+
+      // Servico coberto por pacote/assinatura: a conta sai zerada (o cliente ja pagou), entao nao
+      // ha receita a lancar — mas a sessao e consumida, o insumo sai e o profissional recebe a
+      // comissao sobre o valor da sessao dentro do que foi pago.
+      if (ComandaItem.TIPO_SERVICO.equals(item.getTipo()) && item.getCoberturaTipo() != null) {
+        consumirCobertura(tenantId, item);
+        registrarServicoExecutado(
+            tenantId, comanda, item, item.getValorCobertura(), servicosJaRegistradosPeloAgendamento);
+        continue;
+      }
       if (NumericUtil.isZeroOrNegative(valorLiquido)) continue;
 
       // Rateia a receita do item pelos meios de pagamento reais da comanda (uma Transacao por
@@ -603,23 +956,9 @@ public class ServicoComanda {
         }
       } else if (ComandaItem.TIPO_PACOTE.equals(item.getTipo())) {
         criarSaldoDePacoteVendido(tenantId, comanda, item, valorLiquido);
-      } else if (ComandaItem.TIPO_SERVICO.equals(item.getTipo())
-          && comanda.getAppointmentId() == null) {
-        // So para comanda AVULSA: quando ha agendamento vinculado, ServicoAgendamentos ja registra
-        // comissao de servico e consome insumo ao concluir — duplicar aqui lancaria em dobro.
-        estoqueMovimentacaoService.consumirInsumosPorItemComanda(
-            tenantId, item.getId(), item.getReferenciaId());
-        if (item.getProfessionalId() != null) {
-          commissionService.registerServiceCommissionForComandaItemIfApplicable(
-              tenantId,
-              comanda.getId(),
-              item.getId(),
-              item.getProfessionalId(),
-              item.getReferenciaId(),
-              item.getTotal(),
-              valorLiquido,
-              Instant.now());
-        }
+      } else if (ComandaItem.TIPO_SERVICO.equals(item.getTipo())) {
+        registrarServicoExecutado(
+            tenantId, comanda, item, valorLiquido, servicosJaRegistradosPeloAgendamento);
       }
     }
 
@@ -977,7 +1316,8 @@ public class ServicoComanda {
       if (ComandaItem.TIPO_PRODUTO.equals(item.getTipo())) {
         devolverEstoqueProduto(item, motivo);
       } else if (ComandaItem.TIPO_SERVICO.equals(item.getTipo())) {
-        // Comissao de SERVICO avulso usa o proprio item como chave de origem (ver fechar()).
+        if (item.getCoberturaTipo() != null) devolverCobertura(item);
+        // Comissao de SERVICO usa o proprio item da comanda como chave de origem (ver fechar()).
         commissionService.reverseEntryForOrigin(tenantId, "SERVICE", item.getId(), motivo);
         reverterConsumoInsumoItem(tenantId, item, motivo);
       }
@@ -1277,6 +1617,9 @@ public class ServicoComanda {
     r.precoUnitario = item.getPrecoUnitario();
     r.total = item.getTotal();
     r.origem = item.getOrigem();
+    r.coberturaTipo = item.getCoberturaTipo();
+    r.coberturaSaldoId = item.getCoberturaSaldoId() != null ? item.getCoberturaSaldoId().toString() : null;
+    r.valorCobertura = item.getValorCobertura();
     return r;
   }
 
