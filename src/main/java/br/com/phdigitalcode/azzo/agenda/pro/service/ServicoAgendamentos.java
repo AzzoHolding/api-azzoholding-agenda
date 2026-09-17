@@ -562,6 +562,23 @@ public class ServicoAgendamentos {
     }
     Map<String, Object> before = snapshotAgendamento(a);
 
+    // Em andamento, a conta ja existe: serviço, profissional e horario se ajustam NA COMANDA. Mudar
+    // aqui deixava agenda e comanda dizendo coisas diferentes (analise de 2026-09-16, M1). Nao
+    // compareceu e fato consumado. Nos dois, so a observacao muda.
+    if (a.getStatus() == StatusAgendamento.IN_PROGRESS || a.getStatus() == StatusAgendamento.NO_SHOW) {
+      if (tentaMudarAlemDaObservacao(a, req)) {
+        throw new IllegalArgumentException(
+            a.getStatus() == StatusAgendamento.IN_PROGRESS
+                ? "Atendimento em andamento: ajuste servicos e profissional na comanda. Aqui so a"
+                    + " observacao pode mudar."
+                : "Agendamento marcado como nao compareceu: so a observacao pode mudar.");
+      }
+      if (req.notes != null) a.setNotes(req.notes.isBlank() ? null : req.notes.trim());
+      agendamentoRepository.save(a);
+      auditarAgendamento(tenantId, "APPOINTMENT_UPDATE", before, snapshotAgendamento(a), a.getId());
+      return toResponse(a);
+    }
+
     if (req.notes != null) a.setNotes(req.notes.isBlank() ? null : req.notes.trim());
 
     if (req.professionalId != null && !req.professionalId.isBlank()) {
@@ -2163,6 +2180,38 @@ public class ServicoAgendamentos {
         comandaRepository.findFirstByAppointmentAndTenant(agendamento.getId(), tenantId).orElse(null);
     if (existente != null) return existente.getId();
     return criarComandaComItens(tenantId, agendamento);
+  }
+
+  /**
+   * O pedido de edicao muda algo alem da observacao? Compara os VALORES, e nao a presenca dos
+   * campos: a tela de edicao manda o formulario inteiro, com profissional, data e itens iguais.
+   */
+  private boolean tentaMudarAlemDaObservacao(Agendamento a, AppointmentUpdateRequest req) {
+    if (req.professionalId != null && !req.professionalId.isBlank()
+        && !req.professionalId.trim().equals(String.valueOf(a.getProfessionalId()))) {
+      return true;
+    }
+    if (req.date != null && !req.date.isBlank()) {
+      LocalDate data = DataUtil.parseDataISO(req.date);
+      if (data == null || !data.equals(a.getDate())) return true;
+    }
+    if (req.startTime != null && !req.startTime.isBlank()) {
+      if (!formatTime(parseTimeOrThrow(req.startTime)).equals(a.getStartTime())) return true;
+    }
+    if (req.items != null && !req.items.isEmpty()) {
+      java.util.Map<String, Integer> pedido = new java.util.TreeMap<>();
+      for (var item : req.items) {
+        if (item == null || item.serviceId == null) continue;
+        pedido.merge(item.serviceId.trim(), Math.max(item.quantity, 1), Integer::sum);
+      }
+      java.util.Map<String, Integer> atual = new java.util.TreeMap<>();
+      for (AgendamentoItem item : a.getItems()) {
+        if (item.getServiceId() == null) continue;
+        atual.merge(item.getServiceId().toString(), Math.max(item.getQuantity(), 1), Integer::sum);
+      }
+      if (!pedido.equals(atual)) return true;
+    }
+    return false;
   }
 
   /** Total do item do agendamento (preco - desconto) por unidade; cai no preco cheio sem total. */

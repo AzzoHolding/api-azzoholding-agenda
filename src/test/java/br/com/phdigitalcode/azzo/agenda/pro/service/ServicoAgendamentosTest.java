@@ -1649,4 +1649,57 @@ class ServicoAgendamentosTest {
         .hasMessageContaining("Cancele");
     verify(agendamentoRepository, never()).delete(any(Agendamento.class));
   }
+
+  // ─── Atendimento em andamento: so a observacao muda (2026-09-16, M1) ───────
+
+  private SchedulingDtosUpdate formularioIgual(Agendamento a) {
+    return new SchedulingDtosUpdate(a);
+  }
+
+  /** O formulario de edicao manda tudo: profissional, data, hora e itens iguais aos atuais. */
+  private static final class SchedulingDtosUpdate {
+    final br.com.phdigitalcode.azzo.agenda.pro.dto.SchedulingDtos.AppointmentUpdateRequest req =
+        new br.com.phdigitalcode.azzo.agenda.pro.dto.SchedulingDtos.AppointmentUpdateRequest();
+
+    SchedulingDtosUpdate(Agendamento a) {
+      req.professionalId = a.getProfessionalId().toString();
+      req.date = a.getDate().toString();
+      req.startTime = a.getStartTime();
+      for (var item : a.getItems()) {
+        AgendamentoRequest.ItemRequest pedido = new AgendamentoRequest.ItemRequest();
+        pedido.serviceId = item.getServiceId().toString();
+        pedido.quantity = item.getQuantity();
+        req.items.add(pedido);
+      }
+    }
+  }
+
+  @Test
+  @DisplayName("em andamento, trocar o profissional e recusado: ajusta-se na comanda")
+  void emAndamentoNaoTrocaProfissional() {
+    Agendamento a = agendamentoExistente(StatusAgendamento.IN_PROGRESS, LocalDate.now(ZONE_BR), "10:00", "10:30");
+    when(agendamentoRepository.findByIdAndTenantId(a.getId(), tenantId)).thenReturn(Optional.of(a));
+    var form = formularioIgual(a);
+    form.req.professionalId = UUID.randomUUID().toString();
+
+    assertThatThrownBy(() -> service.atualizar(a.getId(), form.req))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("ajuste servicos e profissional na comanda");
+    assertThat(a.getProfessionalId()).isEqualTo(professionalId);
+  }
+
+  @Test
+  @DisplayName("em andamento, o formulario inteiro com so a observacao mudada passa")
+  void emAndamentoMudaSoAObservacao() {
+    Agendamento a = agendamentoExistente(StatusAgendamento.IN_PROGRESS, LocalDate.now(ZONE_BR), "10:00", "10:30");
+    when(agendamentoRepository.findByIdAndTenantId(a.getId(), tenantId)).thenReturn(Optional.of(a));
+    var form = formularioIgual(a);
+    form.req.notes = "Cliente pediu para nao lavar";
+
+    service.atualizar(a.getId(), form.req);
+
+    assertThat(a.getNotes()).isEqualTo("Cliente pediu para nao lavar");
+    verify(agendamentoRepository).save(a);
+  }
 }
+

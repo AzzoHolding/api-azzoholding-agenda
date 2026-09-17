@@ -390,6 +390,7 @@ public class CommissionService {
     }
 
     CommissionDtos.CycleResponse before = toCycleResponse(cycle);
+    adiarProfissionaisSemSaldoNoCiclo(tenantId, cycle);
     cycle.setStatus("PAID");
     cycle.setPaidAt(Instant.now());
     cycle.setPaidByUserId(actorUserId);
@@ -421,7 +422,9 @@ public class CommissionService {
     UUID actorUserId = authenticatedUser.idOuNulo();
     UUID professionalId = parseUuidRequired(request.professionalId, "professionalId invalido");
     Profissional professional = getProfessionalOrFail(tenantId, professionalId);
-    if (request.amount == null || NumericUtil.isZeroOrNegative(request.amount)) {
+    // Negativo e permitido: e o DESCONTO de comissao — o unico jeito de acertar o que foi pago a
+    // mais (analise de 2026-09-16, M4). Zero nao muda nada e continua recusado.
+    if (request.amount == null || request.amount.signum() == 0) {
       throw new IllegalArgumentException("amount nao pode ser zero");
     }
 
@@ -1049,10 +1052,14 @@ public class CommissionService {
     if (tenantId == null || originId == null) return;
     CommissionEntry entry = entryRepository.findByTenantAndOrigin(tenantId, originType, originId).orElse(null);
     if (entry == null) return;
-    if ("PAID".equals(entry.getEntryStatus()) || "REVERSED".equals(entry.getEntryStatus())) return;
-
+    if ("REVERSED".equals(entry.getEntryStatus())) return;
     if (!"REVERSE_COMMISSION".equals(resolveRefundPolicy(entry))) return;
+    if ("PAID".equals(entry.getEntryStatus())) {
+      descontarComissaoJaPaga(tenantId, entry, reason);
+      return;
+    }
 
+    descontarDoCicloFechado(tenantId, entry);
     entry.setEntryStatus("REVERSED");
     entry.setReversedAt(Instant.now());
     entry.setNotes(appendNote(entry.getNotes(), reason));
@@ -1078,9 +1085,14 @@ public class CommissionService {
             tenantId, "SERVICE", "APPOINTMENT:" + appointmentId + ":ITEM:");
     for (CommissionEntry entry : entries) {
       if (entry == null) continue;
-      if ("PAID".equals(entry.getEntryStatus()) || "REVERSED".equals(entry.getEntryStatus())) continue;
+      if ("REVERSED".equals(entry.getEntryStatus())) continue;
       if (!"REVERSE_COMMISSION".equals(resolveRefundPolicy(entry))) continue;
+      if ("PAID".equals(entry.getEntryStatus())) {
+        descontarComissaoJaPaga(tenantId, entry, reason);
+        continue;
+      }
 
+      descontarDoCicloFechado(tenantId, entry);
       entry.setEntryStatus("REVERSED");
       entry.setReversedAt(Instant.now());
       entry.setNotes(appendNote(entry.getNotes(), reason));
@@ -1097,6 +1109,79 @@ public class CommissionService {
               "originType", "SERVICE",
               "originReference", entry.getOriginReference(),
               "reason", entry.getNotes()));
+    }
+  }
+
+  /**
+   * A venda foi estornada, mas a comissao dela JA FOI PAGA.
+   *
+   * <p>Antes, o estorno simplesmente ignorava a comissao paga, e o ajuste manual recusava valor
+   * negativo: o salao pagava comissao de venda desfeita e nao tinha como descontar (analise de
+   * 2026-09-16, M4). Agora nasce um AJUSTE NEGATIVO aberto, do mesmo valor, que entra no proximo
+   * ciclo do profissional. A entrada paga fica como esta — o pagamento aconteceu — e aponta para o
+   * desconto ({@code reversalEntryId}), o que tambem impede descontar duas vezes.
+   */
+  private void descontarComissaoJaPaga(UUID tenantId, CommissionEntry paga, String reason) {
+    if (paga.getReversalEntryId() != null || paga.getTotalAmountCents() <= 0) return;
+
+    Instant agora = Instant.now();
+    CommissionEntry desconto = new CommissionEntry();
+    desconto.setTenantId(tenantId);
+    desconto.setProfessionalId(paga.getProfessionalId());
+    desconto.setOriginType("MANUAL_ADJUSTMENT");
+    desconto.setOriginId(paga.getId());
+    desconto.setOriginReference("DESCONTO_DE_COMISSAO_PAGA:" + paga.getId());
+    desconto.setPeriodKey(PERIOD_KEY_FORMAT.format(agora.atZone(ZONA_BR).toLocalDate()));
+    desconto.setBaseAmountCents(0L);
+    desconto.setPercentValue(BigDecimal.ZERO);
+    desconto.setPercentAmountCents(0L);
+    desconto.setFixedAmountCents(-paga.getTotalAmountCents());
+    desconto.setTotalAmountCents(-paga.getTotalAmountCents());
+    desconto.setEntryStatus("OPEN");
+    desconto.setNotes(
+        "Desconto de comissao ja paga — a venda foi desfeita"
+            + (reason != null && !reason.isBlank() ? ": " + reason.trim() : ""));
+    desconto.setCreatedAt(agora);
+    entryRepository.save(desconto);
+    paga.setReversalEntryId(desconto.getId());
+
+    auditSuccess(
+        tenantId,
+        authenticatedUser.idOuNulo(),
+        "COMMISSION_PAID_REVERSAL_ADJUSTMENT",
+        "COMMISSION_ENTRY",
+        desconto.getId(),
+        null,
+        Map.of(
+            "entradaPagaId", paga.getId().toString(),
+            "valorDescontadoCents", paga.getTotalAmountCents(),
+            "motivo", reason == null ? "" : reason));
+  }
+
+  /**
+   * Entrada ja num ciclo FECHADO (e ainda nao pago) que e estornada: o total do ciclo baixa junto.
+   * O pagamento ja ignorava entrada estornada, mas o total exibido continuava com ela.
+   */
+  private void descontarDoCicloFechado(UUID tenantId, CommissionEntry entry) {
+    if (entry.getCycleId() == null) return;
+    cycleRepository
+        .findByTenantIdAndId(tenantId, entry.getCycleId())
+        .filter(ciclo -> !"PAID".equals(ciclo.getStatus()))
+        .ifPresent(ciclo -> ciclo.setTotalAmountCents(ciclo.getTotalAmountCents() - entry.getTotalAmountCents()));
+  }
+
+  /**
+   * Profissional com saldo zerado ou negativo no ciclo nao recebe agora — e as entradas dele passam
+   * para o proximo ciclo. Sem isso, pagar o ciclo marcava o DESCONTO como pago sem ter descontado
+   * nada, e a divida sumia.
+   */
+  private void adiarProfissionaisSemSaldoNoCiclo(UUID tenantId, CommissionCycle cycle) {
+    for (Object[] row : entryRepository.sumTotalCentsByProfessionalForCycle(tenantId, cycle.getId())) {
+      UUID professionalId = (UUID) row[0];
+      long total = row[1] instanceof Number number ? number.longValue() : 0L;
+      if (professionalId == null || total > 0) continue;
+      entryRepository.releaseProfessionalFromCycle(tenantId, cycle.getId(), professionalId);
+      cycle.setTotalAmountCents(cycle.getTotalAmountCents() - total);
     }
   }
 
