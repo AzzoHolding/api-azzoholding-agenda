@@ -85,11 +85,17 @@ public class TravaFinanceira {
             .orElse(false);
     if (!fechado) return;
 
+    // Quando o dia travado e HOJE, "registre como lancamento de hoje" seria mandar a pessoa para a
+    // mesma porta fechada: o que chega depois do fechamento entra no caixa de amanha.
     String motivo =
-        "O caixa de "
-            + DIA_BR.format(dia)
-            + " ja foi fechado: o dinheiro desse dia nao pode mais mudar. Registre a correcao como"
-            + " um lancamento de hoje.";
+        dia.equals(LocalDate.now(ZONA_BR))
+            ? "O caixa de hoje ("
+                + DIA_BR.format(dia)
+                + ") ja foi fechado: o que entrar ou sair agora fica para o caixa de amanha."
+            : "O caixa de "
+                + DIA_BR.format(dia)
+                + " ja foi fechado: o dinheiro desse dia nao pode mais mudar. Registre a correcao"
+                + " como um lancamento de hoje.";
     registrarTentativaBloqueada(tenantId, acao, tipoDeEntidade, idDaEntidade, tentativa, motivo);
     throw new IllegalArgumentException(motivo);
   }
