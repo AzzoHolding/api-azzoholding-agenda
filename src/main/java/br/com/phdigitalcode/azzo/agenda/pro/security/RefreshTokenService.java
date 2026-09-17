@@ -27,6 +27,7 @@ public class RefreshTokenService {
   private final RefreshTokenRepository refreshTokenRepository;
   private final UsuarioRepository usuarioRepository;
   private final TokenRevocationService tokenRevocationService;
+  private final AcessoDeProfissional acessoDeProfissional;
 
   @Value("${app.security.refresh-token.ttl-days:30}")
   private int refreshTokenTtlDays;
@@ -34,10 +35,12 @@ public class RefreshTokenService {
   public RefreshTokenService(
       RefreshTokenRepository refreshTokenRepository,
       UsuarioRepository usuarioRepository,
-      TokenRevocationService tokenRevocationService) {
+      TokenRevocationService tokenRevocationService,
+      AcessoDeProfissional acessoDeProfissional) {
     this.refreshTokenRepository = refreshTokenRepository;
     this.usuarioRepository = usuarioRepository;
     this.tokenRevocationService = tokenRevocationService;
+    this.acessoDeProfissional = acessoDeProfissional;
   }
 
   @Transactional
@@ -67,6 +70,13 @@ public class RefreshTokenService {
     if (current.getTenantId() != null && user.getTenantId() != null
         && !current.getTenantId().equals(user.getTenantId())) {
       throw new ApiClientErrorException("refresh_token invalido para o tenant atual", 401);
+    }
+    // Sem isto, quem foi desligado continuava renovando a sessao que ja tinha aberta por ate 30
+    // dias. O token apresentado e revogado ali mesmo: nao serve para uma segunda tentativa.
+    if (acessoDeProfissional.desativado(user)) {
+      current.setRevokedAt(now);
+      refreshTokenRepository.save(current);
+      throw new ApiClientErrorException(AcessoDeProfissional.MENSAGEM, 401);
     }
 
     String newRawToken = generateTokenValue();
