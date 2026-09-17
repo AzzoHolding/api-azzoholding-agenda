@@ -574,6 +574,43 @@ public class EstoqueMovimentacaoService {
   }
 
   /** Sem linha de configuracao o bloqueio e considerado <b>ativo</b>, como no original. */
+  /**
+   * Devolve ao estoque o insumo que um agendamento consumiu ao ser concluido.
+   *
+   * <p>Sair de CONCLUIDO revertia receita e comissao, mas o insumo ficava baixado para sempre — o
+   * saldo mentia a menor (analise de 2026-09-16, M2). Cancelado e estado final, entao isto roda uma
+   * vez so por agendamento.
+   */
+  @Transactional
+  public void devolverInsumosDoAgendamento(UUID tenantId, UUID appointmentId, String motivo) {
+    if (tenantId == null || appointmentId == null) return;
+    for (MovimentacaoEstoque movimentacao :
+        movimentacaoEstoqueRepository.findByTenantIdAndAppointmentId(tenantId, appointmentId)) {
+      if (movimentacao.getTipo() != TipoMovimentacaoEstoque.SAIDA) continue;
+      criarMovimentacao(
+          movimentacao.getItemEstoqueId(),
+          "ENTRADA",
+          movimentacao.getQuantidade(),
+          "Devolucao de insumo: " + motivo);
+    }
+  }
+
+  /**
+   * Vender esta quantidade deixaria o produto sem saldo, com o bloqueio de saida ligado?
+   *
+   * <p>O PDV so descobria isso ao FECHAR a comanda — depois de o cliente pagar (analise de
+   * 2026-09-16, M5). Agora a comanda confere ao lancar o item.
+   */
+  @Transactional(readOnly = true)
+  public boolean faltaSaldoParaVender(UUID tenantId, UUID itemEstoqueId, BigDecimal quantidade) {
+    if (tenantId == null || itemEstoqueId == null || quantidade == null) return false;
+    if (!bloqueiaSaidaSemSaldo(tenantId)) return false;
+    return itemEstoqueRepository
+        .findByIdAndTenantId(itemEstoqueId, tenantId)
+        .map(item -> nvl(item.getSaldoAtual()).compareTo(quantidade) < 0)
+        .orElse(false);
+  }
+
   private boolean bloqueiaSaidaSemSaldo(UUID tenantId) {
     EstoqueConfiguracao cfg = estoqueConfiguracaoRepository.findByTenantId(tenantId).orElse(null);
     return cfg == null || cfg.getBloquearSaidaSemSaldo() == null || cfg.getBloquearSaidaSemSaldo();

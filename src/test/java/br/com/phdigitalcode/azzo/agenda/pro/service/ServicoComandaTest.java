@@ -1564,4 +1564,30 @@ class ServicoComandaTest {
     assertThat(corte.getCoberturaTipo()).isNull();
     assertThat(corte.getTotal()).isEqualByComparingTo("70.00");
   }
+
+  // ─── Produto sem estoque e recusado ao lancar (2026-09-16, M5) ─────────────
+
+  /** Antes so o FECHAR recusava — depois de o cliente pagar. */
+  @Test
+  void produtoSemEstoqueEhRecusadoAoLancar() {
+    comanda(Comanda.STATUS_ABERTA);
+    ItemEstoque produto = new ItemEstoque();
+    produto.setId(serviceId);
+    produto.setTenantId(tenantId);
+    produto.setNome("Shampoo");
+    produto.setSaldoAtual(new BigDecimal("1"));
+    when(itemEstoqueRepository.findByIdAndTenantId(eq(serviceId), eq(tenantId))).thenReturn(Optional.of(produto));
+    when(estoqueMovimentacaoService.faltaSaldoParaVender(eq(tenantId), eq(serviceId), any())).thenReturn(true);
+
+    ComandaDtos.AdicionarItemRequest req = new ComandaDtos.AdicionarItemRequest();
+    req.tipo = ComandaItem.TIPO_PRODUTO;
+    req.referenciaId = serviceId.toString();
+    req.quantidade = new BigDecimal("2");
+    req.precoUnitario = new BigDecimal("40.00");
+
+    assertThatThrownBy(() -> service.adicionarItem(comandaId, req))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("Sem estoque de Shampoo");
+    verify(comandaItemRepository, never()).save(any());
+  }
 }

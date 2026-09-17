@@ -870,11 +870,21 @@ class ServicoAgendamentosTest {
           .thenReturn(Optional.empty());
       lenient().when(servicoRepository.findByIdAndTenantId(serviceId, tenantId)).thenReturn(Optional.empty());
 
+      Transacao receita = new Transacao();
+      receita.setId(UUID.randomUUID());
+      receita.setDate(Instant.now());
+      when(transacaoRepository.listarAtivasDoAgendamentoPorCategoria(
+              tenantId, a.getId(), TipoTransacao.INCOME, "APPOINTMENT"))
+          .thenReturn(List.of(receita));
+
       service.atualizarStatus(a.getId(), "CANCELLED");
 
-      verify(transacaoRepository)
-          .deleteByTenantAndAppointmentAndTypeAndCategoryName(
-              tenantId, a.getId(), TipoTransacao.INCOME, "APPOINTMENT");
+      // Soft delete, e nao remocao fisica — e o insumo volta ao estoque (M2).
+      assertThat(receita.getDeletedAt()).isNotNull();
+      verify(transacaoRepository, never())
+          .deleteByTenantAndAppointmentAndTypeAndCategoryName(any(), any(), any(), any());
+      verify(estoqueMovimentacaoService)
+          .devolverInsumosDoAgendamento(tenantId, a.getId(), "agendamento saiu de concluido");
       verify(commissionService)
           .reverseServiceCommissionIfApplicable(
               tenantId, a.getId(), "Agendamento saiu do status COMPLETED");

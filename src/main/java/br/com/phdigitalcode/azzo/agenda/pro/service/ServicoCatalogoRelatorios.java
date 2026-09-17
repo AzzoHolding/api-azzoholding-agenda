@@ -247,17 +247,17 @@ public class ServicoCatalogoRelatorios {
       case "clientes-inativos" -> definitionSimple(
           key,
           "Clientes inativos",
-          List.of("clientes", "agenda"),
+          List.of("clientes", "comanda", "agenda"),
           List.of("cliente_id", "cliente", "telefone", "ultima_visita", "valor_historico"),
-          """
-          SELECT c.id::text, c.name, c.phone, MAX(a.date)::text, COALESCE(SUM(ai.total_price), 0)
+          // Visita e valor pelo que o cliente PAGOU (ReceitaDeClientesSql).
+          "WITH " + br.com.phdigitalcode.azzo.agenda.pro.util.ReceitaDeClientesSql.CTE + """
+          SELECT c.id::text, c.name, c.phone, MAX(v.dia)::text, COALESCE(SUM(v.valor), 0)
           FROM clients c
-          LEFT JOIN appointments a ON a.client_id = c.id AND a.tenant_id = c.tenant_id AND a.status = 'Concluido'
-          LEFT JOIN appointment_items ai ON ai.appointment_id = a.id AND ai.tenant_id = a.tenant_id
+          LEFT JOIN visitas_clientes v ON v.client_id = c.id
           WHERE c.tenant_id = :tenantId
           GROUP BY c.id, c.name, c.phone
-          HAVING MAX(a.date) IS NULL OR MAX(a.date) <= (:dataFim - (:inactiveDays || ' days')::interval)::date
-          ORDER BY MAX(a.date) NULLS FIRST, c.name
+          HAVING MAX(v.dia) IS NULL OR MAX(v.dia) <= (:dataFim - (:inactiveDays || ' days')::interval)::date
+          ORDER BY MAX(v.dia) NULLS FIRST, c.name
           LIMIT :limit OFFSET :offset
           """);
       case "taxa-retorno" -> definitionSimple(
@@ -370,15 +370,13 @@ public class ServicoCatalogoRelatorios {
       case "curva-abc-clientes" -> definitionSimple(
           key,
           "Curva ABC de clientes",
-          List.of("clientes", "agenda"),
+          List.of("clientes", "comanda", "agenda"),
           List.of("cliente_id", "cliente", "valor_gasto", "percentual_acumulado", "classe"),
-          """
-          WITH receita AS (
-            SELECT c.id, c.name, COALESCE(SUM(ai.total_price), 0) AS valor
+          "WITH " + br.com.phdigitalcode.azzo.agenda.pro.util.ReceitaDeClientesSql.CTE + """
+          , receita AS (
+            SELECT c.id, c.name, COALESCE(SUM(v.valor), 0) AS valor
             FROM clients c
-            JOIN appointments a ON a.client_id = c.id AND a.tenant_id = c.tenant_id
-              AND a.status = 'Concluido' AND a.date BETWEEN :dataInicio AND :dataFim
-            JOIN appointment_items ai ON ai.appointment_id = a.id AND ai.tenant_id = a.tenant_id
+            JOIN visitas_clientes v ON v.client_id = c.id AND v.dia BETWEEN :dataInicio AND :dataFim
             WHERE c.tenant_id = :tenantId
             GROUP BY c.id, c.name
           ), ranked AS (
