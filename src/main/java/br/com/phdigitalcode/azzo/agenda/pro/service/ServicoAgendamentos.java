@@ -170,6 +170,10 @@ public class ServicoAgendamentos {
   @org.springframework.beans.factory.annotation.Autowired(required = false)
   private TravaFinanceira travaFinanceira;
 
+  /** O que prende o agendamento e impede de exclui-lo (analise de 2026-09-16, A2). */
+  @org.springframework.beans.factory.annotation.Autowired
+  private VinculosDeExclusao vinculosDeExclusao;
+
   public ServicoAgendamentos(
       AgendamentoRepository agendamentoRepository,
       AgendamentoQueryRepository agendamentoQueryRepository,
@@ -666,6 +670,23 @@ public class ServicoAgendamentos {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Agendamento before = agendamentoRepository.findByIdAndTenantId(id, tenantId).orElse(null);
     if (before == null) throw new IllegalArgumentException("Agendamento nao encontrado");
+
+    // Excluir e apagar de vez — o banco levava junto o SINAL pago e o registro do atendimento. So
+    // sai o agendamento que ainda nao aconteceu e nunca envolveu dinheiro; o resto se CANCELA,
+    // que mantem o historico e ja cuida do sinal e da comanda (analise de 2026-09-16, A2).
+    if (before.getStatus() != StatusAgendamento.PENDING
+        && before.getStatus() != StatusAgendamento.CONFIRMED) {
+      throw new IllegalArgumentException(
+          "Agendamento " + before.getStatus().getDescription().toLowerCase()
+              + " nao pode ser excluido: ele faz parte do historico do cliente.");
+    }
+    List<String> vinculos = vinculosDeExclusao.doAgendamento(tenantId, id);
+    if (!vinculos.isEmpty()) {
+      throw new IllegalArgumentException(
+          "Este agendamento tem " + String.join(", ", vinculos)
+              + " e nao pode ser excluido. Cancele o agendamento.");
+    }
+
     Map<String, Object> snapshot = snapshotAgendamento(before);
     agendamentoRepository.delete(before);
     auditarAgendamento(tenantId, "APPOINTMENT_DELETE", snapshot, null, id);

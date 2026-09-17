@@ -39,6 +39,7 @@ class ServicoServiceTest {
   private ServiceCategoryRepository serviceCategoryRepository;
   private ContextoTenant contextoTenant;
   private ServicoService service;
+  private VinculosDeExclusao vinculosDeExclusao;
 
   private final UUID tenantId = UUID.randomUUID();
 
@@ -55,6 +56,10 @@ class ServicoServiceTest {
       return s;
     });
     service = new ServicoService(servicoRepository, profissionalRepository, serviceCategoryRepository, contextoTenant);
+    vinculosDeExclusao = mock(VinculosDeExclusao.class);
+    when(vinculosDeExclusao.doServico(any(), any())).thenReturn(List.of());
+    org.springframework.test.util.ReflectionTestUtils.setField(
+        service, "vinculosDeExclusao", vinculosDeExclusao);
   }
 
   private ServicoRequest baseRequest() {
@@ -202,5 +207,37 @@ class ServicoServiceTest {
   void deletarTodosSemServicosRetornaZero() {
     when(servicoRepository.findByTenantId(tenantId)).thenReturn(List.of());
     assertThat(service.deletarTodos()).isZero();
+  }
+
+  // ─── Exclusao nao apaga dinheiro (2026-09-16, A6) ──────────────────────────
+
+  /** O banco levava junto o saldo de sessoes que os clientes pagaram. O caminho e desativar. */
+  @Test
+  void servicoUsadoNaoSeExclui() {
+    Servico servico = new Servico();
+    servico.setId(UUID.randomUUID());
+    servico.setTenantId(tenantId);
+    servico.setName("Corte");
+    when(servicoRepository.findByIdAndTenantId(servico.getId(), tenantId)).thenReturn(Optional.of(servico));
+    when(vinculosDeExclusao.doServico(tenantId, servico.getId()))
+        .thenReturn(List.of("pacotes", "saldo de pacote de clientes"));
+
+    assertThatThrownBy(() -> service.deletar(servico.getId()))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("saldo de pacote de clientes")
+        .hasMessageContaining("Desative");
+    org.mockito.Mockito.verify(servicoRepository, org.mockito.Mockito.never()).delete(any(Servico.class));
+  }
+
+  @Test
+  void servicoNuncaUsadoSeExclui() {
+    Servico servico = new Servico();
+    servico.setId(UUID.randomUUID());
+    servico.setTenantId(tenantId);
+    when(servicoRepository.findByIdAndTenantId(servico.getId(), tenantId)).thenReturn(Optional.of(servico));
+
+    service.deletar(servico.getId());
+
+    org.mockito.Mockito.verify(servicoRepository).delete(servico);
   }
 }
