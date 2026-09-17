@@ -756,6 +756,7 @@ public class ServicoFinanceiro {
     r.id = t.getId().toString();
     r.tenantId = t.getTenantId().toString();
     r.appointmentId = t.getAppointmentId() != null ? t.getAppointmentId().toString() : null;
+    r.comandaId = t.getComandaId() != null ? t.getComandaId().toString() : null;
     r.professionalId = t.getProfessionalId() != null ? t.getProfessionalId().toString() : null;
     r.productId = t.getStockItemId() != null ? t.getStockItemId().toString() : null;
     r.productCategory = t.getProductCategoryRef() != null ? t.getProductCategoryRef().getName() : null;
