@@ -57,6 +57,10 @@ public class ClienteService {
   private final AuditService auditService;
   private final MinioStorageService minioStorageService;
 
+  /** O que prende o cliente e impede de exclui-lo (analise de 2026-09-16, A6). */
+  @org.springframework.beans.factory.annotation.Autowired
+  private VinculosDeExclusao vinculosDeExclusao;
+
   public ClienteService(
       ClienteRepository clienteRepository,
       ClienteStatsRepository clienteStatsRepository,
@@ -166,6 +170,20 @@ public class ClienteService {
       LOG.warn("customers.delete.notFound {}", CorrelatedLogging.context("tenantId", tenantId, "clientId", id));
       throw new IllegalArgumentException("Cliente nao encontrado");
     }
+    // Cliente com historico nao se apaga: o banco levava junto os pacotes COMPRADOS e as
+    // assinaturas (dinheiro recebido, sessoes devidas), e o resto estourava como "erro
+    // inesperado". Para tirar os dados pessoais, o caminho e a anonimizacao da LGPD, que mantem o
+    // historico sem dono identificavel (analise de 2026-09-16, A6).
+    List<String> vinculos = vinculosDeExclusao.doCliente(tenantId, id);
+    if (!vinculos.isEmpty()) {
+      LOG.warn("customers.delete.blocked {}", CorrelatedLogging.context(
+          "tenantId", tenantId, "clientId", id, "vinculos", vinculos));
+      throw new IllegalArgumentException(
+          "Este cliente tem " + String.join(", ", vinculos)
+              + " e nao pode ser excluido. Para remover os dados pessoais, use a anonimizacao"
+              + " (LGPD).");
+    }
+
     ClienteStats stats = clienteStatsRepository.findStatsByTenantAndClient(tenantId, before.getId());
     Map<String, Object> snapshot = resumoCliente(before, stats);
     clienteRepository.delete(before);

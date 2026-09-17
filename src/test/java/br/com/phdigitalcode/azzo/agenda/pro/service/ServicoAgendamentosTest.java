@@ -131,6 +131,7 @@ class ServicoAgendamentosTest {
   @Mock private AuditService auditService;
   @Mock private ContextoTenant contextoTenant;
   @Mock private AuthenticatedUser authenticatedUser;
+  @Mock private VinculosDeExclusao vinculosDeExclusao;
 
   private ServicoAgendamentos service;
 
@@ -167,6 +168,9 @@ class ServicoAgendamentosTest {
             new ObjectMapper(),
             contextoTenant,
             authenticatedUser);
+    org.springframework.test.util.ReflectionTestUtils.setField(
+        service, "vinculosDeExclusao", vinculosDeExclusao);
+    lenient().when(vinculosDeExclusao.doAgendamento(any(), any())).thenReturn(List.of());
 
     lenient().when(contextoTenant.obterTenantIdOuFalhar()).thenReturn(tenantId);
     // criar() confere que o cliente e do salao; por padrao ele e. Quem testa o contrario sobrepoe.
@@ -1611,5 +1615,34 @@ class ServicoAgendamentosTest {
     service.deletar(a.getId());
 
     verify(agendamentoRepository).delete(a);
+  }
+
+  // ─── Exclusao nao apaga dinheiro nem historico (2026-09-16, A2) ────────────
+
+  /** Concluido e historico do cliente — e o banco levava junto o sinal e o registro. */
+  @Test
+  @DisplayName("agendamento concluido nao se exclui")
+  void agendamentoConcluidoNaoSeExclui() {
+    Agendamento a = agendamentoExistente(StatusAgendamento.COMPLETED, LocalDate.of(2030, 6, 10), "10:00", "10:30");
+    when(agendamentoRepository.findByIdAndTenantId(a.getId(), tenantId)).thenReturn(Optional.of(a));
+
+    assertThatThrownBy(() -> service.deletar(a.getId()))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("historico do cliente");
+    verify(agendamentoRepository, never()).delete(any(Agendamento.class));
+  }
+
+  @Test
+  @DisplayName("agendamento pendente com sinal pago nao se exclui: cancela")
+  void agendamentoComSinalNaoSeExclui() {
+    Agendamento a = agendamentoExistente(StatusAgendamento.PENDING, LocalDate.of(2030, 6, 10), "10:00", "10:30");
+    when(agendamentoRepository.findByIdAndTenantId(a.getId(), tenantId)).thenReturn(Optional.of(a));
+    when(vinculosDeExclusao.doAgendamento(tenantId, a.getId())).thenReturn(List.of("sinal de reserva"));
+
+    assertThatThrownBy(() -> service.deletar(a.getId()))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("sinal de reserva")
+        .hasMessageContaining("Cancele");
+    verify(agendamentoRepository, never()).delete(any(Agendamento.class));
   }
 }

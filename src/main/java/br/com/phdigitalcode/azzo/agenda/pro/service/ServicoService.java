@@ -27,6 +27,10 @@ public class ServicoService {
   private final ServiceCategoryRepository serviceCategoryRepository;
   private final ContextoTenant contextoTenant;
 
+  /** O que prende o servico e impede de exclui-lo (analise de 2026-09-16, A6). */
+  @org.springframework.beans.factory.annotation.Autowired
+  private VinculosDeExclusao vinculosDeExclusao;
+
   public ServicoService(
       ServicoRepository servicoRepository,
       ProfissionalRepository profissionalRepository,
@@ -67,6 +71,15 @@ public class ServicoService {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Servico servico = servicoRepository.findByIdAndTenantId(id, tenantId)
         .orElseThrow(() -> new IllegalArgumentException("Servico nao encontrado"));
+    // Servico que ja foi usado nao se apaga: o banco levava junto o SALDO de sessoes que os
+    // clientes pagaram em pacote e assinatura, e tirava o servico dos pacotes a venda. O caminho e
+    // DESATIVAR — some das listas de marcar e vender, e o historico fica (analise de 2026-09-16, A6).
+    List<String> vinculos = vinculosDeExclusao.doServico(tenantId, id);
+    if (!vinculos.isEmpty()) {
+      throw new IllegalArgumentException(
+          "O servico \"" + servico.getName() + "\" esta em " + String.join(", ", vinculos)
+              + " e nao pode ser excluido. Desative o servico.");
+    }
     servicoRepository.delete(servico);
   }
 
