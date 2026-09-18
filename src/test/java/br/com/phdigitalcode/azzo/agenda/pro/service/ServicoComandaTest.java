@@ -1522,10 +1522,12 @@ class ServicoComandaTest {
     corte.setValorCobertura(new BigDecimal("50.00"));
     itensDaComanda(corte);
     pagamentosDaComanda();
+    when(clientPackageBalanceRepository.consumirSeHouverSaldo(saldo.getId(), 1)).thenReturn(1);
 
     service.fechar(comandaId);
 
-    assertThat(saldo.getSessoesUsadas()).isEqualTo(2);
+    // O consumo e uma instrucao unica no banco (so passa se ainda houver saldo).
+    verify(clientPackageBalanceRepository).consumirSeHouverSaldo(saldo.getId(), 1);
     verify(commissionService)
         .registerServiceCommissionForComandaItemIfApplicable(
             eq(tenantId), eq(comandaId), eq(corte.getId()), eq(professionalId), eq(serviceId),
@@ -1547,7 +1549,55 @@ class ServicoComandaTest {
     req.motivo = "cliente nao foi atendido";
     service.estornar(comandaId, req);
 
-    assertThat(saldo.getSessoesUsadas()).isEqualTo(2);
+    verify(clientPackageBalanceRepository).devolver(saldo.getId(), 1);
+  }
+
+  /**
+   * Duas comandas escolheram a ultima sessao: a que fecha depois encontra o saldo zerado no banco
+   * e o fechamento inteiro volta atras — antes as duas fechavam (2026-09-18).
+   */
+  @Test
+  void fecharRecusaQuandoOutraComandaLevouAUltimaSessao() {
+    Comanda aberta = comanda(Comanda.STATUS_ABERTA);
+    aberta.setClientId(clientId);
+    aberta.setSubtotal(BigDecimal.ZERO);
+    aberta.setTotal(BigDecimal.ZERO);
+    ClientPackageBalance saldo = saldoDePacote(3, 2, clientId);
+    ComandaItem corte = item(ComandaItem.TIPO_SERVICO, "0.00", professionalId);
+    corte.setCoberturaTipo(ComandaItem.COBERTURA_PACOTE);
+    corte.setCoberturaSaldoId(saldo.getId());
+    corte.setValorCobertura(new BigDecimal("80.00"));
+    itensDaComanda(corte);
+    pagamentosDaComanda();
+    when(clientPackageBalanceRepository.consumirSeHouverSaldo(saldo.getId(), 1)).thenReturn(0);
+
+    assertThatThrownBy(() -> service.fechar(comandaId))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("acabou enquanto a comanda estava aberta");
+    assertThat(aberta.getStatus()).isEqualTo(Comanda.STATUS_ABERTA);
+  }
+
+  /** Estornar a venda do pacote depois de usar sessoes devolveria o valor inteiro. */
+  @Test
+  void estornoDaVendaDePacoteComSessoesUsadasEhRecusado() {
+    comanda(Comanda.STATUS_FECHADA);
+    when(transacaoRepository.listarAtivasPorComanda(any(), any())).thenReturn(List.of());
+    ClientPackagePurchase compra = new ClientPackagePurchase();
+    compra.setId(UUID.randomUUID());
+    compra.setPackageNome("3 cortes");
+    when(clientPackagePurchaseRepository.findByTenantIdAndComandaId(tenantId, comandaId))
+        .thenReturn(List.of(compra));
+    ClientPackageBalance usado = new ClientPackageBalance();
+    usado.setSessoesTotais(3);
+    usado.setSessoesUsadas(2);
+    when(clientPackageBalanceRepository.findByPurchaseId(compra.getId())).thenReturn(List.of(usado));
+    ComandaDtos.EstornarComandaRequest req = new ComandaDtos.EstornarComandaRequest();
+    req.motivo = "cliente pediu o dinheiro de volta";
+
+    assertThatThrownBy(() -> service.estornar(comandaId, req))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("ja usou 2 sessoes");
+    verify(clientPackagePurchaseRepository, never()).delete(any());
   }
 
   @Test

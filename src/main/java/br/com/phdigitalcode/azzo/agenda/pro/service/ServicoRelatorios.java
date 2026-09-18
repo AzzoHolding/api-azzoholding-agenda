@@ -681,6 +681,7 @@ public class ServicoRelatorios {
                        COALESCE(SUM(amount) FILTER (WHERE type = 'EXPENSE'), 0) AS despesa
                 FROM transactions
                 WHERE tenant_id = :tenantId
+                  AND deleted_at IS NULL
                   AND date BETWEEN :from AND :to
                 GROUP BY 1 ORDER BY 1
                 """)
