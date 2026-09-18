@@ -665,19 +665,49 @@ public class ServicoComanda {
     return assinatura.getPrecoMensal().divide(BigDecimal.valueOf(sessoes), 2, RoundingMode.HALF_UP);
   }
 
-  /** Desconta a sessao do saldo — so no fechamento. */
+  /**
+   * Desconta a sessao do saldo — so no fechamento, e pelo banco: se outra comanda levou a ultima
+   * sessao entre a conferencia e aqui, o fechamento inteiro volta atras.
+   */
   private void consumirCobertura(UUID tenantId, ComandaItem item) {
     int sessoes = sessoesDoItem(item);
+    int consumiu;
     if (ComandaItem.COBERTURA_PACOTE.equals(item.getCoberturaTipo())) {
-      clientPackageBalanceRepository.findById(item.getCoberturaSaldoId()).ifPresent(saldo -> {
-        saldo.setSessoesUsadas(saldo.getSessoesUsadas() + sessoes);
-        clientPackageBalanceRepository.save(saldo);
-      });
+      consumiu = clientPackageBalanceRepository.consumirSeHouverSaldo(item.getCoberturaSaldoId(), sessoes);
     } else if (ComandaItem.COBERTURA_ASSINATURA.equals(item.getCoberturaTipo())) {
-      clientMembershipBalanceRepository.findById(item.getCoberturaSaldoId()).ifPresent(saldo -> {
-        saldo.setUsadasNoPeriodo(saldo.getUsadasNoPeriodo() + sessoes);
-        clientMembershipBalanceRepository.save(saldo);
-      });
+      consumiu =
+          clientMembershipBalanceRepository.consumirSeHouverSaldo(item.getCoberturaSaldoId(), sessoes);
+    } else {
+      return;
+    }
+    if (consumiu == 0) {
+      throw new IllegalArgumentException(
+          "O saldo de " + item.getDescricao() + " acabou enquanto a comanda estava aberta:"
+              + " retire a cobertura e cobre o servico.");
+    }
+  }
+
+  /**
+   * Estornar a venda de um pacote devolve o dinheiro inteiro e apaga o saldo: so vale enquanto o
+   * cliente nao usou nenhuma sessao. Depois disso o estorno total dava de graca as sessoes ja
+   * feitas (teste de 2026-09-18) — acerto parcial e decisao do dono, fora do estorno.
+   */
+  private void exigirPacotesVendidosSemUso(List<ClientPackagePurchase> compras) {
+    for (ClientPackagePurchase compra : compras) {
+      int usadas =
+          clientPackageBalanceRepository.findByPurchaseId(compra.getId()).stream()
+              .mapToInt(ClientPackageBalance::getSessoesUsadas)
+              .sum();
+      if (usadas > 0) {
+        throw new IllegalArgumentException(
+            "O cliente ja usou "
+                + usadas
+                + (usadas == 1 ? " sessao" : " sessoes")
+                + " do pacote "
+                + compra.getPackageNome()
+                + ": o estorno devolveria o valor inteiro. Estorne antes os atendimentos"
+                + " feitos com o pacote.");
+      }
     }
   }
 
@@ -685,15 +715,9 @@ public class ServicoComanda {
   private void devolverCobertura(ComandaItem item) {
     int sessoes = sessoesDoItem(item);
     if (ComandaItem.COBERTURA_PACOTE.equals(item.getCoberturaTipo())) {
-      clientPackageBalanceRepository.findById(item.getCoberturaSaldoId()).ifPresent(saldo -> {
-        saldo.setSessoesUsadas(Math.max(0, saldo.getSessoesUsadas() - sessoes));
-        clientPackageBalanceRepository.save(saldo);
-      });
+      clientPackageBalanceRepository.devolver(item.getCoberturaSaldoId(), sessoes);
     } else if (ComandaItem.COBERTURA_ASSINATURA.equals(item.getCoberturaTipo())) {
-      clientMembershipBalanceRepository.findById(item.getCoberturaSaldoId()).ifPresent(saldo -> {
-        saldo.setUsadasNoPeriodo(Math.max(0, saldo.getUsadasNoPeriodo() - sessoes));
-        clientMembershipBalanceRepository.save(saldo);
-      });
+      clientMembershipBalanceRepository.devolver(item.getCoberturaSaldoId(), sessoes);
     }
   }
 
@@ -1405,6 +1429,7 @@ public class ServicoComanda {
 
     List<ClientPackagePurchase> comprasPacote =
         clientPackagePurchaseRepository.findByTenantIdAndComandaId(tenantId, comanda.getId());
+    exigirPacotesVendidosSemUso(comprasPacote);
     for (ClientPackagePurchase compra : comprasPacote) {
       for (ClientPackageBalance saldo :
           clientPackageBalanceRepository.findByPurchaseId(compra.getId())) {
