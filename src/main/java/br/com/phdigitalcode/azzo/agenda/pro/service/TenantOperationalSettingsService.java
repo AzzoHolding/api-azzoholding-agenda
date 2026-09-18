@@ -20,6 +20,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -371,6 +372,13 @@ public class TenantOperationalSettingsService {
             () -> {
               TenantOperationalSettings created = new TenantOperationalSettings();
               created.setTenantId(tenantId);
+              // Numa leitura (transacao readOnly de quem chamou) nao da para gravar: o salao novo,
+              // que ainda nao salvou configuracao nenhuma, quebrava o "Perfil do salao", a vitrine
+              // publica e os horarios livres com "Ocorreu um erro inesperado" (teste de
+              // 2026-09-18). Na leitura vale o padrao em memoria; a linha nasce na primeira escrita.
+              if (TransactionSynchronizationManager.isCurrentTransactionReadOnly()) {
+                return created;
+              }
               return repository.saveAndFlush(created);
             });
   }

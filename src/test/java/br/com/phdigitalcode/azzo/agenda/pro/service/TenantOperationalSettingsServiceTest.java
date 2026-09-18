@@ -628,4 +628,37 @@ class TenantOperationalSettingsServiceTest {
     hours.setEnabled(enabled);
     return hours;
   }
+
+  // ─── Leitura de salao novo nao grava (2026-09-18) ──────────────────────────
+
+  /**
+   * Salao sem configuracao salva: dentro de uma LEITURA (readOnly), o padrao vem em memoria. Antes
+   * gravava e o Postgres recusava ("cannot execute INSERT in a read-only transaction"), quebrando
+   * o perfil do salao, a vitrine publica e os horarios livres.
+   */
+  @Test
+  @DisplayName("horario de funcionamento de salao novo, numa leitura, nao grava nada")
+  void horarioDeSalaoNovoNumaLeituraNaoGrava() {
+    when(repository.findById(tenantId)).thenReturn(Optional.empty());
+    org.springframework.transaction.support.TransactionSynchronizationManager
+        .setCurrentTransactionReadOnly(true);
+    try {
+      assertThat(service.getBusinessHours(tenantId)).isNotEmpty();
+    } finally {
+      org.springframework.transaction.support.TransactionSynchronizationManager
+          .setCurrentTransactionReadOnly(false);
+    }
+    verify(repository, never()).saveAndFlush(any());
+  }
+
+  @Test
+  @DisplayName("fora de uma leitura, o salao novo ganha a linha de configuracao")
+  void horarioDeSalaoNovoForaDeLeituraGrava() {
+    when(repository.findById(tenantId)).thenReturn(Optional.empty());
+    when(repository.saveAndFlush(any())).thenAnswer(inv -> inv.getArgument(0));
+
+    assertThat(service.getBusinessHours(tenantId)).isNotEmpty();
+
+    verify(repository).saveAndFlush(any());
+  }
 }
