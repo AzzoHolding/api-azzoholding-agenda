@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -14,6 +15,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -21,10 +23,12 @@ import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import br.com.phdigitalcode.azzo.agenda.pro.dto.PublicBookingDtos;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.SalonDtos;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.Agendamento;
+import br.com.phdigitalcode.azzo.agenda.pro.entity.AgendamentoItem;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.AppointmentDeposit;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.Cliente;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.Profissional;
@@ -629,5 +633,58 @@ class ServicoPublicBookingTest {
 
     verify(agendamentoQueryRepository)
         .lockProfessionalDateForWrite(eq(tenantId), eq(professionalId), eq(LocalDate.parse(request.date)));
+  }
+
+  // ─── A colecao de itens do agendamento (2026-09-17, jornada de usuario) ────
+
+  /**
+   * `Agendamento.items` e `orphanRemoval = true`: o Hibernate recusa no flush uma colecao de
+   * orfaos que deixou de ser a MESMA instancia. Trocar a lista quebrava todo agendamento feito
+   * pelo link publico — o cliente lia "Ocorreu um erro inesperado" e nada era gravado.
+   */
+  @Test
+  void criarAgendamentoPublicoPreencheOsItensSemTrocarAColecao() {
+    UUID professionalId = UUID.randomUUID();
+    UUID serviceId = UUID.randomUUID();
+    Servico servico = servicoAtivo(serviceId, 30, BigDecimal.TEN);
+    when(servicoRepository.findByIdAndTenantId(serviceId, tenantId)).thenReturn(Optional.of(servico));
+    when(tenantOperationalSettingsService.isBusinessOpenAt(eq(tenantId), any(), any(), any())).thenReturn(true);
+    when(specialClosureService.isClosedAt(eq(tenantId), eq(professionalId), any(), any(), any())).thenReturn(false);
+    when(profissionalRepository.findByIdAndTenantIdAndIsActiveTrue(professionalId, tenantId))
+        .thenReturn(Optional.of(profissionalAtivo(professionalId)));
+    when(agendamentoRepository.findFirstByTenantIdAndProfessionalIdAndDateAndStartTimeAndStatusNot(
+            any(), any(), any(), anyString(), any())).thenReturn(Optional.empty());
+    when(clienteRepository.findByTenantIdOrderByName(tenantId)).thenReturn(List.of());
+    when(clienteRepository.save(any(Cliente.class))).thenAnswer(invocation -> {
+      Cliente c = invocation.getArgument(0);
+      if (c.getId() == null) c.setId(UUID.randomUUID());
+      return c;
+    });
+    List<Object> colecoesDosItens = new ArrayList<>();
+    when(agendamentoRepository.save(any(Agendamento.class))).thenAnswer(invocation -> {
+      Agendamento a = invocation.getArgument(0);
+      if (a.getId() == null) a.setId(UUID.randomUUID());
+      colecoesDosItens.add(a.getItems());
+      return a;
+    });
+    when(agendamentoItemRepository.existsByAppointmentId(any())).thenReturn(false);
+    when(agendamentoItemRepository.save(any(AgendamentoItem.class))).thenAnswer(invocation -> {
+      AgendamentoItem item = invocation.getArgument(0);
+      if (item.getId() == null) item.setId(UUID.randomUUID());
+      return item;
+    });
+
+    PublicBookingDtos.PublicAppointmentResponse response =
+        service.criarAgendamentoPublico("salao-teste", requestValido(professionalId, serviceId));
+
+    assertThat(response.appointmentId).isNotBlank();
+    ArgumentCaptor<Agendamento> captor = ArgumentCaptor.forClass(Agendamento.class);
+    verify(agendamentoRepository, atLeastOnce()).save(captor.capture());
+    Agendamento salvo = captor.getValue();
+    assertThat(salvo.getItems()).hasSize(1);
+    assertThat(salvo.getItems().get(0).getServiceId()).isEqualTo(serviceId);
+    // A instancia da colecao e a mesma do inicio ao fim (o que o orphanRemoval exige).
+    assertThat(colecoesDosItens).isNotEmpty();
+    assertThat(colecoesDosItens).allMatch(c -> c == salvo.getItems());
   }
 }
