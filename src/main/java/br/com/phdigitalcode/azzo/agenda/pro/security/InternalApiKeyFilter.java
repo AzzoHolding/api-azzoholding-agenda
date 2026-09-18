@@ -40,6 +40,13 @@ public class InternalApiKeyFilter extends OncePerRequestFilter {
   private static final String INTERNAL_PATH_PREFIX = "/api/v1/internal/";
   private static final String HEADER_NAME = "X-Internal-Api-Key";
 
+  /**
+   * Marca a requisicao que passou pela chave interna. {@link ContextoTenant} so aceita o salao pelo
+   * header {@code X-Tenant-Id} com esta marca — nunca de quem chama sem autenticacao.
+   */
+  public static final String ATRIBUTO_CHAMADA_INTERNA =
+      InternalApiKeyFilter.class.getName() + ".autenticada";
+
   private final String configuredApiKey;
 
   public InternalApiKeyFilter(@Value("${app.internal.api-key:changeme-dev}") String configuredApiKey) {
@@ -68,6 +75,7 @@ public class InternalApiKeyFilter extends OncePerRequestFilter {
       return;
     }
 
+    request.setAttribute(ATRIBUTO_CHAMADA_INTERNA, Boolean.TRUE);
     filterChain.doFilter(request, response);
   }
 

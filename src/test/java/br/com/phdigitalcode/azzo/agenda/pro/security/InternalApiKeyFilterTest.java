@@ -145,4 +145,23 @@ class InternalApiKeyFilterTest {
     verify(chain, never()).doFilter(any(), any());
     assertThat(response.getStatus()).isEqualTo(401);
   }
+
+  @Test
+  @DisplayName("so a chamada com chave interna valida fica marcada como interna")
+  void soChaveValidaMarcaChamadaInterna() throws Exception {
+    MockHttpServletRequest valida = request("/api/v1/internal/plans/todos");
+    valida.addHeader("X-Internal-Api-Key", CHAVE);
+    filter.doFilter(valida, response, chain);
+    assertThat(valida.getAttribute(InternalApiKeyFilter.ATRIBUTO_CHAMADA_INTERNA)).isEqualTo(Boolean.TRUE);
+
+    MockHttpServletRequest publica = request("/api/v1/public/salons/x");
+    publica.addHeader("X-Internal-Api-Key", CHAVE);
+    filter.doFilter(publica, new MockHttpServletResponse(), chain);
+    assertThat(publica.getAttribute(InternalApiKeyFilter.ATRIBUTO_CHAMADA_INTERNA)).isNull();
+
+    MockHttpServletRequest errada = request("/api/v1/internal/plans/todos");
+    errada.addHeader("X-Internal-Api-Key", "chave-errada");
+    filter.doFilter(errada, new MockHttpServletResponse(), chain);
+    assertThat(errada.getAttribute(InternalApiKeyFilter.ATRIBUTO_CHAMADA_INTERNA)).isNull();
+  }
 }
