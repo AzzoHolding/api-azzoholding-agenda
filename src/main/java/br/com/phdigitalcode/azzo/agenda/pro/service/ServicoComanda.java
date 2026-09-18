@@ -16,6 +16,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import br.com.phdigitalcode.azzo.agenda.pro.dto.ComandaDtos;
+import br.com.phdigitalcode.azzo.agenda.pro.entity.Agendamento;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.AppointmentDeposit;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.ClientMembership;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.ClientMembershipBalance;
@@ -181,10 +182,46 @@ public class ServicoComanda {
   public ComandaDtos.ComandaResponse abrir(ComandaDtos.AbrirComandaRequest request) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
 
+    UUID appointmentId = parseUuidOrNull(request != null ? request.appointmentId : null);
+    UUID clientId = parseUuidOrNull(request != null ? request.clientId : null);
+
+    // Agendamento e cliente precisam ser DESTE salao. Antes nada era conferido: outro salao abria
+    // uma comanda com o id de um agendamento daqui e, ao pagar com "credito de sinal", consumia o
+    // sinal que o nosso cliente pagou; ao fechar, creditava pontos de fidelidade no nosso cliente
+    // (teste de isolamento de 2026-09-18).
+    if (appointmentId != null) {
+      Agendamento agendamento =
+          agendamentoRepository
+              .findByIdAndTenantId(appointmentId, tenantId)
+              .orElseThrow(() -> new IllegalArgumentException("Agendamento nao encontrado."));
+      if (clientId == null) {
+        clientId = agendamento.getClientId();
+      } else if (!clientId.equals(agendamento.getClientId())) {
+        throw new IllegalArgumentException(
+            "O cliente da comanda precisa ser o mesmo do agendamento.");
+      }
+      // Um atendimento, uma cobranca: a segunda comanda para o mesmo agendamento cobrava o
+      // cliente de novo. Depois de estornada ou cancelada, pode abrir outra.
+      for (Comanda existente :
+          comandaRepository.findByAppointmentIdAndTenantId(appointmentId, tenantId)) {
+        if (Comanda.STATUS_ABERTA.equals(existente.getStatus())) {
+          throw new IllegalArgumentException(
+              "Este agendamento ja tem uma comanda aberta: continue nela.");
+        }
+        if (Comanda.STATUS_FECHADA.equals(existente.getStatus())) {
+          throw new IllegalArgumentException(
+              "Este agendamento ja foi cobrado. Para cobrar de novo, o dono estorna a comanda.");
+        }
+      }
+    }
+    if (clientId != null && clienteRepository.findByIdAndTenantId(clientId, tenantId).isEmpty()) {
+      throw new IllegalArgumentException("Cliente nao encontrado.");
+    }
+
     Comanda comanda = new Comanda();
     comanda.setTenantId(tenantId);
-    comanda.setAppointmentId(parseUuidOrNull(request != null ? request.appointmentId : null));
-    comanda.setClientId(parseUuidOrNull(request != null ? request.clientId : null));
+    comanda.setAppointmentId(appointmentId);
+    comanda.setClientId(clientId);
     comanda.setAbertaPor(obterUsuarioId());
     comandaRepository.save(comanda);
 
@@ -838,6 +875,8 @@ public class ServicoComanda {
     AppointmentDeposit deposit =
         appointmentDepositRepository
             .findPaidUnusedByAppointmentId(comanda.getAppointmentId())
+            // O sinal e do cliente DESTE salao: a busca e so por agendamento.
+            .filter(d -> tenantId.equals(d.getTenantId()))
             .orElseThrow(
                 () ->
                     new IllegalArgumentException(
@@ -1025,7 +1064,8 @@ public class ServicoComanda {
             .intValue();
     if (pontos <= 0) return 0;
 
-    Cliente cliente = clienteRepository.findById(comanda.getClientId()).orElse(null);
+    Cliente cliente =
+        clienteRepository.findByIdAndTenantId(comanda.getClientId(), tenantId).orElse(null);
     if (cliente != null) {
       cliente.setLoyaltyPoints(cliente.getLoyaltyPoints() + pontos);
     }

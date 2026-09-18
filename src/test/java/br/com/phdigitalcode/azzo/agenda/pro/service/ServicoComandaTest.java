@@ -27,6 +27,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.exception.ApiClientErrorException;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.AppointmentDeposit;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.ClientPackageBalance;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.ClientPackagePurchase;
+import br.com.phdigitalcode.azzo.agenda.pro.entity.Agendamento;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.Cliente;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.Comanda;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditEventCommand;
@@ -612,7 +613,7 @@ class ServicoComandaTest {
     cliente.setId(clientId);
     cliente.setTenantId(tenantId);
     cliente.setLoyaltyPoints(10);
-    when(clienteRepository.findById(eq(clientId))).thenReturn(Optional.of(cliente));
+    when(clienteRepository.findByIdAndTenantId(eq(clientId), eq(tenantId))).thenReturn(Optional.of(cliente));
 
     service.fechar(comandaId);
 
@@ -740,6 +741,7 @@ class ServicoComandaTest {
     AppointmentDeposit deposit = new AppointmentDeposit();
     deposit.setId(UUID.randomUUID());
     deposit.setAppointmentId(appointmentId);
+    deposit.setTenantId(tenantId);
     deposit.setStatus(AppointmentDeposit.STATUS_PAID);
     deposit.setAmountCents(3000L);
     when(appointmentDepositRepository.findPaidUnusedByAppointmentId(eq(appointmentId)))
@@ -1589,5 +1591,129 @@ class ServicoComandaTest {
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("Sem estoque de Shampoo");
     verify(comandaItemRepository, never()).save(any());
+  }
+
+  // ─── Comanda isolada por salao (2026-09-18, teste de isolamento) ───────────
+
+  /** Outro salao abria comanda com o id de um agendamento daqui. */
+  @Test
+  void abrirRecusaAgendamentoDeOutroSalao() {
+    UUID deOutroSalao = UUID.randomUUID();
+    when(agendamentoRepository.findByIdAndTenantId(eq(deOutroSalao), eq(tenantId)))
+        .thenReturn(Optional.empty());
+    ComandaDtos.AbrirComandaRequest req = new ComandaDtos.AbrirComandaRequest();
+    req.appointmentId = deOutroSalao.toString();
+
+    assertThatThrownBy(() -> service.abrir(req))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("Agendamento nao encontrado");
+    verify(comandaRepository, never()).save(any());
+  }
+
+  @Test
+  void abrirRecusaClienteDeOutroSalao() {
+    UUID deOutroSalao = UUID.randomUUID();
+    when(clienteRepository.findByIdAndTenantId(eq(deOutroSalao), eq(tenantId)))
+        .thenReturn(Optional.empty());
+    ComandaDtos.AbrirComandaRequest req = new ComandaDtos.AbrirComandaRequest();
+    req.clientId = deOutroSalao.toString();
+
+    assertThatThrownBy(() -> service.abrir(req))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("Cliente nao encontrado");
+    verify(comandaRepository, never()).save(any());
+  }
+
+  /** O cliente da comanda e o do agendamento: nao da para cobrar o atendimento de um no outro. */
+  @Test
+  void abrirRecusaClienteDiferenteDoAgendamento() {
+    UUID agendamentoId = UUID.randomUUID();
+    Agendamento agendamento = new Agendamento();
+    agendamento.setId(agendamentoId);
+    agendamento.setClientId(UUID.randomUUID());
+    when(agendamentoRepository.findByIdAndTenantId(eq(agendamentoId), eq(tenantId)))
+        .thenReturn(Optional.of(agendamento));
+    ComandaDtos.AbrirComandaRequest req = new ComandaDtos.AbrirComandaRequest();
+    req.appointmentId = agendamentoId.toString();
+    req.clientId = UUID.randomUUID().toString();
+
+    assertThatThrownBy(() -> service.abrir(req))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("mesmo do agendamento");
+  }
+
+  /** Sem cliente informado, a comanda do agendamento herda o cliente dele. */
+  @Test
+  void abrirComAgendamentoHerdaOCliente() {
+    UUID agendamentoId = UUID.randomUUID();
+    UUID clienteId = UUID.randomUUID();
+    Agendamento agendamento = new Agendamento();
+    agendamento.setId(agendamentoId);
+    agendamento.setClientId(clienteId);
+    when(agendamentoRepository.findByIdAndTenantId(eq(agendamentoId), eq(tenantId)))
+        .thenReturn(Optional.of(agendamento));
+    when(clienteRepository.findByIdAndTenantId(eq(clienteId), eq(tenantId)))
+        .thenReturn(Optional.of(new Cliente()));
+    when(comandaRepository.save(any(Comanda.class))).thenAnswer(inv -> {
+      Comanda c = inv.getArgument(0);
+      c.setId(UUID.randomUUID());
+      return c;
+    });
+    ComandaDtos.AbrirComandaRequest req = new ComandaDtos.AbrirComandaRequest();
+    req.appointmentId = agendamentoId.toString();
+
+    ComandaDtos.ComandaResponse response = service.abrir(req);
+
+    assertThat(response.clientId).isEqualTo(clienteId.toString());
+    assertThat(response.appointmentId).isEqualTo(agendamentoId.toString());
+  }
+
+  /** O sinal pago por cliente de outro salao nao paga comanda daqui. */
+  @Test
+  void creditoDeSinalDeOutroSalaoNaoEhAceito() {
+    Comanda comanda = comanda(Comanda.STATUS_ABERTA);
+    UUID appointmentId = UUID.randomUUID();
+    comanda.setAppointmentId(appointmentId);
+    AppointmentDeposit deposit = new AppointmentDeposit();
+    deposit.setId(UUID.randomUUID());
+    deposit.setAppointmentId(appointmentId);
+    deposit.setTenantId(UUID.randomUUID());
+    deposit.setStatus(AppointmentDeposit.STATUS_PAID);
+    deposit.setAmountCents(3000L);
+    when(appointmentDepositRepository.findPaidUnusedByAppointmentId(eq(appointmentId)))
+        .thenReturn(Optional.of(deposit));
+    ComandaDtos.RegistrarPagamentoRequest req = new ComandaDtos.RegistrarPagamentoRequest();
+    req.meio = ComandaPagamento.MEIO_CREDITO_SINAL;
+    req.valor = new BigDecimal("30.00");
+
+    assertThatThrownBy(() -> service.registrarPagamento(comandaId, req))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("Nao ha sinal pago");
+    assertThat(deposit.getUsedInComandaId()).isNull();
+  }
+
+  /** Um atendimento, uma cobranca: segunda comanda so depois de estornar a primeira. */
+  @Test
+  void abrirRecusaSegundaComandaDoMesmoAgendamento() {
+    UUID agendamentoId = UUID.randomUUID();
+    UUID clienteId = UUID.randomUUID();
+    Agendamento agendamento = new Agendamento();
+    agendamento.setId(agendamentoId);
+    agendamento.setClientId(clienteId);
+    when(agendamentoRepository.findByIdAndTenantId(eq(agendamentoId), eq(tenantId)))
+        .thenReturn(Optional.of(agendamento));
+    Comanda jaCobrada = new Comanda();
+    jaCobrada.setStatus(Comanda.STATUS_FECHADA);
+    Comanda estornada = new Comanda();
+    estornada.setStatus(Comanda.STATUS_ESTORNADA);
+    when(comandaRepository.findByAppointmentIdAndTenantId(eq(agendamentoId), eq(tenantId)))
+        .thenReturn(List.of(estornada, jaCobrada));
+    ComandaDtos.AbrirComandaRequest req = new ComandaDtos.AbrirComandaRequest();
+    req.appointmentId = agendamentoId.toString();
+
+    assertThatThrownBy(() -> service.abrir(req))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("ja foi cobrado");
+    verify(comandaRepository, never()).save(any());
   }
 }
