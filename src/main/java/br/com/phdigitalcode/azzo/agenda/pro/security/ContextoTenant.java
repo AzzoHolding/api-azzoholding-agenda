@@ -18,7 +18,7 @@ import jakarta.servlet.http.HttpServletRequest;
  * {@code @RequestScoped} no Quarkus). Le o tenant do claim {@code tenant_id}/{@code tid} do JWT
  * autenticado (via {@link JwtPrincipal} no {@code SecurityContext}), com fallback para o header
  * {@code X-Tenant-Id} (usado apenas no fluxo sistema-a-sistema do assistant, ver inventario secao
- * 6.6). Falha explicitamente ({@link IllegalStateException}) se o tenant estiver ausente — sem
+ * 6.6) — e so em requisicao que passou pelo {@link InternalApiKeyFilter}. Falha explicitamente ({@link IllegalStateException}) se o tenant estiver ausente — sem
  * default silencioso, mesmo comportamento do original.
  *
  * <p>{@code proxyMode = TARGET_CLASS} e necessario porque este bean de escopo de requisicao e
@@ -69,6 +69,11 @@ public class ContextoTenant {
         (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
     if (attributes == null) return null;
     HttpServletRequest request = attributes.getRequest();
+    // O salao so vem do header em chamada entre sistemas ja autenticada pela chave interna. Sem
+    // isso, qualquer rota publica que usasse este contexto deixaria quem chama escolher o salao.
+    if (!Boolean.TRUE.equals(request.getAttribute(InternalApiKeyFilter.ATRIBUTO_CHAMADA_INTERNA))) {
+      return null;
+    }
     String value = request.getHeader("X-Tenant-Id");
     if (value == null || value.isBlank()) {
       value = request.getHeader("x-tenant-id");
