@@ -462,7 +462,18 @@ public class ServicoPublicBooking {
       item = agendamentoItemRepository.save(item);
       persistedItems.add(item);
     }
-    appointment.setItems(persistedItems);
+    // TROCAR a lista quebrava TODO agendamento pelo link publico: `Agendamento.items` e
+    // `orphanRemoval = true`, e o Hibernate recusa no flush uma colecao com orfaos que deixou de
+    // ser a mesma instancia ("A collection with orphan deletion was no longer referenced by the
+    // owning entity instance"). O agendamento nem chegava a existir: a transacao caia inteira e o
+    // cliente lia "Ocorreu um erro inesperado" (achado na jornada de usuario de 2026-09-17).
+    // A colecao aqui esta sempre vazia — `exists` acima devolve antes quando ja ha item.
+    if (appointment.getItems() == null) {
+      appointment.setItems(new ArrayList<>(persistedItems));
+      return;
+    }
+    appointment.getItems().clear();
+    appointment.getItems().addAll(persistedItems);
   }
 
   private List<Servico> resolveSelectedServices(UUID tenantId, String serviceId, String serviceIds) {
