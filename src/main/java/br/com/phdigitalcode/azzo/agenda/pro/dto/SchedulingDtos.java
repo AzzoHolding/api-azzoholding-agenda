@@ -116,13 +116,12 @@ public final class SchedulingDtos {
 
   /** Espelha {@code api/dto/AppointmentUpdateRequest.java}. */
   public static class AppointmentUpdateRequest {
-    @NotBlank(message = "ID do profissional e obrigatorio")
+    // Os tres sao opcionais: o que nao vier fica como esta. Antes eram obrigatorios, e anotar uma
+    // observacao exigia reenviar profissional, data e hora (jornada de usuario de 2026-09-17).
     public String professionalId;
 
-    @NotBlank(message = "Data do agendamento e obrigatoria")
     public String date;
 
-    @NotBlank(message = "Hora de inicio e obrigatoria")
     public String startTime;
 
     public String notes;

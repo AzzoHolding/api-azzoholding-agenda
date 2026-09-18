@@ -34,26 +34,26 @@ public class FechamentoCaixaController {
   }
 
   @GetMapping
-  @RequiresPermission("finance:view")
+  @RequiresPermission("cash:view")
   public List<FechamentoCaixaResponse> listar() {
     return servicoFechamentoCaixa.listar();
   }
 
   @GetMapping("/{id}")
-  @RequiresPermission("finance:view")
+  @RequiresPermission("cash:view")
   public FechamentoCaixaResponse buscar(@PathVariable UUID id) {
     return servicoFechamentoCaixa.buscar(id);
   }
 
   @PostMapping("/open")
   @ResponseStatus(HttpStatus.CREATED)
-  @RequiresPermission("finance:manage")
+  @RequiresPermission("cash:manage")
   public FechamentoCaixaResponse abrir(@Valid @RequestBody(required = false) AberturaCaixaRequest request) {
     return servicoFechamentoCaixa.abrir(request);
   }
 
   @PostMapping("/{id}/close")
-  @RequiresPermission("finance:manage")
+  @RequiresPermission("cash:manage")
   public FechamentoCaixaResponse fechar(
       @PathVariable UUID id, @Valid @RequestBody FechamentoCaixaRequest request) {
     return servicoFechamentoCaixa.fechar(id, request);
@@ -61,7 +61,7 @@ public class FechamentoCaixaController {
 
   @DeleteMapping("/{id}")
   @ResponseStatus(HttpStatus.NO_CONTENT)
-  @RequiresPermission("finance:manage")
+  @RequiresPermission("cash:manage")
   public void remover(@PathVariable UUID id) {
     servicoFechamentoCaixa.remover(id);
   }

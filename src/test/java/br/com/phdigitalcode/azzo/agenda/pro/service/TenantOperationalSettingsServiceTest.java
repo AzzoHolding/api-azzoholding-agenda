@@ -448,6 +448,22 @@ class TenantOperationalSettingsServiceTest {
     assertThat(entidade.getPosMaxDiscountPercent()).isEqualTo(15);
   }
 
+  /** Nome de campo errado chegava como nulo e a tela achava que tinha salvo (2026-09-17). */
+  @Test
+  @DisplayName("teto de desconto sem o campo e recusado, e o teto atual fica")
+  void tetoDeDescontoSemOCampoEhRecusado() {
+    TenantOperationalSettings entidade = novaEntidade();
+    entidade.setPosMaxDiscountPercent(15);
+    lenient().when(repository.findById(tenantId)).thenReturn(Optional.of(entidade));
+
+    assertThatThrownBy(() -> service.updateDiscountPolicy(tenantId, new SettingsDtos.DiscountPolicyRequest()))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("maxDiscountPercent");
+    assertThatThrownBy(() -> service.updateDiscountPolicy(tenantId, null))
+        .isInstanceOf(IllegalArgumentException.class);
+    assertThat(entidade.getPosMaxDiscountPercent()).isEqualTo(15);
+  }
+
   @Test
   @DisplayName("regua de lembretes valida HH:mm e a faixa 1..12 de horasAntes")
   void reminderSettingsValidaFormatoEFaixa() {

@@ -1167,6 +1167,43 @@ class ServicoAgendamentosTest {
           .isBusinessOpenAt(any(), any(), any(), any());
     }
 
+    /** Corpo sem campo reconhecido voltava 200 sem mudar nada (jornada de 2026-09-17). */
+    @Test
+    @DisplayName("pedido de edicao vazio e recusado")
+    void pedidoDeEdicaoVazioEhRecusado() {
+      Agendamento a = agendamentoExistente(StatusAgendamento.CONFIRMED, LocalDate.now(ZONE_BR), "10:00", "10:30");
+      when(agendamentoRepository.findByIdAndTenantId(a.getId(), tenantId)).thenReturn(Optional.of(a));
+
+      assertThatThrownBy(() -> service.atualizar(a.getId(), new AppointmentUpdateRequest()))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("Informe o que mudar");
+      verify(agendamentoRepository, never()).save(any());
+    }
+
+    /** Profissional, data e hora deixaram de ser obrigatorios: o que nao vem fica como esta. */
+    @Test
+    @DisplayName("so a observacao, sem profissional, data e hora, mantem o resto")
+    void soObservacaoMantemProfissionalDataEHora() {
+      Agendamento a = agendamentoExistente(StatusAgendamento.CONFIRMED, LocalDate.now(ZONE_BR), "10:00", "10:30");
+      UUID profissionalAntes = a.getProfessionalId();
+      LocalDate dataAntes = a.getDate();
+      when(agendamentoRepository.findByIdAndTenantId(a.getId(), tenantId)).thenReturn(Optional.of(a));
+      lenient().when(clienteRepository.findByIdAndTenantId(clientId, tenantId)).thenReturn(Optional.empty());
+      lenient()
+          .when(profissionalRepository.findByIdAndTenantId(professionalId, tenantId))
+          .thenReturn(Optional.empty());
+      lenient().when(servicoRepository.findByIdAndTenantId(serviceId, tenantId)).thenReturn(Optional.empty());
+      AppointmentUpdateRequest req = new AppointmentUpdateRequest();
+      req.notes = "prefere agua sem gas";
+
+      service.atualizar(a.getId(), req);
+
+      assertThat(a.getNotes()).isEqualTo("prefere agua sem gas");
+      assertThat(a.getProfessionalId()).isEqualTo(profissionalAntes);
+      assertThat(a.getDate()).isEqualTo(dataAntes);
+      assertThat(a.getStartTime()).isEqualTo("10:00");
+    }
+
     @Test
     @DisplayName("realocacao para profissional que nao atende os servicos e recusada")
     void realocacaoParaProfissionalIncompativel() {
