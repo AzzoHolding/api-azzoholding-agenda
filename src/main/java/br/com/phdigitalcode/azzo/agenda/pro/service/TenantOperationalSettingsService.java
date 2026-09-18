@@ -891,8 +891,13 @@ public class TenantOperationalSettingsService {
   @Transactional
   public SettingsDtos.DiscountPolicyResponse updateDiscountPolicy(
       UUID tenantId, SettingsDtos.DiscountPolicyRequest request) {
+    // Sem o campo, a chamada voltava 200 sem mudar nada — e quem errou o nome do campo achava que
+    // tinha salvo o teto (jornada de usuario de 2026-09-17).
+    if (request == null || request.maxDiscountPercent == null) {
+      throw new IllegalArgumentException("Informe o teto de desconto (maxDiscountPercent, de 0 a 100).");
+    }
     TenantOperationalSettings entity = findByTenantIdOrCreate(tenantId);
-    if (request != null && request.maxDiscountPercent != null) {
+    {
       int teto = request.maxDiscountPercent;
       if (teto < 0 || teto > 100) {
         throw new IllegalArgumentException("O teto de desconto vai de 0% a 100%.");

@@ -564,6 +564,9 @@ public class ServicoAgendamentos {
       throw new IllegalArgumentException(
           "Nao e permitido editar agendamento concluido ou cancelado");
     }
+    if (pedidoDeEdicaoVazio(req)) {
+      throw new IllegalArgumentException("Informe o que mudar no agendamento.");
+    }
     Map<String, Object> before = snapshotAgendamento(a);
 
     // Em andamento, a conta ja existe: serviço, profissional e horario se ajustam NA COMANDA. Mudar
@@ -2208,6 +2211,23 @@ public class ServicoAgendamentos {
    * O pedido de edicao muda algo alem da observacao? Compara os VALORES, e nao a presenca dos
    * campos: a tela de edicao manda o formulario inteiro, com profissional, data e itens iguais.
    */
+  /**
+   * Nenhum campo reconhecido: responder 200 sem mudar nada escondia erro de quem chama (nome de
+   * campo errado, corpo vazio) — jornada de usuario de 2026-09-17.
+   */
+  private static boolean pedidoDeEdicaoVazio(AppointmentUpdateRequest req) {
+    if (req == null) return true;
+    return req.notes == null
+        && (req.professionalId == null || req.professionalId.isBlank())
+        && (req.date == null || req.date.isBlank())
+        && (req.startTime == null || req.startTime.isBlank())
+        && (req.items == null || req.items.isEmpty())
+        && (req.serviceId == null || req.serviceId.isBlank())
+        && req.totalPrice == null
+        && req.allowConflict == null
+        && req.conflictAcknowledged == null;
+  }
+
   private boolean tentaMudarAlemDaObservacao(Agendamento a, AppointmentUpdateRequest req) {
     if (req.professionalId != null && !req.professionalId.isBlank()
         && !req.professionalId.trim().equals(String.valueOf(a.getProfessionalId()))) {
