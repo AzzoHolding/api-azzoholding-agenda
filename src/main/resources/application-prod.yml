@@ -31,3 +31,11 @@ logging:
   level:
     root: INFO
     br.com.phdigitalcode: INFO
+
+# Traces vao para o Tempo do monitoramento (perfil `monitoramento` do compose, rede interna).
+management:
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          endpoint: ${OTLP_TRACES_ENDPOINT:http://tempo:4318/v1/traces}

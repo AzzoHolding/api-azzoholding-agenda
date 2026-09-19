@@ -144,6 +144,25 @@
       <groupId>io.micrometer</groupId>
       <artifactId>micrometer-registry-prometheus</artifactId>
     </dependency>
+    <!-- Traces (OpenTelemetry -> Tempo por OTLP): caminho de cada requisicao, e o traceId no log
+         e na resposta de erro. Ver management.opentelemetry em application*.yml. -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-opentelemetry</artifactId>
+      <exclusions>
+        <!-- O exportador padrao usa okhttp 5, que conflita com o okhttp 4 + okio 3.6 do cliente do
+             MinIO (NoSuchMethodError okio.Okio.socket ao enviar os traces). Envio pelo HttpClient
+             do proprio JDK, abaixo — sem mexer no MinIO. -->
+        <exclusion>
+          <groupId>io.opentelemetry</groupId>
+          <artifactId>opentelemetry-exporter-sender-okhttp</artifactId>
+        </exclusion>
+      </exclusions>
+    </dependency>
+    <dependency>
+      <groupId>io.opentelemetry</groupId>
+      <artifactId>opentelemetry-exporter-sender-jdk</artifactId>
+    </dependency>
 
     <!-- OpenAPI -->
     <dependency>

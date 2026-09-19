@@ -285,6 +285,23 @@ management:
         # indicador so entra na sonda de readiness se listado neste grupo.
         readiness:
           include: readinessState,db,estoqueImportacaoReadiness
+  # Traces: toda requisicao (o volume e pequeno). O envio so acontece com endpoint configurado —
+  # em producao, o Tempo do monitoramento (application-prod.yml). O traceId vai para o MDC, para
+  # o log (logging.pattern.correlation) e para a resposta de erro (ErrorResponse.traceId).
+  tracing:
+    sampling:
+      probability: ${TRACING_SAMPLING_PROBABILITY:1.0}
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          endpoint: ${OTLP_TRACES_ENDPOINT:}
+  # O starter do OpenTelemetry tambem liga o envio de METRICAS por OTLP (para localhost:4318, que
+  # nao existe) — as metricas ja saem pelo /actuator/prometheus. Desligado para nao encher o log.
+  otlp:
+    metrics:
+      export:
+        enabled: false
 
 springdoc:
   api-docs:
@@ -293,6 +310,9 @@ springdoc:
     path: /swagger-ui.html
 
 logging:
+  # "traceId=<32 hex>" em toda linha: e o que o Grafana (Loki) reconhece para abrir o trace.
+  pattern:
+    correlation: "[traceId=%X{traceId:-} spanId=%X{spanId:-}] "
   level:
     root: INFO
     br.com.phdigitalcode: INFO
