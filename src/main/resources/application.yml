@@ -303,6 +303,16 @@ management:
       export:
         enabled: false
 
+# Consultas SQL no trace (datasource-micrometer). Entram a conexao (espera pelo pool) e a consulta;
+# a leitura linha a linha do resultado (FETCH) fica de fora, so faz ruido. Os VALORES dos parametros
+# NUNCA entram: teriam nome, telefone e CPF de cliente (LGPD) — o trace mostra `where phone = ?`.
+jdbc:
+  includes: connection,query
+  datasource-proxy:
+    include-parameter-values: false
+    query:
+      enable-logging: false
+
 springdoc:
   api-docs:
     path: /v3/api-docs
