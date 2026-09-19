@@ -255,14 +255,14 @@ public class ServicoAgendamentos {
                   tenantId, profissional.getId(), date, pageable)
               : agendamentoRepository.listByTenantAndProfessional(
                   tenantId, profissional.getId(), pageable);
-      return agendamentos.stream().map(this::toResponse).toList();
+      return toResponses(agendamentos);
     }
 
     List<Agendamento> agendamentos =
         date != null
             ? agendamentoRepository.listByTenantAndDate(tenantId, date, pageable)
             : agendamentoRepository.listByTenant(tenantId, pageable);
-    return agendamentos.stream().map(this::toResponse).toList();
+    return toResponses(agendamentos);
   }
 
   @Transactional(readOnly = true)
@@ -2464,7 +2464,58 @@ public class ServicoAgendamentos {
 
   // ─── MAPEAMENTO DE RESPOSTA ───────────────────────────────────────────────
 
+  /**
+   * Cliente, estatisticas do cliente, profissional e servico da LISTA inteira, carregados de uma vez.
+   * Montar item a item fazia 5 consultas por agendamento: a agenda de um dia com 30 horarios dava
+   * ~150 consultas e ~1 s, e segurava uma conexao do pool — com 200 usuarios, a fila do pool
+   * travava o sistema todo (teste de carga de 2026-09-19).
+   */
+  private record Relacionados(
+      Map<UUID, Cliente> clientes,
+      Map<UUID, ClienteStatsRepository.ClienteStats> estatisticas,
+      Map<UUID, Profissional> profissionais,
+      Map<UUID, Servico> servicos) {}
+
+  private List<AgendamentoResponse> toResponses(List<Agendamento> agendamentos) {
+    if (agendamentos.isEmpty()) return List.of();
+    Relacionados relacionados = carregarRelacionados(agendamentos.get(0).getTenantId(), agendamentos);
+    return agendamentos.stream().map(a -> toResponse(a, relacionados)).toList();
+  }
+
+  private Relacionados carregarRelacionados(UUID tenantId, List<Agendamento> agendamentos) {
+    List<UUID> clientIds =
+        agendamentos.stream().map(Agendamento::getClientId).filter(java.util.Objects::nonNull).distinct().toList();
+    List<UUID> professionalIds =
+        agendamentos.stream().map(Agendamento::getProfessionalId).filter(java.util.Objects::nonNull).distinct().toList();
+    List<UUID> serviceIds =
+        agendamentos.stream().map(Agendamento::resolvePrimaryServiceId).filter(java.util.Objects::nonNull).distinct().toList();
+
+    Map<UUID, Cliente> clientes = new java.util.HashMap<>();
+    for (Cliente c : clienteRepository.findAllById(clientIds)) {
+      if (tenantId.equals(c.getTenantId())) clientes.put(c.getId(), c);
+    }
+    Map<UUID, Profissional> profissionais = new java.util.HashMap<>();
+    if (!professionalIds.isEmpty()) {
+      for (Profissional p : profissionalRepository.findByIdInAndTenantId(professionalIds, tenantId)) {
+        profissionais.put(p.getId(), p);
+      }
+    }
+    Map<UUID, Servico> servicos = new java.util.HashMap<>();
+    if (!serviceIds.isEmpty()) {
+      for (Servico sv : servicoRepository.findByTenantIdAndIdIn(tenantId, serviceIds)) {
+        servicos.put(sv.getId(), sv);
+      }
+    }
+    Map<UUID, ClienteStatsRepository.ClienteStats> estatisticas =
+        clienteStatsRepository.findStatsByTenantAndClientIds(tenantId, new ArrayList<>(clientes.keySet()));
+    return new Relacionados(clientes, estatisticas, profissionais, servicos);
+  }
+
   private AgendamentoResponse toResponse(Agendamento a) {
+    return toResponse(a, carregarRelacionados(a.getTenantId(), List.of(a)));
+  }
+
+  private AgendamentoResponse toResponse(Agendamento a, Relacionados relacionados) {
     UUID tenantId = a.getTenantId();
 
     AgendamentoResponse r = new AgendamentoResponse();
@@ -2482,10 +2533,10 @@ public class ServicoAgendamentos {
     r.totalPrice = a.resolveEffectiveTotalPrice();
     r.createdAt = a.getCreatedAt() != null ? a.getCreatedAt().toString() : null;
 
-    Cliente c = clienteRepository.findByIdAndTenantId(a.getClientId(), tenantId).orElse(null);
+    Cliente c = relacionados.clientes().get(a.getClientId());
     if (c != null) {
       ClienteStatsRepository.ClienteStats stats =
-          clienteStatsRepository.findStatsByTenantAndClient(tenantId, c.getId());
+          relacionados.estatisticas().getOrDefault(c.getId(), ClienteStatsRepository.ClienteStats.EMPTY);
       ClienteResponse cr = new ClienteResponse();
       cr.id = c.getId().toString();
       cr.tenantId = c.getTenantId().toString();
@@ -2503,8 +2554,7 @@ public class ServicoAgendamentos {
       r.client = cr;
     }
 
-    Profissional p =
-        profissionalRepository.findByIdAndTenantId(a.getProfessionalId(), tenantId).orElse(null);
+    Profissional p = relacionados.profissionais().get(a.getProfessionalId());
     if (p != null) {
       ProfissionalResponse pr = new ProfissionalResponse();
       pr.id = p.getId().toString();
@@ -2520,10 +2570,7 @@ public class ServicoAgendamentos {
       r.professional = pr;
     }
 
-    Servico s =
-        primaryServiceId != null
-            ? servicoRepository.findByIdAndTenantId(primaryServiceId, tenantId).orElse(null)
-            : null;
+    Servico s = primaryServiceId != null ? relacionados.servicos().get(primaryServiceId) : null;
     if (s != null) {
       r.service = toServicoResponse(s);
     }

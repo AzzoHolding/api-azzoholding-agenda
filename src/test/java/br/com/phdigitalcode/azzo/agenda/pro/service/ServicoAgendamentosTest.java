@@ -9,6 +9,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -18,6 +19,7 @@ import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -1347,6 +1349,57 @@ class ServicoAgendamentosTest {
       verify(agendamentoRepository).listByTenant(eq(tenantId), captor.capture());
       assertThat(captor.getValue().getPageNumber()).isEqualTo(2);
       assertThat(captor.getValue().getPageSize()).isEqualTo(500);
+    }
+
+    /**
+     * A agenda do dia montava cada horario buscando cliente, estatisticas, profissional e servico um
+     * a um: 30 horarios = ~150 consultas e ~1 s, e o pool de conexoes travava com 200 usuarios
+     * (teste de carga de 2026-09-19). Agora e uma consulta de cada para a lista inteira.
+     */
+    @Test
+    @DisplayName("agenda do dia carrega cliente, profissional e servico uma vez para a lista toda")
+    void agendaDoDiaCarregaRelacionadosEmLote() {
+      LocalDate dia = LocalDate.of(2030, 6, 10);
+      List<Agendamento> doDia =
+          List.of(
+              agendamentoExistente(StatusAgendamento.CONFIRMED, dia, "09:00", "10:00"),
+              agendamentoExistente(StatusAgendamento.CONFIRMED, dia, "10:00", "11:00"),
+              agendamentoExistente(StatusAgendamento.PENDING, dia, "11:00", "12:00"));
+      when(agendamentoRepository.listByTenantAndDate(eq(tenantId), eq(dia), any(Pageable.class)))
+          .thenReturn(doDia);
+      Cliente cliente = clienteDoSalao();
+      cliente.setId(clientId);
+      cliente.setName("Ana");
+      when(clienteRepository.findAllById(any())).thenReturn(List.of(cliente));
+      when(clienteStatsRepository.findStatsByTenantAndClientIds(eq(tenantId), any()))
+          .thenReturn(Map.of(clientId, new ClienteStatsRepository.ClienteStats(4, new BigDecimal("320.00"), dia)));
+      Profissional profissional = new Profissional();
+      profissional.setId(professionalId);
+      profissional.setTenantId(tenantId);
+      profissional.setName("Bia");
+      when(profissionalRepository.findByIdInAndTenantId(List.of(professionalId), tenantId))
+          .thenReturn(List.of(profissional));
+      Servico servico = new Servico();
+      servico.setId(serviceId);
+      servico.setTenantId(tenantId);
+      servico.setName("Corte");
+      when(servicoRepository.findByTenantIdAndIdIn(tenantId, List.of(serviceId))).thenReturn(List.of(servico));
+
+      List<AgendamentoResponse> agenda = service.listar(dia, 1, 50);
+
+      assertThat(agenda).hasSize(3);
+      assertThat(agenda).allSatisfy(r -> {
+        assertThat(r.client.name).isEqualTo("Ana");
+        assertThat(r.client.totalVisits).isEqualTo(4);
+        assertThat(r.professional.name).isEqualTo("Bia");
+        assertThat(r.service.name).isEqualTo("Corte");
+      });
+      verify(clienteRepository, times(1)).findAllById(any());
+      verify(clienteStatsRepository, times(1)).findStatsByTenantAndClientIds(eq(tenantId), any());
+      verify(profissionalRepository, times(1)).findByIdInAndTenantId(any(), eq(tenantId));
+      verify(servicoRepository, times(1)).findByTenantIdAndIdIn(eq(tenantId), any());
+      verify(clienteRepository, never()).findByIdAndTenantId(any(), any());
+      verify(clienteStatsRepository, never()).findStatsByTenantAndClient(any(), any());
     }
 
     @Test
