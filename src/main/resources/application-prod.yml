@@ -34,6 +34,9 @@ logging:
 
 # Traces vao para o Tempo do monitoramento (perfil `monitoramento` do compose, rede interna).
 management:
+  tracing:
+    export:
+      enabled: ${TRACING_EXPORT_ENABLED:true}
   opentelemetry:
     tracing:
       export:
