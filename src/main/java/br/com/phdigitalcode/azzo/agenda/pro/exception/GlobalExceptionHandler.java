@@ -211,6 +211,9 @@ public class GlobalExceptionHandler {
   private ResponseEntity<ErrorResponse> buildErrorResponse(int status, ErrorResponse payload, Throwable exception) {
     logRequestFailure(status, payload, exception);
     registrarErroGlobal(payload.path, payload.code, payload.message);
+    if (payload.traceId != null) {
+      return ResponseEntity.status(status).header("X-Trace-Id", payload.traceId).body(payload);
+    }
     return ResponseEntity.status(status).body(payload);
   }
 
