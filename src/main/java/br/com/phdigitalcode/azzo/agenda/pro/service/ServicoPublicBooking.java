@@ -27,6 +27,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.entity.AppointmentDeposit;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.Cliente;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.Profissional;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.Servico;
+import br.com.phdigitalcode.azzo.agenda.pro.entity.Specialty;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.Tenant;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.SalonDtos;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.BookingFunnelStage;
@@ -107,7 +108,7 @@ public class ServicoPublicBooking {
   }
 
   @Transactional(readOnly = true)
-  public List<ServicoResponse> listarServicosAtivos(String slug) {
+  public List<PublicBookingDtos.PublicService> listarServicosAtivos(String slug) {
     Tenant tenant = obterTenantPorSlug(slug);
     return servicoRepository.findByTenantId(tenant.getId()).stream()
         // Servico so aparece se alguem que ATENDE pode faze-lo: vinculado so a quem nao recebe
@@ -118,17 +119,17 @@ public class ServicoPublicBooking {
   }
 
   @Transactional(readOnly = true)
-  public List<ProfissionalResponse> listarProfissionaisAtivos(String slug) {
+  public List<PublicBookingDtos.PublicProfessional> listarProfissionaisAtivos(String slug) {
     return listarProfissionaisAtivos(slug, null, null);
   }
 
   @Transactional(readOnly = true)
-  public List<ProfissionalResponse> listarProfissionaisAtivos(String slug, String serviceId) {
+  public List<PublicBookingDtos.PublicProfessional> listarProfissionaisAtivos(String slug, String serviceId) {
     return listarProfissionaisAtivos(slug, serviceId, null);
   }
 
   @Transactional(readOnly = true)
-  public List<ProfissionalResponse> listarProfissionaisAtivos(String slug, String serviceId, String serviceIds) {
+  public List<PublicBookingDtos.PublicProfessional> listarProfissionaisAtivos(String slug, String serviceId, String serviceIds) {
     Tenant tenant = obterTenantPorSlug(slug);
     // Quem nao recebe agendamento continua na equipe, mas nao e opcao no link publico.
     List<Profissional> ativos = profissionalRepository.findByTenantIdAndIsActiveTrue(tenant.getId()).stream()
@@ -583,18 +584,15 @@ public class ServicoPublicBooking {
     }
   }
 
-  private ServicoResponse toServicoResponse(Servico s) {
-    ServicoResponse r = new ServicoResponse();
+  /** So o que a tela de agendar mostra (inclui o sinal, que o cliente precisa saber). */
+  private PublicBookingDtos.PublicService toServicoResponse(Servico s) {
+    PublicBookingDtos.PublicService r = new PublicBookingDtos.PublicService();
     r.id = s.getId().toString();
-    r.tenantId = s.getTenantId().toString();
     r.name = s.getName();
     r.description = s.getDescription();
     r.duration = s.getDuration();
     r.price = s.getPrice();
     r.category = resolveCategoryName(s.getCategoryId());
-    r.professionalIds = new ArrayList<>(s.getProfissionais().stream().map(Profissional::getId).toList());
-    r.isActive = s.isActive();
-    r.createdAt = s.getCreatedAt() != null ? s.getCreatedAt().toString() : null;
     r.requiresDeposit = s.isRequiresDeposit();
     r.depositType = s.getDepositType();
     r.depositValue = s.getDepositValue();
@@ -606,18 +604,15 @@ public class ServicoPublicBooking {
     return serviceCategoryRepository.findById(categoryId).map(c -> c.getName()).orElse(null);
   }
 
-  private ProfissionalResponse toProfissionalResponse(Profissional p) {
-    ProfissionalResponse r = new ProfissionalResponse();
+  /** So o que a tela de agendar mostra. Nada de e-mail, telefone, comissao ou id interno. */
+  private PublicBookingDtos.PublicProfessional toProfissionalResponse(Profissional p) {
+    PublicBookingDtos.PublicProfessional r = new PublicBookingDtos.PublicProfessional();
     r.id = p.getId().toString();
-    r.tenantId = p.getTenantId().toString();
-    r.userId = p.getUserId() != null ? p.getUserId().toString() : null;
     r.name = p.getName();
-    r.email = p.getEmail();
-    r.phone = p.getPhone();
     r.avatar = p.getAvatar();
-    r.commissionRate = p.getCommissionRate();
-    r.isActive = p.isActive();
-    r.createdAt = p.getCreatedAt() != null ? p.getCreatedAt().toString() : null;
+    if (p.getSpecialties() != null) {
+      r.specialties = p.getSpecialties().stream().map(Specialty::getName).sorted().toList();
+    }
     return r;
   }
 

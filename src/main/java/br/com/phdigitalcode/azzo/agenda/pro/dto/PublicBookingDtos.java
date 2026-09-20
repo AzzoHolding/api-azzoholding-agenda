@@ -21,6 +21,31 @@ public final class PublicBookingDtos {
     public List<AvailabilitySlot> slots = new ArrayList<>();
   }
 
+  /**
+   * O profissional como o LINK PUBLICO mostra: so o que a tela de agendar usa. A rota nao pede
+   * login — devolver e-mail, telefone, taxa de comissao e ids internos do profissional expunha
+   * dado pessoal e comercial a qualquer um com o link (achado de 2026-09-20).
+   */
+  public static class PublicProfessional {
+    public String id;
+    public String name;
+    public String avatar;
+    public List<String> specialties = new ArrayList<>();
+  }
+
+  /** O servico como o link publico mostra: o suficiente para escolher e saber do sinal. */
+  public static class PublicService {
+    public String id;
+    public String name;
+    public String description;
+    public Integer duration;
+    public BigDecimal price;
+    public String category;
+    public boolean requiresDeposit;
+    public String depositType;
+    public BigDecimal depositValue;
+  }
+
   public static class PublicAppointmentRequest {
     @NotBlank public String customerName;
     @NotBlank public String customerPhone;
