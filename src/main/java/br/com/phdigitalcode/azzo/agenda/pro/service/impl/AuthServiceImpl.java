@@ -234,7 +234,6 @@ public class AuthServiceImpl implements AuthService {
         usuario.getId(),
         AuditConstants.Status.SUCCESS,
         "AUTH_REGISTER",
-        null,
         Map.of("email", usuario.getEmail(), "role", usuario.getRole().name()));
     LOG.info(CorrelatedLogging.context(
         "Registro concluido",
@@ -264,8 +263,11 @@ public class AuthServiceImpl implements AuthService {
           "Login recusado", "tenantId", usuario.getTenantId(), "userId", usuario.getId(),
           "email", usuario.getEmail(), "reason", "invalid_password"));
       registrarAuditoriaAuth(
-          usuario.getTenantId(), usuario.getId(), AuditConstants.Status.DENIED, "AUTH_LOGIN",
-          Map.of("email", usuario.getEmail()), null);
+        usuario.getTenantId(),
+        usuario.getId(),
+        AuditConstants.Status.DENIED,
+        "AUTH_LOGIN",
+        Map.of("email", usuario.getEmail()));
       throw new IllegalArgumentException("Credenciais invalidas");
     }
     emailLoginAttempts.remove(normalizedEmail);
@@ -277,8 +279,11 @@ public class AuthServiceImpl implements AuthService {
           "Login recusado", "tenantId", usuario.getTenantId(), "userId", usuario.getId(),
           "email", usuario.getEmail(), "reason", "professional_inactive"));
       registrarAuditoriaAuth(
-          usuario.getTenantId(), usuario.getId(), AuditConstants.Status.DENIED, "AUTH_LOGIN",
-          null, Map.of("email", usuario.getEmail(), "reason", "PROFESSIONAL_INACTIVE"));
+        usuario.getTenantId(),
+        usuario.getId(),
+        AuditConstants.Status.DENIED,
+        "AUTH_LOGIN",
+        Map.of("email", usuario.getEmail(), "reason", "PROFESSIONAL_INACTIVE"));
       throw new ApiClientErrorException(AcessoDeProfissional.MENSAGEM, 403);
     }
 
@@ -287,8 +292,11 @@ public class AuthServiceImpl implements AuthService {
           "Login recusado", "tenantId", usuario.getTenantId(), "userId", usuario.getId(),
           "email", usuario.getEmail(), "reason", "mfa_required"));
       registrarAuditoriaAuth(
-          usuario.getTenantId(), usuario.getId(), AuditConstants.Status.DENIED, "AUTH_LOGIN_MFA_REQUIRED",
-          Map.of("email", usuario.getEmail()), null);
+        usuario.getTenantId(),
+        usuario.getId(),
+        AuditConstants.Status.DENIED,
+        "AUTH_LOGIN_MFA_REQUIRED",
+        Map.of("email", usuario.getEmail()));
       throw new ApiClientErrorException("Codigo MFA obrigatorio", 428);
     }
 
@@ -300,16 +308,22 @@ public class AuthServiceImpl implements AuthService {
             "Login recusado", "tenantId", usuario.getTenantId(), "userId", usuario.getId(),
             "email", usuario.getEmail(), "reason", "invalid_mfa_code"));
         registrarAuditoriaAuth(
-            usuario.getTenantId(), usuario.getId(), AuditConstants.Status.DENIED, "AUTH_LOGIN_MFA_DENIED",
-            Map.of("email", usuario.getEmail()), null);
+        usuario.getTenantId(),
+        usuario.getId(),
+        AuditConstants.Status.DENIED,
+        "AUTH_LOGIN_MFA_DENIED",
+        Map.of("email", usuario.getEmail()));
         throw new IllegalArgumentException("Codigo MFA invalido");
       }
     }
 
     AuthResponse response = montarResposta(usuario);
     registrarAuditoriaAuth(
-        usuario.getTenantId(), usuario.getId(), AuditConstants.Status.SUCCESS, "AUTH_LOGIN",
-        null, Map.of("email", usuario.getEmail()));
+        usuario.getTenantId(),
+        usuario.getId(),
+        AuditConstants.Status.SUCCESS,
+        "AUTH_LOGIN",
+        Map.of("email", usuario.getEmail()));
     LOG.info(CorrelatedLogging.context(
         "Login concluido", "tenantId", usuario.getTenantId(), "userId", usuario.getId(), "email", usuario.getEmail()));
     return response;
@@ -360,8 +374,11 @@ public class AuthServiceImpl implements AuthService {
     String resetUrl = buildResetUrl(rawToken);
 
     registrarAuditoriaAuth(
-        usuario.getTenantId(), usuario.getId(), AuditConstants.Status.SUCCESS, "AUTH_FORGOT_PASSWORD_REQUEST",
-        null, Map.of("email", usuario.getEmail()));
+        usuario.getTenantId(),
+        usuario.getId(),
+        AuditConstants.Status.SUCCESS,
+        "AUTH_FORGOT_PASSWORD_REQUEST",
+        Map.of("email", usuario.getEmail()));
 
     emailJobService.enqueuePasswordReset(usuario, token, resetUrl);
     LOG.info(CorrelatedLogging.context(
@@ -398,15 +415,29 @@ public class AuthServiceImpl implements AuthService {
     refreshTokenService.revokeAllForUser(usuario.getId());
 
     registrarAuditoriaAuth(
-        usuario.getTenantId(), usuario.getId(), AuditConstants.Status.SUCCESS, "AUTH_PASSWORD_RESET",
-        Map.of("email", usuario.getEmail()), Map.of("passwordReset", true));
+        usuario.getTenantId(),
+        usuario.getId(),
+        AuditConstants.Status.SUCCESS,
+        "AUTH_PASSWORD_RESET",
+        Map.of("email", usuario.getEmail()));
     LOG.info(CorrelatedLogging.context(
         "Reset de senha concluido", "tenantId", usuario.getTenantId(), "userId", usuario.getId(), "email", usuario.getEmail()));
 
     return new GenericMessageResponse("Senha redefinida com sucesso.");
   }
 
-  private void registrarAuditoriaAuth(UUID tenantId, UUID actorUserId, String status, String action, Object before, Object after) {
+  /**
+   * Entrar e sair NAO alteram dado: o e-mail e o motivo sao CONTEXTO, e vao em {@code metadata}.
+   * Enquanto iam em {@code before}/{@code after}, a auditoria marcava todo login como "alterou
+   * dado" (campo {@code _root}), porque um lado vinha nulo (achado na tela de auditoria,
+   * 2026-09-20).
+   */
+  private void registrarAuditoriaAuth(
+        UUID tenantId,
+        UUID actorUserId,
+        String status,
+        String action,
+        Object contexto) {
     if (tenantId == null) return;
     try {
       AuditEventCommand command = new AuditEventCommand();
@@ -417,8 +448,7 @@ public class AuthServiceImpl implements AuthService {
       command.entityType = "USER_AUTH";
       command.entityId = actorUserId != null ? actorUserId.toString() : null;
       command.sourceChannel = AuditConstants.SourceChannel.API;
-      command.before = before;
-      command.after = after;
+      command.metadata = contexto;
       if (AuditConstants.Status.SUCCESS.equals(status)) {
         auditService.recordSuccess(command);
       } else if (AuditConstants.Status.DENIED.equals(status)) {

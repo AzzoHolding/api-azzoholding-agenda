@@ -139,4 +139,23 @@ class AuthServiceImplLoginDeDesligadoTest {
 
     assertThat(service.login(login("Senha@123")).access_token).isEqualTo("jwt");
   }
+
+  /**
+   * Entrar nao altera dado. Enquanto o e-mail ia em {@code after} (com {@code before} nulo), a
+   * tela de auditoria marcava todo login como "alterou dado", campo {@code _root} (2026-09-20).
+   */
+  @Test
+  void loginNaoEhRegistradoComoAlteracaoDeDado() {
+    when(acessoDeProfissional.desativado(usuario)).thenReturn(false);
+
+    service.login(login("Senha@123"));
+
+    ArgumentCaptor<AuditEventCommand> captor = ArgumentCaptor.forClass(AuditEventCommand.class);
+    verify(auditService).recordSuccess(captor.capture());
+    AuditEventCommand evento = captor.getValue();
+    assertThat(evento.action).isEqualTo("AUTH_LOGIN");
+    assertThat(evento.before).isNull();
+    assertThat(evento.after).isNull();
+    assertThat(evento.metadata).isNotNull();
+  }
 }
