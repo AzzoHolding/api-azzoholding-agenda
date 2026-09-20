@@ -193,6 +193,36 @@ class ServicoPublicBookingTest {
             "requiresDeposit", "depositType", "depositValue");
   }
 
+  /**
+   * Servico sem profissional vinculado = "qualquer profissional" (e o padrao de quem acaba de
+   * cadastrar). Ficava de fora do link publico e o salao novo aparecia vazio (2026-09-20).
+   */
+  @Test
+  void servicoSemProfissionalVinculadoApareceNoLinkPublico() {
+    Profissional ana = profissionalAtivo(UUID.randomUUID());
+    Servico corte = servicoAtivo(UUID.randomUUID(), 30, new BigDecimal("70.00"));
+    corte.setProfissionais(Set.of());
+    when(servicoRepository.findByTenantId(tenantId)).thenReturn(List.of(corte));
+    when(profissionalRepository.findByTenantIdAndIsActiveTrue(tenantId)).thenReturn(List.of(ana));
+
+    assertThat(service.listarServicosAtivos("salao-teste"))
+        .extracting(s -> s.id)
+        .containsExactly(corte.getId().toString());
+  }
+
+  /** Sem ninguem que receba agendamento, nao ha o que oferecer. */
+  @Test
+  void servicoSemVinculoNaoApareceSeNinguemRecebeAgendamento() {
+    Profissional recepcao = profissionalAtivo(UUID.randomUUID());
+    recepcao.setAcceptsAppointments(false);
+    Servico corte = servicoAtivo(UUID.randomUUID(), 30, new BigDecimal("70.00"));
+    corte.setProfissionais(Set.of());
+    when(servicoRepository.findByTenantId(tenantId)).thenReturn(List.of(corte));
+    when(profissionalRepository.findByTenantIdAndIsActiveTrue(tenantId)).thenReturn(List.of(recepcao));
+
+    assertThat(service.listarServicosAtivos("salao-teste")).isEmpty();
+  }
+
   @Test
   void listarServicosAtivosDeixaDeForaServicoSoDeQuemNaoRecebeAgendamento() {
     Profissional recepcao = profissionalAtivo(UUID.randomUUID());
