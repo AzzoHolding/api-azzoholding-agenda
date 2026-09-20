@@ -129,8 +129,11 @@ public interface AuditEventRepository
           WHERE tenant_id = :tenantId
             AND module <> :systemModule
             AND actor_user_id IS NOT NULL
-            AND (:from IS NULL OR created_at >= :from)
-            AND (:to IS NULL OR created_at <= :to)
+            -- CAST obrigatorio: em `:from IS NULL` o Postgres nao tem como deduzir o tipo do
+            -- parametro e recusa a consulta inteira ("could not determine data type of parameter"),
+            -- com ou sem valor. A tela de auditoria ficava sem os filtros (achado de 2026-09-20).
+            AND (CAST(:from AS timestamptz) IS NULL OR created_at >= CAST(:from AS timestamptz))
+            AND (CAST(:to AS timestamptz) IS NULL OR created_at <= CAST(:to AS timestamptz))
           ORDER BY module, status, action, entity_type, source_channel
           """,
       nativeQuery = true)
