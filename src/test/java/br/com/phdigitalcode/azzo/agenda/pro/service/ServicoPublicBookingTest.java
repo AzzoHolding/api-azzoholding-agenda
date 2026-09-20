@@ -149,6 +149,50 @@ class ServicoPublicBookingTest {
         .containsExactly(ana.getId().toString());
   }
 
+  /**
+   * A rota nao pede login: quem tem o link ve a resposta inteira. Ate 2026-09-20 ela devolvia
+   * e-mail, telefone, taxa de comissao e ids internos do profissional.
+   */
+  @Test
+  void oLinkPublicoNaoExpoeDadoPessoalNemComercialDoProfissional() {
+    Profissional ana = profissionalAtivo(UUID.randomUUID());
+    ana.setName("Ana");
+    ana.setEmail("ana@salao.test");
+    ana.setPhone("11999990000");
+    ana.setCommissionRate(new BigDecimal("40.00"));
+    ana.setAvatar("https://exemplo/ana.png");
+    when(profissionalRepository.findByTenantIdAndIsActiveTrue(tenantId)).thenReturn(List.of(ana));
+
+    var publicos = service.listarProfissionaisAtivos("salao-teste");
+
+    assertThat(publicos).hasSize(1);
+    var p = publicos.get(0);
+    assertThat(p.name).isEqualTo("Ana");
+    assertThat(p.avatar).isEqualTo("https://exemplo/ana.png");
+    // O que a resposta publica NAO pode ter: so estes quatro campos existem no DTO.
+    assertThat(p.getClass().getFields())
+        .extracting(java.lang.reflect.Field::getName)
+        .containsExactlyInAnyOrder("id", "name", "avatar", "specialties");
+  }
+
+  @Test
+  void oLinkPublicoNaoExpoeOIdInternoDoSalaoNoServico() {
+    Servico corte = servicoAtivo(UUID.randomUUID(), 30, new BigDecimal("80.00"));
+    Profissional ana = profissionalAtivo(UUID.randomUUID());
+    corte.setProfissionais(Set.of(ana));
+    when(servicoRepository.findByTenantId(tenantId)).thenReturn(List.of(corte));
+    when(profissionalRepository.findByTenantIdAndIsActiveTrue(tenantId)).thenReturn(List.of(ana));
+
+    var publicos = service.listarServicosAtivos("salao-teste");
+
+    assertThat(publicos).hasSize(1);
+    assertThat(publicos.get(0).getClass().getFields())
+        .extracting(java.lang.reflect.Field::getName)
+        .containsExactlyInAnyOrder(
+            "id", "name", "description", "duration", "price", "category",
+            "requiresDeposit", "depositType", "depositValue");
+  }
+
   @Test
   void listarServicosAtivosDeixaDeForaServicoSoDeQuemNaoRecebeAgendamento() {
     Profissional recepcao = profissionalAtivo(UUID.randomUUID());
@@ -169,7 +213,7 @@ class ServicoPublicBookingTest {
     Servico semProfissional = servicoAtivo(UUID.randomUUID(), 30, BigDecimal.TEN);
     when(servicoRepository.findByTenantId(tenantId)).thenReturn(List.of(comProfissional, semProfissional));
 
-    List<br.com.phdigitalcode.azzo.agenda.pro.dto.response.ServicoResponse> result =
+    var result =
         service.listarServicosAtivos("salao-teste");
 
     assertThat(result).hasSize(1);
@@ -183,7 +227,7 @@ class ServicoPublicBookingTest {
     Profissional p1 = profissionalAtivo(UUID.randomUUID());
     when(profissionalRepository.findByTenantIdAndIsActiveTrue(tenantId)).thenReturn(List.of(p1));
 
-    List<br.com.phdigitalcode.azzo.agenda.pro.dto.response.ProfissionalResponse> result =
+    var result =
         service.listarProfissionaisAtivos("salao-teste");
 
     assertThat(result).hasSize(1);
@@ -201,7 +245,7 @@ class ServicoPublicBookingTest {
     servico.setProfissionais(Set.of(p1));
     when(servicoRepository.findByIdAndTenantId(serviceId, tenantId)).thenReturn(Optional.of(servico));
 
-    List<br.com.phdigitalcode.azzo.agenda.pro.dto.response.ProfissionalResponse> result =
+    var result =
         service.listarProfissionaisAtivos("salao-teste", serviceId.toString());
 
     assertThat(result).extracting(r -> r.id).containsExactly(p1.getId().toString());

@@ -44,7 +44,7 @@ class PublicSalonsControllerTest {
 
   @Test
   void listarServicosAtivosDelega() {
-    List<ServicoResponse> esperado = List.of(new ServicoResponse());
+    List<PublicBookingDtos.PublicService> esperado = List.of(new PublicBookingDtos.PublicService());
     when(servicoPublicBooking.listarServicosAtivos("salao-teste")).thenReturn(esperado);
 
     assertThat(controller.listarServicosAtivos("salao-teste")).isSameAs(esperado);
@@ -52,7 +52,7 @@ class PublicSalonsControllerTest {
 
   @Test
   void listarProfissionaisAtivosDelegaComFiltrosDeServico() {
-    List<ProfissionalResponse> esperado = List.of(new ProfissionalResponse());
+    List<PublicBookingDtos.PublicProfessional> esperado = List.of(new PublicBookingDtos.PublicProfessional());
     when(servicoPublicBooking.listarProfissionaisAtivos("salao-teste", "svc-1", "svc-1,svc-2"))
         .thenReturn(esperado);
 
