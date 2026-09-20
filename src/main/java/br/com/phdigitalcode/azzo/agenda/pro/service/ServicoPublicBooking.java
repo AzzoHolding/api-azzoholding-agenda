@@ -110,10 +110,15 @@ public class ServicoPublicBooking {
   @Transactional(readOnly = true)
   public List<PublicBookingDtos.PublicService> listarServicosAtivos(String slug) {
     Tenant tenant = obterTenantPorSlug(slug);
+    // SEM profissional vinculado significa "qualquer profissional" — e o padrao de quem acabou de
+    // cadastrar o servico, e e assim que a agenda, a lista de profissionais do link e a criacao do
+    // agendamento ja tratam. Aqui ficava de fora (anyMatch numa lista vazia e falso), e o salao
+    // novo via "nenhum servico disponivel" no proprio link publico (achado de 2026-09-20).
+    boolean alguemAtende =
+        profissionalRepository.findByTenantIdAndIsActiveTrue(tenant.getId()).stream()
+            .anyMatch(ServicoPublicBooking::atendeNoLink);
     return servicoRepository.findByTenantId(tenant.getId()).stream()
-        // Servico so aparece se alguem que ATENDE pode faze-lo: vinculado so a quem nao recebe
-        // agendamento (ou a inativos), o cliente escolheria e nao acharia profissional.
-        .filter(s -> s.isActive() && s.getProfissionais().stream().anyMatch(ServicoPublicBooking::atendeNoLink))
+        .filter(s -> s.isActive() && servicoTemQuemAtenda(s, alguemAtende))
         .map(this::toServicoResponse)
         .toList();
   }
@@ -431,6 +436,18 @@ public class ServicoPublicBooking {
   public List<LocalDate> listarDatasIndisponiveis(String slug, LocalDate from, LocalDate to) {
     Tenant tenant = obterTenantPorSlug(slug);
     return specialClosureService.listarDatasIndisponiveis(tenant.getId(), from, to);
+  }
+
+  /**
+   * Alguem pode fazer este servico pelo link? Sem vinculo, qualquer profissional que atenda serve;
+   * com vinculo, pelo menos um dos vinculados precisa atender (vinculado so a quem nao recebe
+   * agendamento, o cliente escolheria e nao acharia profissional).
+   */
+  private static boolean servicoTemQuemAtenda(Servico servico, boolean alguemAtendeNoSalao) {
+    if (servico.getProfissionais() == null || servico.getProfissionais().isEmpty()) {
+      return alguemAtendeNoSalao;
+    }
+    return servico.getProfissionais().stream().anyMatch(ServicoPublicBooking::atendeNoLink);
   }
 
   /** Pode ser escolhido no link publico: ativo e aceitando agendamento. */
