@@ -22,7 +22,11 @@ class AuditEventRepositoryQueryTest {
         AuditEventRepository.class.getMethod(
             "findFilterOptionRows", java.util.UUID.class, String.class,
             java.time.Instant.class, java.time.Instant.class);
-    String sql = metodo.getAnnotation(Query.class).value();
+    // Sem os comentarios: eles CITAM o padrao errado para explicar por que ele nao pode voltar.
+    String sql =
+        metodo.getAnnotation(Query.class).value().lines()
+            .filter(linha -> !linha.strip().startsWith("--"))
+            .collect(java.util.stream.Collectors.joining("\n"));
 
     assertThat(sql).contains("CAST(:from AS timestamptz)").contains("CAST(:to AS timestamptz)");
     assertThat(sql).doesNotContain(":from IS NULL").doesNotContain(":to IS NULL");
