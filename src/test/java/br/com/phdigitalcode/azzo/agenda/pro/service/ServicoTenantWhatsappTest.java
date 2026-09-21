@@ -166,6 +166,45 @@ class ServicoTenantWhatsappTest {
     verify(auditService).recordError(any(AuditEventCommand.class));
   }
 
+  /**
+   * O erro que fez o dono perseguir o problema errado em 20/09: a Meta recusou com
+   * {@code (#133010) Account not registered} — numero nao registrado no Cloud API — e a tela
+   * mandou revisar credenciais que estavam corretas.
+   */
+  @Test
+  void numeroNaoRegistradoNoCloudApiNaoManda_revisar_credenciais() {
+    when(repository.findByTenantIdOrCreate(tenantId)).thenReturn(configVazia());
+    when(whatsAppClient.sendMessage(any(TenantWhatsAppConfig.class), anyString(), anyString()))
+        .thenThrow(new IllegalStateException("(#133010) Account not registered"));
+
+    TenantWhatsAppDtos.TestMessageRequest request = new TenantWhatsAppDtos.TestMessageRequest();
+    request.destinationPhone = "+5511999998888";
+
+    TenantWhatsAppDtos.TestMessageResponse response =
+        serviceEmbeddedHabilitado.enviarMensagemTeste(request);
+
+    assertThat(response.success).isFalse();
+    assertThat(response.message).contains("registrado no WhatsApp Cloud API");
+    assertThat(response.message).doesNotContain("Revise as credenciais");
+  }
+
+  /** Erro que ninguem previu se explica na TELA: sem isso, so o log do servidor sabe o motivo. */
+  @Test
+  void erroDesconhecidoDaMetaChegaNaTelaComOTextoDela() {
+    when(repository.findByTenantIdOrCreate(tenantId)).thenReturn(configVazia());
+    when(whatsAppClient.sendMessage(any(TenantWhatsAppConfig.class), anyString(), anyString()))
+        .thenThrow(new IllegalStateException("(#131030) Recipient phone number not in allowed list"));
+
+    TenantWhatsAppDtos.TestMessageRequest request = new TenantWhatsAppDtos.TestMessageRequest();
+    request.destinationPhone = "+5511999998888";
+
+    TenantWhatsAppDtos.TestMessageResponse response =
+        serviceEmbeddedHabilitado.enviarMensagemTeste(request);
+
+    assertThat(response.success).isFalse();
+    assertThat(response.message).contains("131030").contains("not in allowed list");
+  }
+
   @Test
   void enviarMensagemTesteComSucessoRegistraAuditoria() {
     TenantWhatsAppConfig config = configVazia();

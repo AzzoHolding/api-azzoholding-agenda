@@ -197,8 +197,21 @@ public class ServicoTenantWhatsapp {
     }
   }
 
+  /**
+   * Traduz a falha para quem esta na tela de integracao.
+   *
+   * <p><b>O que a Meta disse nao pode ser engolido.</b> Ate 2026-09-21 todo erro nao reconhecido
+   * virava "revise as credenciais" — e em 20/09 isso mandou o dono conferir um token que estava
+   * correto: a Meta recusava com {@code (#133010) Account not registered}, que e o numero ainda nao
+   * registrado no Cloud API, e nao credencial errada. Diagnosticar exigiu abrir o log do servidor
+   * para ver a mensagem que a propria resposta ja trazia.
+   *
+   * <p>Por isso o texto da Meta vai junto no caso desconhecido: o proximo erro que ninguem previu
+   * se explica na tela, em vez de mandar a pessoa arrumar o que nao esta quebrado.
+   */
   private String mapTestConnectionError(Exception error) {
-    String message = error == null || error.getMessage() == null ? "" : error.getMessage().toLowerCase();
+    String original = error == null || error.getMessage() == null ? "" : error.getMessage().trim();
+    String message = original.toLowerCase();
     if (message.contains("token do whatsapp nao configurado")) {
       return "Token de acesso do WhatsApp nao configurado. Salve a configuracao antes de testar.";
     }
@@ -211,7 +224,17 @@ public class ServicoTenantWhatsapp {
         || message.contains("not authorized")) {
       return "Falha ao validar a conexao com o WhatsApp. Revise o token de acesso informado e tente novamente.";
     }
-    return "Falha ao validar a conexao com o WhatsApp. Revise as credenciais configuradas e tente novamente.";
+    // 133010: o numero existe e esta verificado (ler os dados dele funciona), mas falta o registro
+    // no Cloud API — um passo unico, feito no painel da Meta, que o Azzo nao executa.
+    if (message.contains("133010") || message.contains("account not registered")) {
+      return "O numero ainda nao foi registrado no WhatsApp Cloud API. O token e o Phone Number ID"
+          + " estao corretos; falta concluir o registro do numero no painel da Meta (Cloud API >"
+          + " registrar numero, com o PIN de verificacao em duas etapas) antes de enviar mensagens.";
+    }
+    if (original.isBlank()) {
+      return "Falha ao validar a conexao com o WhatsApp. Revise as credenciais configuradas e tente novamente.";
+    }
+    return "Falha ao enviar pelo WhatsApp. A Meta respondeu: " + original;
   }
 
   @Transactional
