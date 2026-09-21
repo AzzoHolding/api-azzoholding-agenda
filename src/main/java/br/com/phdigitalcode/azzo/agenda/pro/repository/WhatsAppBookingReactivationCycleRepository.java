@@ -10,9 +10,11 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 import br.com.phdigitalcode.azzo.agenda.pro.entity.WhatsAppBookingReactivationCycleEntity;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.WhatsAppBookingReactivationStage;
@@ -24,6 +26,23 @@ import br.com.phdigitalcode.azzo.agenda.pro.specification.WhatsAppBookingReactiv
 public interface WhatsAppBookingReactivationCycleRepository
     extends JpaRepository<WhatsAppBookingReactivationCycleEntity, UUID>,
         JpaSpecificationExecutor<WhatsAppBookingReactivationCycleEntity> {
+
+  /**
+   * Tira o titular anonimizado da reativacao.
+   *
+   * O {@code user_identifier} e o telefone e nao aceita nulo; vira um valor unico e sem dono para
+   * nao juntar dois anonimizados no mesmo "cliente". Sem isso, um pedido de exclusao ainda deixava
+   * nome e numero guardados numa fila de marketing.
+   */
+  @Modifying
+  @Transactional
+  @Query(
+      value =
+          "UPDATE whatsapp_booking_reactivation_cycles "
+              + "SET customer_name = NULL, user_identifier = 'ANONIMIZADO-' || id "
+              + "WHERE tenant_id = :tenantId AND client_id = :clientId",
+      nativeQuery = true)
+  int anonimizarPorClienteRaw(@Param("tenantId") UUID tenantId, @Param("clientId") UUID clientId);
 
   @Query(
       "from WhatsAppBookingReactivationCycleEntity c where c.tenantId = :tenantId "

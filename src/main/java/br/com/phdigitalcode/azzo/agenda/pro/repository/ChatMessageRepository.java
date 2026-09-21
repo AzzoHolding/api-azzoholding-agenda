@@ -58,6 +58,22 @@ public interface ChatMessageRepository extends JpaRepository<ChatMessageEntity, 
       nativeQuery = true)
   int clearExpiredContentsRaw(@Param("threshold") Instant threshold);
 
+  /**
+   * Apaga o texto das mensagens do titular anonimizado.
+   *
+   * A conversa e onde o cliente escreve nome, endereco e telefone por extenso — apagar so a ficha
+   * dele deixava tudo isso guardado aqui. As linhas ficam (data, direcao, situacao) porque sao o
+   * registro de que houve atendimento; o conteudo, nao.
+   */
+  @Modifying
+  @Transactional
+  @Query(
+      value =
+          "UPDATE chat_messages SET content = NULL, updated_at = NOW() "
+              + "WHERE tenant_id = :tenantId AND client_id = :clientId AND content IS NOT NULL",
+      nativeQuery = true)
+  int anonimizarPorClienteRaw(@Param("tenantId") UUID tenantId, @Param("clientId") UUID clientId);
+
   @Modifying
   @Transactional
   @Query(

@@ -21,6 +21,25 @@ import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.StatusNotification;
 public interface NotificationRepository
     extends JpaRepository<Notification, UUID>, JpaSpecificationExecutor<Notification> {
 
+  /**
+   * Apaga o contato e o texto das notificacoes enviadas ao titular anonimizado.
+   *
+   * Nao ha {@code client_id} aqui: chega-se pelo agendamento. O destino e o telefone ou o e-mail
+   * dele, e o texto traz o nome — anonimizar sem passar por aqui deixava o contato guardado.
+   * {@code destination} nao aceita nulo, entao recebe o marcador.
+   */
+  @Modifying
+  @Transactional
+  @Query(
+      value =
+          "UPDATE notifications SET destination = '[ANONIMIZADO]', message = NULL, "
+              + "error_message = NULL "
+              + "WHERE tenant_id = :tenantId AND appointment_id IN "
+              + "(SELECT a.id FROM appointments a WHERE a.tenant_id = :tenantId "
+              + "AND a.client_id = :clientId)",
+      nativeQuery = true)
+  int anonimizarPorClienteRaw(@Param("tenantId") UUID tenantId, @Param("clientId") UUID clientId);
+
   Optional<Notification> findByIdAndTenantId(UUID id, UUID tenantId);
 
   long deleteByIdAndTenantId(UUID id, UUID tenantId);

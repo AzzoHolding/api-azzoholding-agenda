@@ -21,9 +21,14 @@ import br.com.phdigitalcode.azzo.agenda.pro.entity.LgpdDataSubjectRequest;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditEventCommand;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditService;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.AppointmentCustomerNoteRepository;
+import br.com.phdigitalcode.azzo.agenda.pro.repository.ChatConversationRepository;
+import br.com.phdigitalcode.azzo.agenda.pro.repository.ChatMessageRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.ClienteRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.LgpdDataSubjectRequestEventRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.LgpdDataSubjectRequestRepository;
+import br.com.phdigitalcode.azzo.agenda.pro.repository.NotificationRepository;
+import br.com.phdigitalcode.azzo.agenda.pro.repository.WhatsAppBookingReactivationCycleRepository;
+import br.com.phdigitalcode.azzo.agenda.pro.repository.WhatsAppMessageLogRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.security.AuthenticatedUser;
 import br.com.phdigitalcode.azzo.agenda.pro.security.ContextoTenant;
 
@@ -40,6 +45,11 @@ class ServicoAnonimizacaoTitularTest {
   private AppointmentCustomerNoteRepository noteRepository;
   private LgpdDataSubjectRequestRepository requestRepository;
   private LgpdDataSubjectRequestEventRepository eventRepository;
+  private ChatConversationRepository conversationRepository;
+  private ChatMessageRepository chatMessageRepository;
+  private NotificationRepository notificationRepository;
+  private WhatsAppMessageLogRepository whatsAppMessageLogRepository;
+  private WhatsAppBookingReactivationCycleRepository reactivationCycleRepository;
   private AuditService auditService;
   private ServicoAnonimizacaoTitular service;
 
@@ -51,9 +61,16 @@ class ServicoAnonimizacaoTitularTest {
     noteRepository = mock(AppointmentCustomerNoteRepository.class);
     requestRepository = mock(LgpdDataSubjectRequestRepository.class);
     eventRepository = mock(LgpdDataSubjectRequestEventRepository.class);
+    conversationRepository = mock(ChatConversationRepository.class);
+    chatMessageRepository = mock(ChatMessageRepository.class);
+    notificationRepository = mock(NotificationRepository.class);
+    whatsAppMessageLogRepository = mock(WhatsAppMessageLogRepository.class);
+    reactivationCycleRepository = mock(WhatsAppBookingReactivationCycleRepository.class);
     auditService = mock(AuditService.class);
     service = new ServicoAnonimizacaoTitular(
-        contextoTenant, authenticatedUser, clienteRepository, noteRepository, requestRepository, eventRepository, auditService);
+        contextoTenant, authenticatedUser, clienteRepository, noteRepository, requestRepository,
+        eventRepository, conversationRepository, chatMessageRepository, notificationRepository,
+        whatsAppMessageLogRepository, reactivationCycleRepository, auditService);
 
     when(contextoTenant.obterTenantIdOuFalhar()).thenReturn(tenantId);
     when(authenticatedUser.idOuNulo()).thenReturn(userId);
@@ -150,5 +167,26 @@ class ServicoAnonimizacaoTitularTest {
     ServicoAnonimizacaoTitular.AnonimizacaoResponse response = service.anonimizar(clientId);
 
     assertThat(response).isNotNull();
+  }
+
+  /**
+   * O dado pessoal do titular nao mora so na ficha dele.
+   *
+   * Ate 2026-09-20 a anonimizacao parava no cliente e nas notas: o telefone continuava no chat,
+   * nas notificacoes, no log do WhatsApp e na fila de reativacao — pedido de exclusao atendido
+   * pela metade.
+   */
+  @Test
+  void anonimizarAlcancaChatNotificacoesEReativacao() {
+    Cliente cliente = buildCliente();
+    when(clienteRepository.findByIdAndTenantId(clientId, tenantId)).thenReturn(Optional.of(cliente));
+
+    service.anonimizar(clientId);
+
+    verify(conversationRepository).anonimizarPorClienteRaw(tenantId, clientId);
+    verify(chatMessageRepository).anonimizarPorClienteRaw(tenantId, clientId);
+    verify(notificationRepository).anonimizarPorClienteRaw(tenantId, clientId);
+    verify(whatsAppMessageLogRepository).anonimizarPorClienteRaw(tenantId, clientId);
+    verify(reactivationCycleRepository).anonimizarPorClienteRaw(tenantId, clientId);
   }
 }

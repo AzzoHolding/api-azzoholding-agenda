@@ -22,9 +22,14 @@ import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditConstants;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditEventCommand;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditService;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.AppointmentCustomerNoteRepository;
+import br.com.phdigitalcode.azzo.agenda.pro.repository.ChatConversationRepository;
+import br.com.phdigitalcode.azzo.agenda.pro.repository.ChatMessageRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.ClienteRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.LgpdDataSubjectRequestEventRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.LgpdDataSubjectRequestRepository;
+import br.com.phdigitalcode.azzo.agenda.pro.repository.NotificationRepository;
+import br.com.phdigitalcode.azzo.agenda.pro.repository.WhatsAppBookingReactivationCycleRepository;
+import br.com.phdigitalcode.azzo.agenda.pro.repository.WhatsAppMessageLogRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.security.AuthenticatedUser;
 import br.com.phdigitalcode.azzo.agenda.pro.security.ContextoTenant;
 
@@ -47,6 +52,11 @@ public class ServicoAnonimizacaoTitular {
   private final AppointmentCustomerNoteRepository noteRepository;
   private final LgpdDataSubjectRequestRepository requestRepository;
   private final LgpdDataSubjectRequestEventRepository eventRepository;
+  private final ChatConversationRepository conversationRepository;
+  private final ChatMessageRepository chatMessageRepository;
+  private final NotificationRepository notificationRepository;
+  private final WhatsAppMessageLogRepository whatsAppMessageLogRepository;
+  private final WhatsAppBookingReactivationCycleRepository reactivationCycleRepository;
   private final AuditService auditService;
 
   public ServicoAnonimizacaoTitular(
@@ -56,6 +66,11 @@ public class ServicoAnonimizacaoTitular {
       AppointmentCustomerNoteRepository noteRepository,
       LgpdDataSubjectRequestRepository requestRepository,
       LgpdDataSubjectRequestEventRepository eventRepository,
+      ChatConversationRepository conversationRepository,
+      ChatMessageRepository chatMessageRepository,
+      NotificationRepository notificationRepository,
+      WhatsAppMessageLogRepository whatsAppMessageLogRepository,
+      WhatsAppBookingReactivationCycleRepository reactivationCycleRepository,
       AuditService auditService) {
     this.contextoTenant = contextoTenant;
     this.authenticatedUser = authenticatedUser;
@@ -63,6 +78,11 @@ public class ServicoAnonimizacaoTitular {
     this.noteRepository = noteRepository;
     this.requestRepository = requestRepository;
     this.eventRepository = eventRepository;
+    this.conversationRepository = conversationRepository;
+    this.chatMessageRepository = chatMessageRepository;
+    this.notificationRepository = notificationRepository;
+    this.whatsAppMessageLogRepository = whatsAppMessageLogRepository;
+    this.reactivationCycleRepository = reactivationCycleRepository;
     this.auditService = auditService;
   }
 
@@ -108,6 +128,16 @@ public class ServicoAnonimizacaoTitular {
       note.setInternalFollowupNotes(null);
     }
 
+    // O dado pessoal do titular NAO mora so na ficha dele. Ate 2026-09-20 a anonimizacao parava no
+    // cliente e nas notas de atendimento, e o telefone continuava no chat, nas notificacoes e na
+    // fila de reativacao — um pedido de exclusao atendido pela metade. O que fica de proposito e o
+    // que a lei manda guardar: a nota fiscal emitida (`nfse_invoices`) e a trilha de auditoria.
+    int conversas = conversationRepository.anonimizarPorClienteRaw(tenantId, clientId);
+    int mensagens = chatMessageRepository.anonimizarPorClienteRaw(tenantId, clientId);
+    int notificacoes = notificationRepository.anonimizarPorClienteRaw(tenantId, clientId);
+    int mensagensWhatsapp = whatsAppMessageLogRepository.anonimizarPorClienteRaw(tenantId, clientId);
+    int reativacoes = reactivationCycleRepository.anonimizarPorClienteRaw(tenantId, clientId);
+
     // Registra solicitação LGPD do tipo EXCLUSAO já encerrada (art. 18, VI)
     LgpdDataSubjectRequest lgpdRequest = new LgpdDataSubjectRequest();
     lgpdRequest.setTenantId(tenantId);
@@ -130,15 +160,24 @@ public class ServicoAnonimizacaoTitular {
     event.setEventType("ANONYMIZATION_EXECUTED");
     event.setPreviousStatus("ABERTO");
     event.setNewStatus("ENCERRADO");
-    event.setEventNote("Anonimizacao automatica via operador. " + notes.size() + " nota(s) de atendimento anonimizadas.");
+    event.setEventNote(
+        "Anonimizacao automatica via operador. "
+            + notes.size() + " nota(s) de atendimento, "
+            + conversas + " conversa(s), "
+            + mensagens + " mensagem(ns) de chat, "
+            + notificacoes + " notificacao(oes), "
+            + mensagensWhatsapp + " mensagem(ns) de WhatsApp e "
+            + reativacoes + " ciclo(s) de reativacao anonimizados.");
     event.setActorUserId(obterActorId());
     eventRepository.save(event);
 
     auditar(tenantId, clientId, lgpdRequest.getId(), notes.size());
 
     LOG.info(
-        "lgpd_anonymization_completed clientId={} tenantId={} protocol={} notesAnonymized={}",
-        clientId, tenantId, lgpdRequest.getProtocolCode(), notes.size());
+        "lgpd_anonymization_completed clientId={} tenantId={} protocol={} notesAnonymized={} "
+            + "conversations={} chatMessages={} notifications={} whatsappLogs={} reactivations={}",
+        clientId, tenantId, lgpdRequest.getProtocolCode(), notes.size(),
+        conversas, mensagens, notificacoes, mensagensWhatsapp, reativacoes);
 
     return new AnonimizacaoResponse(
         clientId.toString(),
