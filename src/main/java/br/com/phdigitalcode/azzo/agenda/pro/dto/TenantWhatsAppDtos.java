@@ -55,6 +55,30 @@ public final class TenantWhatsAppDtos {
     public String confirmationMessageTemplate;
     public String cancellationMessageTemplate;
     public String reminderMessageTemplate;
+    /**
+     * O numero foi registrado no Cloud API? <b>Sem isso ele nao envia mensagem.</b>
+     *
+     * Numero pode estar verificado, com o nome certo, e ainda assim mudo — e por isso a tela
+     * precisa dizer isto separado de "conectado".
+     */
+    public boolean numeroRegistrado;
+    /**
+     * O PIN de verificacao em duas etapas do numero, em claro.
+     *
+     * O Azzo define o PIN de um numero novo, e o dono precisa dele para levar o numero para outro
+     * provedor: esconder seria prender o cliente ao Azzo por falta de informacao. So OWNER chega
+     * aqui — o controller inteiro e `hasRole('OWNER')`.
+     */
+    public String registrationPin;
+  }
+
+  public static class RegistroDoNumeroResponse {
+    public boolean success;
+    public String message;
+    /** O PIN usado, para o dono guardar: sem ele o numero nao migra de provedor. */
+    public String registrationPin;
+    /** O webhook da conta comercial tambem foi inscrito? Sem isso o salao envia mas nao recebe. */
+    public boolean webhookInscrito;
   }
 
   public static class MessageLogItem {

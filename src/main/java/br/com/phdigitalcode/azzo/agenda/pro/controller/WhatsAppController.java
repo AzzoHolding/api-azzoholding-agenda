@@ -52,6 +52,18 @@ public class WhatsAppController {
     return servicoTenantWhatsapp.validarConfiguracao(request);
   }
 
+  /**
+   * Registra o numero no Cloud API para uma conexao que JA existe.
+   *
+   * <p>O Embedded Signup passou a registrar na conexao nova, mas quem ja estava conectado antes
+   * ficou com um numero que nao envia — e reconectar pelo popup so para disparar o registro seria
+   * absurdo. Este e o caminho para esses casos, e para quando o registro falhou na primeira vez.
+   */
+  @PostMapping("/register-number")
+  public TenantWhatsAppDtos.RegistroDoNumeroResponse registrarNumero() {
+    return servicoTenantWhatsapp.registrarNumero();
+  }
+
   @PostMapping("/test-message")
   public TenantWhatsAppDtos.TestMessageResponse enviarMensagemTeste(
       @Valid @RequestBody TenantWhatsAppDtos.TestMessageRequest request) {

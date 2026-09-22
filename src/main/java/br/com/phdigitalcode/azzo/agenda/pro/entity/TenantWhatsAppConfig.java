@@ -63,6 +63,20 @@ public class TenantWhatsAppConfig {
   @Column(name = "embedded_signup_completed_at")
   private Instant embeddedSignupCompletedAt;
 
+  /**
+   * PIN de 6 digitos usado no registro do numero no Cloud API, criptografado.
+   *
+   * <p>No modelo de provedor, quem define o PIN de um numero novo e o Azzo — e guardar e
+   * obrigatorio: sem ele o numero nao pode ser re-registrado nem migrado para outro provedor. O
+   * dono le o valor na tela, como ja acontece com o verify token do webhook.
+   */
+  @Column(name = "whatsapp_registration_pin_enc")
+  private String whatsappRegistrationPinEnc;
+
+  /** Quando o numero foi registrado no Cloud API. Nulo significa que ele NAO envia mensagem. */
+  @Column(name = "whatsapp_registered_at")
+  private Instant whatsappRegisteredAt;
+
   @Column(name = "embedded_signup_last_error", length = 500)
   private String embeddedSignupLastError;
 
