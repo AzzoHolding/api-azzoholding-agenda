@@ -15,6 +15,7 @@ import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.data.domain.Pageable;
 
 import br.com.phdigitalcode.azzo.agenda.pro.dto.TenantWhatsAppDtos;
@@ -186,6 +187,70 @@ class ServicoTenantWhatsappTest {
     assertThat(response.success).isFalse();
     assertThat(response.message).contains("registrado no WhatsApp Cloud API");
     assertThat(response.message).doesNotContain("Revise as credenciais");
+    // O codigo da Meta e o que se pesquisa e o que se manda para o suporte dela.
+    assertThat(response.message).contains("133010");
+  }
+
+  /**
+   * A secao "Mensagens enviadas" da tela existia sem nunca receber dado: NADA no backend escrevia
+   * em {@code whatsapp_message_log}. O erro vivia so num aviso que desaparece.
+   */
+  @Test
+  void falhaNoEnvioDeTesteFicaRegistradaNoLogComOErroCruDaMeta() {
+    when(repository.findByTenantIdOrCreate(tenantId)).thenReturn(configVazia());
+    when(whatsAppClient.sendMessage(any(TenantWhatsAppConfig.class), anyString(), anyString()))
+        .thenThrow(new IllegalStateException("(#133010) Account not registered"));
+
+    TenantWhatsAppDtos.TestMessageRequest request = new TenantWhatsAppDtos.TestMessageRequest();
+    request.destinationPhone = "+5511999998888";
+
+    serviceEmbeddedHabilitado.enviarMensagemTeste(request);
+
+    ArgumentCaptor<WhatsAppMessageLogEntity> captor =
+        ArgumentCaptor.forClass(WhatsAppMessageLogEntity.class);
+    verify(messageLogRepository).save(captor.capture());
+    WhatsAppMessageLogEntity gravada = captor.getValue();
+    assertThat(gravada.getStatus()).isEqualTo("FAILED");
+    assertThat(gravada.getEventType()).isEqualTo("TEST_MESSAGE");
+    assertThat(gravada.getErrorMessage()).isEqualTo("(#133010) Account not registered");
+  }
+
+  @Test
+  void envioDeTesteBemSucedidoFicaRegistradoComoEntregue() {
+    when(repository.findByTenantIdOrCreate(tenantId)).thenReturn(configVazia());
+    when(whatsAppClient.sendMessage(any(TenantWhatsAppConfig.class), anyString(), anyString()))
+        .thenReturn("wamid.999");
+
+    TenantWhatsAppDtos.TestMessageRequest request = new TenantWhatsAppDtos.TestMessageRequest();
+    request.destinationPhone = "+5511999998888";
+
+    serviceEmbeddedHabilitado.enviarMensagemTeste(request);
+
+    ArgumentCaptor<WhatsAppMessageLogEntity> captor =
+        ArgumentCaptor.forClass(WhatsAppMessageLogEntity.class);
+    verify(messageLogRepository).save(captor.capture());
+    assertThat(captor.getValue().getStatus()).isEqualTo("SENT");
+    assertThat(captor.getValue().getProviderMessageId()).isEqualTo("wamid.999");
+    assertThat(captor.getValue().getErrorMessage()).isNull();
+  }
+
+  /** Registrar e consequencia: se o insert falhar, o envio continua valendo. */
+  @Test
+  void falhaAoGravarNoLogNaoDerrubaOEnvio() {
+    when(repository.findByTenantIdOrCreate(tenantId)).thenReturn(configVazia());
+    when(whatsAppClient.sendMessage(any(TenantWhatsAppConfig.class), anyString(), anyString()))
+        .thenReturn("wamid.777");
+    when(messageLogRepository.save(any(WhatsAppMessageLogEntity.class)))
+        .thenThrow(new RuntimeException("banco fora"));
+
+    TenantWhatsAppDtos.TestMessageRequest request = new TenantWhatsAppDtos.TestMessageRequest();
+    request.destinationPhone = "+5511999998888";
+
+    TenantWhatsAppDtos.TestMessageResponse response =
+        serviceEmbeddedHabilitado.enviarMensagemTeste(request);
+
+    assertThat(response.success).isTrue();
+    assertThat(response.providerMessageId).isEqualTo("wamid.777");
   }
 
   /** Erro que ninguem previu se explica na TELA: sem isso, so o log do servidor sabe o motivo. */

@@ -179,19 +179,24 @@ public class ServicoTenantWhatsapp {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     TenantWhatsAppConfig config = tenantWhatsAppConfigRepository.findByTenantIdOrCreate(tenantId);
     TenantWhatsAppDtos.TestMessageResponse response = new TenantWhatsAppDtos.TestMessageResponse();
+    String destino = trimToNull(request.destinationPhone);
+    String texto = firstNonBlank(trimToNull(request.message), "Mensagem de teste do AZZO Agenda Pro.");
     try {
-      String providerMessageId = whatsAppClient.sendMessage(
-          config,
-          trimToNull(request.destinationPhone),
-          firstNonBlank(trimToNull(request.message), "Mensagem de teste do AZZO Agenda Pro."));
+      String providerMessageId = whatsAppClient.sendMessage(config, destino, texto);
       response.success = true;
       response.providerMessageId = providerMessageId;
       response.message = "Mensagem de teste enviada com sucesso.";
-      registrarAuditoria(tenantId, "WHATSAPP_TEST_MESSAGE", tenantId.toString(), null, java.util.Map.of("success", true, "destination", trimToNull(request.destinationPhone) != null ? trimToNull(request.destinationPhone) : ""), true);
+      registrarNoLog(tenantId, destino, texto, providerMessageId, null);
+      registrarAuditoria(tenantId, "WHATSAPP_TEST_MESSAGE", tenantId.toString(), null, java.util.Map.of("success", true, "destination", destino != null ? destino : ""), true);
       return response;
     } catch (IllegalArgumentException | IllegalStateException ex) {
       response.success = false;
       response.message = mapTestConnectionError(ex);
+      // O erro CRU da Meta vai para o log da tela, e nao a versao traduzida: e o que permite
+      // pesquisar o codigo depois, quando o aviso da tela ja sumiu.
+      registrarNoLog(
+          tenantId, destino, texto, null,
+          ex.getMessage() == null || ex.getMessage().isBlank() ? response.message : ex.getMessage().trim());
       registrarAuditoria(tenantId, "WHATSAPP_TEST_MESSAGE", tenantId.toString(), null, java.util.Map.of("success", false, "error", response.message), false);
       return response;
     }
@@ -227,14 +232,54 @@ public class ServicoTenantWhatsapp {
     // 133010: o numero existe e esta verificado (ler os dados dele funciona), mas falta o registro
     // no Cloud API — um passo unico, feito no painel da Meta, que o Azzo nao executa.
     if (message.contains("133010") || message.contains("account not registered")) {
-      return "O numero ainda nao foi registrado no WhatsApp Cloud API. O token e o Phone Number ID"
-          + " estao corretos; falta concluir o registro do numero no painel da Meta (Cloud API >"
-          + " registrar numero, com o PIN de verificacao em duas etapas) antes de enviar mensagens.";
+      // O texto da Meta vai junto mesmo no caso reconhecido: e o que se pesquisa e o que se manda
+      // para o suporte dela. Explicar sem mostrar o original obriga a abrir o log do servidor.
+      return comDetalheDaMeta(
+          "O numero ainda nao foi registrado no WhatsApp Cloud API. O token e o Phone Number ID"
+              + " estao corretos; falta concluir o registro do numero no painel da Meta (Cloud API >"
+              + " registrar numero, com o PIN de verificacao em duas etapas) antes de enviar"
+              + " mensagens.",
+          original);
     }
     if (original.isBlank()) {
       return "Falha ao validar a conexao com o WhatsApp. Revise as credenciais configuradas e tente novamente.";
     }
     return "Falha ao enviar pelo WhatsApp. A Meta respondeu: " + original;
+  }
+
+  /** A explicacao em portugues, com o que a Meta respondeu entre parenteses. */
+  private String comDetalheDaMeta(String explicacao, String original) {
+    if (original == null || original.isBlank()) return explicacao;
+    return explicacao + " (a Meta respondeu: " + original + ")";
+  }
+
+  /**
+   * Grava o envio de teste em "Mensagens enviadas".
+   *
+   * <p><b>A tabela {@code whatsapp_message_log} so era LIDA.</b> A tela tem a secao de mensagens
+   * enviadas, com o motivo da falha em vermelho, e nada no backend escrevia ali — ficava
+   * permanentemente vazia (lacuna do porte do Quarkus, achada em 2026-09-22). O resultado: o unico
+   * lugar onde o erro aparecia era um aviso que desaparece da tela, e depois so o log do servidor.
+   *
+   * <p>Falhar aqui nao pode derrubar o envio: o registro e consequencia, e nao o objetivo.
+   */
+  private void registrarNoLog(
+      UUID tenantId, String destino, String texto, String providerMessageId, String erro) {
+    try {
+      WhatsAppMessageLogEntity entrada = new WhatsAppMessageLogEntity();
+      entrada.setTenantId(tenantId);
+      entrada.setEventType("TEST_MESSAGE");
+      entrada.setDestinationPhone(destino == null || destino.isBlank() ? "-" : destino);
+      entrada.setMessageText(texto);
+      entrada.setProviderMessageId(providerMessageId);
+      entrada.setStatus(erro == null ? "SENT" : "FAILED");
+      entrada.setErrorMessage(erro);
+      messageLogRepository.save(entrada);
+    } catch (Exception falhaAoRegistrar) {
+      LOG.warn(
+          "whatsapp.testMessage.logFailed tenantId={} reason={}",
+          tenantId, falhaAoRegistrar.getMessage());
+    }
   }
 
   @Transactional
