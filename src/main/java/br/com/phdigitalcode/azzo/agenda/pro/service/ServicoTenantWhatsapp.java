@@ -114,6 +114,12 @@ public class ServicoTenantWhatsapp {
     if (request.confirmationMessageTemplate != null) config.setConfirmationMessageTemplate(trimToNull(request.confirmationMessageTemplate));
     if (request.cancellationMessageTemplate != null) config.setCancellationMessageTemplate(trimToNull(request.cancellationMessageTemplate));
     if (request.reminderMessageTemplate != null) config.setReminderMessageTemplate(trimToNull(request.reminderMessageTemplate));
+
+    // Salvar a credencial nao faz o numero enviar: falta registrar no Cloud API. Fazer isso aqui
+    // e o que torna o passo invisivel para o cliente — ele salva a configuracao e pronto. Falhar
+    // nao derruba o salvamento; o aviso e o botao na tela cobrem o resto.
+    registrarSeNecessario(config);
+
     tenantWhatsAppConfigRepository.save(config);
     TenantWhatsAppDtos.ConfigResponse result = toConfigResponse(config);
     registrarAuditoria(tenantId, "WHATSAPP_CONFIG_UPDATE", tenantId.toString(), null, result, true);
@@ -175,6 +181,49 @@ public class ServicoTenantWhatsapp {
   }
 
   /**
+   * Registra o numero e inscreve o webhook, se ainda nao foi feito. <b>Nunca lanca.</b>
+   *
+   * <p>É o passo que faz o numero SAIR DO MUDO, e ele roda sozinho em todo caminho que configura
+   * credencial — o cliente nao deve precisar saber que "registrar no Cloud API" existe. Mas
+   * tambem nao pode derrubar o salvamento: credencial valida guardada vale mais do que nada, e o
+   * botao "Registrar numero" na tela existe exatamente para os casos em que isto falhou.
+   *
+   * <p>O motivo da falha fica em {@code embeddedSignupLastError} para a tela poder mostrar, e
+   * {@code whatsappRegisteredAt} continua nulo — que e o que mantem o aviso e o botao visiveis.
+   *
+   * @return {@code true} se o numero esta registrado ao fim (inclusive se ja estava).
+   */
+  private boolean registrarSeNecessario(TenantWhatsAppConfig config) {
+    if (config.getWhatsappRegisteredAt() != null) return true;
+    if (!hasAccessTokenConfigured(config)
+        || config.getWhatsappPhoneNumberId() == null
+        || config.getWhatsappPhoneNumberId().isBlank()) {
+      return false;
+    }
+    try {
+      whatsAppClient.registrarNumero(config, ensureRegistrationPin(config));
+      config.setWhatsappRegisteredAt(Instant.now());
+      config.setEmbeddedSignupLastError(null);
+    } catch (RuntimeException erro) {
+      config.setEmbeddedSignupLastError(sanitizeEmbeddedError(erro.getMessage()));
+      LOG.warn(
+          "whatsapp.autoRegister.failed tenantId={} reason={}",
+          config.getTenantId(), sanitizeEmbeddedError(erro.getMessage()));
+      return false;
+    }
+    // Inscrever o webhook e o que faz o salao RECEBER. Falhar aqui nao desfaz o registro: ficar
+    // mudo e pior que nao receber, e o aviso da tela cobre o que ficou pela metade.
+    try {
+      whatsAppClient.inscreverNoWebhook(config);
+    } catch (RuntimeException erro) {
+      LOG.warn(
+          "whatsapp.autoSubscribe.failed tenantId={} reason={}",
+          config.getTenantId(), sanitizeEmbeddedError(erro.getMessage()));
+    }
+    return true;
+  }
+
+  /**
    * Registra o numero no Cloud API, para uma conexao que ja existe.
    *
    * <p>Faz os dois passos que faltavam no onboarding antigo: o registro, sem o qual o numero nao
@@ -193,6 +242,10 @@ public class ServicoTenantWhatsapp {
       String pin = ensureRegistrationPin(config);
       whatsAppClient.registrarNumero(config, pin);
       config.setWhatsappRegisteredAt(Instant.now());
+      config.setEmbeddedSignupLastError(null);
+      // Quem aperta este botao esta destravando uma conexao que ja queria funcionar: deixar
+      // desligado obrigaria a um segundo passo sem motivo. O interruptor continua na tela.
+      config.setWhatsappEnabled(true);
       response.success = true;
       response.registrationPin = pin;
       response.message = "Numero registrado no WhatsApp Cloud API. Guarde o PIN: sem ele o numero nao migra de provedor.";
@@ -377,18 +430,15 @@ public class ServicoTenantWhatsapp {
       //
       // Registrar e inscrever o webhook sao acoes do PROVEDOR: feitas com o token da integracao,
       // sem o cliente fazer nada.
-      String pin = ensureRegistrationPin(config);
-      whatsAppClient.registrarNumero(config, pin);
-      config.setWhatsappRegisteredAt(Instant.now());
+      boolean registrado = registrarSeNecessario(config);
 
-      // Sem a inscricao o salao envia mas nao RECEBE: nada do que o cliente responder chega aqui.
-      whatsAppClient.inscreverNoWebhook(config);
-
-      // So agora: conectado e o numero que REGISTRA e recebe, e nao o que responde a uma leitura.
+      // A credencial e boa: a conexao esta feita, e obrigar a refazer o popup por causa do
+      // registro seria perder o que deu certo. Mas LIGAR um numero que nao envia era o bug de
+      // origem — entao liga apenas se ele registrou. Nao registrou: conectado, desligado, com o
+      // aviso e o botao na tela.
       config.setWhatsappOnboardingStatus(ONBOARDING_CONNECTED);
       config.setEmbeddedSignupCompletedAt(Instant.now());
-      config.setEmbeddedSignupLastError(null);
-      config.setWhatsappEnabled(true);
+      config.setWhatsappEnabled(registrado);
       tenantWhatsAppConfigRepository.save(config);
       TenantWhatsAppDtos.EmbeddedSignupStatusResponse signupResult = toEmbeddedSignupStatus(config);
       registrarAuditoria(tenantId, "WHATSAPP_EMBEDDED_SIGNUP_COMPLETE", tenantId.toString(), null, java.util.Map.of("status", ONBOARDING_CONNECTED), true);
