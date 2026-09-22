@@ -25,6 +25,22 @@ public class FechamentoCaixaResponse {
   public BigDecimal totalDifference;
   public List<CommissionSummaryItem> commissionSummary = new ArrayList<>();
 
+  /**
+   * As comandas ainda abertas, para o caixa OPEN.
+   *
+   * <p>Vem na propria resposta do caixa para a tela poder avisar ANTES de alguem clicar em fechar:
+   * descobrir no erro ja e tarde quando a pessoa esta de saida.
+   */
+  public List<ComandaAbertaItem> comandasAbertas = new ArrayList<>();
+
+  public static class ComandaAbertaItem {
+    public String id;
+    public String clientId;
+    public BigDecimal total;
+    public String openedAt;
+    public int itens;
+  }
+
   public static class CommissionSummaryItem {
     public String professionalId;
     public String professionalName;

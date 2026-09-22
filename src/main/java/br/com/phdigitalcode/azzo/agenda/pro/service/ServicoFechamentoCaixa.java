@@ -5,6 +5,7 @@ import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -22,6 +23,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.request.AberturaCaixaRequest;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.request.FechamentoCaixaRequest;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.response.FechamentoCaixaResponse;
+import br.com.phdigitalcode.azzo.agenda.pro.entity.Comanda;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.FechamentoCaixa;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.MetodoPagamento;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.StatusFechamentoCaixa;
@@ -29,6 +31,8 @@ import br.com.phdigitalcode.azzo.agenda.pro.exception.ApiClientErrorException;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditConstants;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditEventCommand;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditService;
+import br.com.phdigitalcode.azzo.agenda.pro.repository.ComandaItemRepository;
+import br.com.phdigitalcode.azzo.agenda.pro.repository.ComandaRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.FechamentoCaixaRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.TransacaoQueryRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.TransacaoRepository;
@@ -49,12 +53,16 @@ import jakarta.persistence.PersistenceContext;
 public class ServicoFechamentoCaixa {
 
   private static final ZoneId ZONA_BR = ZoneId.of("America/Sao_Paulo");
+  /** Data em portugues no aviso: quem le "2026-09-12" precisa traduzir; "12/09/2026", nao. */
+  private static final DateTimeFormatter DIA_BR = DateTimeFormatter.ofPattern("dd/MM/yyyy");
   private static final TypeReference<LinkedHashMap<String, BigDecimal>> TOTALS_TYPE =
       new TypeReference<>() {};
 
   @PersistenceContext private EntityManager entityManager;
 
   private final FechamentoCaixaRepository fechamentoCaixaRepository;
+  private final ComandaRepository comandaRepository;
+  private final ComandaItemRepository comandaItemRepository;
   private final TransacaoRepository transacaoRepository;
   private final TransacaoQueryRepository transacaoQueryRepository;
   private final ContextoTenant contextoTenant;
@@ -64,6 +72,8 @@ public class ServicoFechamentoCaixa {
 
   public ServicoFechamentoCaixa(
       FechamentoCaixaRepository fechamentoCaixaRepository,
+      ComandaRepository comandaRepository,
+      ComandaItemRepository comandaItemRepository,
       TransacaoRepository transacaoRepository,
       TransacaoQueryRepository transacaoQueryRepository,
       ContextoTenant contextoTenant,
@@ -71,6 +81,8 @@ public class ServicoFechamentoCaixa {
       AuditService auditService,
       ObjectMapper objectMapper) {
     this.fechamentoCaixaRepository = fechamentoCaixaRepository;
+    this.comandaRepository = comandaRepository;
+    this.comandaItemRepository = comandaItemRepository;
     this.transacaoRepository = transacaoRepository;
     this.transacaoQueryRepository = transacaoQueryRepository;
     this.contextoTenant = contextoTenant;
@@ -163,6 +175,28 @@ public class ServicoFechamentoCaixa {
           "Explique a diferenca entre o esperado e o contado antes de fechar o caixa.");
     }
 
+    // Fechar o caixa TRAVA o dia: `TravaFinanceira.exigirDiaAberto` passa a recusar
+    // POS_COMANDA_CLOSE, e a comanda que ficou aberta so fecha AMANHA — com a venda caindo no dia
+    // errado e o dinheiro fora da contagem que acabou de ser assinada. Antes disso o fechamento
+    // nem olhava para elas (pedido do usuario em 2026-09-21: "alerta para que nao esquecam
+    // comandas abertas").
+    //
+    // Recusa, e nao bloqueio: deixar uma comanda para amanha e legitimo quando o cliente volta
+    // amanha. O que nao pode e acontecer por esquecimento, entao a pessoa confirma.
+    List<Comanda> abertas =
+        comandaRepository.findByTenantIdAndStatusOrderByOpenedAtAsc(tenantId, Comanda.STATUS_ABERTA);
+    if (!abertas.isEmpty() && !request.confirmarComandasAbertas) {
+      Map<String, Object> tentativa = new LinkedHashMap<>();
+      tentativa.put("businessDate", String.valueOf(fechamento.getBusinessDate()));
+      tentativa.put("comandasAbertas", abertas.size());
+      tentativa.put(
+          "comandasAbertasIds", abertas.stream().map(c -> String.valueOf(c.getId())).toList());
+      registrarTentativa(
+          tenantId, "FINANCE_CASH_CLOSING_CLOSE", fechamento.getId(), tentativa,
+          "Ha comanda aberta ao fechar o caixa.");
+      throw new IllegalArgumentException(mensagemDeComandasAbertas(abertas));
+    }
+
     Map<String, Object> before = buildAuditPayload(fechamento);
 
     fechamento.setStatus(StatusFechamentoCaixa.CLOSED);
@@ -212,6 +246,54 @@ public class ServicoFechamentoCaixa {
         .orElseThrow(() -> new ApiClientErrorException("Fechamento de caixa nao encontrado", 404));
   }
 
+  /**
+   * O aviso diz QUANTAS, QUANTO e desde QUANDO — e a consequencia.
+   *
+   * Sem o "so fecha amanha" a pessoa nao tem como saber o que perde ao confirmar: a trava do dia
+   * nao esta escrita em lugar nenhum da tela.
+   */
+  private String mensagemDeComandasAbertas(List<Comanda> abertas) {
+    BigDecimal soma =
+        abertas.stream()
+            .map(c -> c.getTotal() == null ? BigDecimal.ZERO : c.getTotal())
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
+    String quantas =
+        abertas.size() == 1 ? "1 comanda aberta" : abertas.size() + " comandas abertas";
+    LocalDate maisVelha =
+        abertas.get(0).getOpenedAt() == null
+            ? null
+            : abertas.get(0).getOpenedAt().atZone(ZONA_BR).toLocalDate();
+    String desde = maisVelha == null ? "" : ", a mais antiga de " + DIA_BR.format(maisVelha);
+    return "Ha "
+        + quantas
+        + desde
+        + ", somando "
+        + soma.setScale(2, RoundingMode.HALF_UP)
+        + ". Fechar o caixa trava o dia: elas so poderao ser fechadas amanha, e a venda vai cair no"
+        + " dia errado. Feche as comandas primeiro ou confirme que ficam para amanha.";
+  }
+
+  private List<FechamentoCaixaResponse.ComandaAbertaItem> listarComandasAbertas(UUID tenantId) {
+    return comandaRepository
+        .findByTenantIdAndStatusOrderByOpenedAtAsc(tenantId, Comanda.STATUS_ABERTA)
+        .stream()
+        .map(
+            comanda -> {
+              FechamentoCaixaResponse.ComandaAbertaItem item =
+                  new FechamentoCaixaResponse.ComandaAbertaItem();
+              item.id = comanda.getId() != null ? comanda.getId().toString() : null;
+              item.clientId = comanda.getClientId() != null ? comanda.getClientId().toString() : null;
+              item.total = comanda.getTotal();
+              item.openedAt = comanda.getOpenedAt() != null ? comanda.getOpenedAt().toString() : null;
+              item.itens =
+                  comanda.getId() == null
+                      ? 0
+                      : comandaItemRepository.findByComandaIdOrderByCreatedAt(comanda.getId()).size();
+              return item;
+            })
+        .toList();
+  }
+
   private FechamentoCaixaResponse toResponse(FechamentoCaixa fechamento) {
     FechamentoCaixaResponse response = new FechamentoCaixaResponse();
     response.id = fechamento.getId() != null ? fechamento.getId().toString() : null;
@@ -241,6 +323,10 @@ public class ServicoFechamentoCaixa {
     if (fechamento.getTenantId() != null && fechamento.getBusinessDate() != null) {
       response.commissionSummary =
           calcularCommissionSummary(fechamento.getTenantId(), fechamento.getBusinessDate());
+    }
+    // So no caixa aberto: no historico a lista de hoje nao diz nada sobre um dia ja fechado.
+    if (fechamento.getStatus() == StatusFechamentoCaixa.OPEN && fechamento.getTenantId() != null) {
+      response.comandasAbertas = listarComandasAbertas(fechamento.getTenantId());
     }
     return response;
   }

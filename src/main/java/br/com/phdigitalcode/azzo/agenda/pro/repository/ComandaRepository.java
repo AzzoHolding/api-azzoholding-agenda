@@ -38,6 +38,14 @@ public interface ComandaRepository extends JpaRepository<Comanda, UUID> {
       UUID tenantId, String status, Pageable pageable);
 
   /**
+   * As comandas ainda abertas, a mais VELHA primeiro.
+   *
+   * Existe para o fechamento de caixa: fechar o caixa trava o dia, e comanda aberta nesse momento
+   * so fecha amanha — a mais esquecida e a que precisa aparecer no topo do aviso.
+   */
+  List<Comanda> findByTenantIdAndStatusOrderByOpenedAtAsc(UUID tenantId, String status);
+
+  /**
    * As comandas que UM PROFISSIONAL pode ver: as que ele abriu, as que tem item dele e as do
    * agendamento dele. O resto do salao nao e assunto dele (achado do teste de ponta a ponta de
    * 2026-09-16 — um profissional lia e mexia na comanda de qualquer colega).
