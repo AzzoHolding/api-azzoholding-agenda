@@ -11,7 +11,9 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -26,11 +28,14 @@ import org.springframework.test.util.ReflectionTestUtils;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import br.com.phdigitalcode.azzo.agenda.pro.dto.request.FechamentoCaixaRequest;
+import br.com.phdigitalcode.azzo.agenda.pro.entity.Comanda;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.FechamentoCaixa;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.MetodoPagamento;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.StatusFechamentoCaixa;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditEventCommand;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditService;
+import br.com.phdigitalcode.azzo.agenda.pro.repository.ComandaItemRepository;
+import br.com.phdigitalcode.azzo.agenda.pro.repository.ComandaRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.FechamentoCaixaRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.TransacaoQueryRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.TransacaoRepository;
@@ -49,6 +54,7 @@ import jakarta.persistence.Query;
 class ServicoFechamentoCaixaTest {
 
   private FechamentoCaixaRepository fechamentoCaixaRepository;
+  private ComandaRepository comandaRepository;
   private TransacaoQueryRepository transacaoQueryRepository;
   private AuditService auditService;
   private ServicoFechamentoCaixa service;
@@ -59,6 +65,9 @@ class ServicoFechamentoCaixaTest {
   @BeforeEach
   void setUp() {
     fechamentoCaixaRepository = mock(FechamentoCaixaRepository.class);
+    comandaRepository = mock(ComandaRepository.class);
+    ComandaItemRepository comandaItemRepository = mock(ComandaItemRepository.class);
+    when(comandaItemRepository.findByComandaIdOrderByCreatedAt(any())).thenReturn(List.of());
     TransacaoRepository transacaoRepository = mock(TransacaoRepository.class);
     transacaoQueryRepository = mock(TransacaoQueryRepository.class);
     auditService = mock(AuditService.class);
@@ -71,6 +80,8 @@ class ServicoFechamentoCaixaTest {
     service =
         new ServicoFechamentoCaixa(
             fechamentoCaixaRepository,
+            comandaRepository,
+            comandaItemRepository,
             transacaoRepository,
             transacaoQueryRepository,
             contextoTenant,
@@ -153,5 +164,70 @@ class ServicoFechamentoCaixaTest {
 
     assertThat(caixa.getStatus()).isEqualTo(StatusFechamentoCaixa.CLOSED);
     assertThat(caixa.getClosingNotes()).isNull();
+  }
+
+  /**
+   * Fechar o caixa TRAVA o dia: a comanda que ficou aberta so fecha amanha, com a venda caindo no
+   * dia errado e o dinheiro fora da contagem que acabou de ser assinada. O fechamento nem olhava
+   * para elas (pedido do usuario em 2026-09-21).
+   */
+  private Comanda comandaAbertaDeTresDiasAtras() {
+    Comanda comanda = new Comanda();
+    comanda.setId(UUID.randomUUID());
+    comanda.setTenantId(tenantId);
+    comanda.setStatus(Comanda.STATUS_ABERTA);
+    comanda.setTotal(new BigDecimal("50.50"));
+    comanda.setOpenedAt(Instant.now().minus(3, ChronoUnit.DAYS));
+    return comanda;
+  }
+
+  @Test
+  @DisplayName("ha comanda aberta e ninguem confirmou: nao fecha, e diz qual e a consequencia")
+  void comandaAbertaSemConfirmacaoNaoFecha() {
+    FechamentoCaixa caixa = caixaAbertoEsperando100EmDinheiro();
+    when(comandaRepository.findByTenantIdAndStatusOrderByOpenedAtAsc(
+            tenantId, Comanda.STATUS_ABERTA))
+        .thenReturn(List.of(comandaAbertaDeTresDiasAtras()));
+
+    assertThatThrownBy(() -> service.fechar(caixaId, contagem("100.00", null)))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("1 comanda aberta")
+        .hasMessageContaining("50.50")
+        // Sem isso a pessoa nao tem como saber o que perde ao confirmar.
+        .hasMessageContaining("so poderao ser fechadas amanha");
+
+    assertThat(caixa.getStatus()).isEqualTo(StatusFechamentoCaixa.OPEN);
+    verify(auditService, never()).recordSuccess(any());
+    // A tentativa fica na trilha: e a prova de que o aviso apareceu.
+    verify(auditService).recordDeniedIsolated(any());
+  }
+
+  @Test
+  @DisplayName("comanda aberta confirmada: fecha, porque deixar para amanha e escolha legitima")
+  void comandaAbertaConfirmadaFecha() {
+    FechamentoCaixa caixa = caixaAbertoEsperando100EmDinheiro();
+    when(comandaRepository.findByTenantIdAndStatusOrderByOpenedAtAsc(
+            tenantId, Comanda.STATUS_ABERTA))
+        .thenReturn(List.of(comandaAbertaDeTresDiasAtras()));
+
+    FechamentoCaixaRequest request = contagem("100.00", null);
+    request.confirmarComandasAbertas = true;
+    service.fechar(caixaId, request);
+
+    assertThat(caixa.getStatus()).isEqualTo(StatusFechamentoCaixa.CLOSED);
+  }
+
+  /** Sem comanda aberta nada muda: a confirmacao nao passa a ser exigida de todo mundo. */
+  @Test
+  @DisplayName("sem comanda aberta, fecha sem pedir confirmacao nenhuma")
+  void semComandaAbertaFechaDireto() {
+    FechamentoCaixa caixa = caixaAbertoEsperando100EmDinheiro();
+    when(comandaRepository.findByTenantIdAndStatusOrderByOpenedAtAsc(
+            tenantId, Comanda.STATUS_ABERTA))
+        .thenReturn(List.of());
+
+    service.fechar(caixaId, contagem("100.00", null));
+
+    assertThat(caixa.getStatus()).isEqualTo(StatusFechamentoCaixa.CLOSED);
   }
 }
