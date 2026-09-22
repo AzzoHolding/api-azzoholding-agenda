@@ -441,4 +441,66 @@ class ServicoTenantWhatsappTest {
     assertThat(response.success).isFalse();
     assertThat(config.getWhatsappRegisteredAt()).isNull();
   }
+
+  /** Uma configuracao manual valida, com o numero que a Meta confirma. */
+  private TenantWhatsAppDtos.UpdateRequest configuracaoValida() {
+    WhatsAppClient.PhoneNumberDetails details = new WhatsAppClient.PhoneNumberDetails();
+    details.id = "1234567890";
+    details.displayPhoneNumber = "+55 11 99999-8888";
+    details.verifiedName = "Meu Salao";
+    when(whatsAppClient.fetchPhoneNumberDetails("token-abc", "1234567890")).thenReturn(details);
+
+    TenantWhatsAppDtos.UpdateRequest request = new TenantWhatsAppDtos.UpdateRequest();
+    request.accessToken = "token-abc";
+    request.phoneNumberId = "1234567890";
+    request.whatsappEnabled = true;
+    return request;
+  }
+
+  /**
+   * O cliente nao deve precisar saber que "registrar no Cloud API" existe: salvar a configuracao
+   * tem que deixar o numero pronto para enviar.
+   */
+  @Test
+  void salvarAConfiguracaoRegistraONumeroSozinho() {
+    TenantWhatsAppConfig config = configVazia();
+    when(repository.findByTenantIdOrCreate(tenantId)).thenReturn(config);
+    when(whatsAppClient.registrarNumero(any(TenantWhatsAppConfig.class), anyString())).thenReturn(true);
+    when(whatsAppClient.inscreverNoWebhook(any(TenantWhatsAppConfig.class))).thenReturn(true);
+
+    serviceEmbeddedHabilitado.atualizar(configuracaoValida());
+
+    verify(whatsAppClient).registrarNumero(any(TenantWhatsAppConfig.class), anyString());
+    verify(whatsAppClient).inscreverNoWebhook(any(TenantWhatsAppConfig.class));
+    assertThat(config.getWhatsappRegisteredAt()).isNotNull();
+  }
+
+  /** Credencial valida guardada vale mais que nada: o botao da tela cobre o registro depois. */
+  @Test
+  void registroQueFalhaNaoDerrubaOSalvamentoDaConfiguracao() {
+    TenantWhatsAppConfig config = configVazia();
+    when(repository.findByTenantIdOrCreate(tenantId)).thenReturn(config);
+    when(whatsAppClient.registrarNumero(any(TenantWhatsAppConfig.class), anyString()))
+        .thenThrow(new IllegalStateException("(#133010) Account not registered"));
+
+    TenantWhatsAppDtos.ConfigResponse response =
+        serviceEmbeddedHabilitado.atualizar(configuracaoValida());
+
+    assertThat(response.phoneNumberId).isNotBlank();
+    // Nulo e o que mantem o aviso e o botao visiveis na tela.
+    assertThat(config.getWhatsappRegisteredAt()).isNull();
+    assertThat(config.getEmbeddedSignupLastError()).contains("133010");
+  }
+
+  /** Registrar de novo a cada salvamento seria bater na Meta sem motivo. */
+  @Test
+  void configuracaoJaRegistradaNaoRegistraDeNovo() {
+    TenantWhatsAppConfig config = configVazia();
+    config.setWhatsappRegisteredAt(java.time.Instant.now());
+    when(repository.findByTenantIdOrCreate(tenantId)).thenReturn(config);
+
+    serviceEmbeddedHabilitado.atualizar(configuracaoValida());
+
+    verify(whatsAppClient, never()).registrarNumero(any(TenantWhatsAppConfig.class), anyString());
+  }
 }
