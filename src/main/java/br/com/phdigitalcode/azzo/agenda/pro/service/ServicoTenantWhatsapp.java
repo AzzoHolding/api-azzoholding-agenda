@@ -174,6 +174,52 @@ public class ServicoTenantWhatsapp {
     return response;
   }
 
+  /**
+   * Registra o numero no Cloud API, para uma conexao que ja existe.
+   *
+   * <p>Faz os dois passos que faltavam no onboarding antigo: o registro, sem o qual o numero nao
+   * envia, e a inscricao do webhook, sem a qual ele nao recebe. A inscricao NAO derruba o
+   * resultado: registrar ja destrava o envio, e falhar em receber e um problema menor que ficar
+   * mudo — mas o retorno diz qual dos dois aconteceu, em vez de esconder.
+   */
+  @Transactional
+  public TenantWhatsAppDtos.RegistroDoNumeroResponse registrarNumero() {
+    UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    TenantWhatsAppConfig config = tenantWhatsAppConfigRepository.findByTenantIdOrCreate(tenantId);
+    TenantWhatsAppDtos.RegistroDoNumeroResponse response =
+        new TenantWhatsAppDtos.RegistroDoNumeroResponse();
+
+    try {
+      String pin = ensureRegistrationPin(config);
+      whatsAppClient.registrarNumero(config, pin);
+      config.setWhatsappRegisteredAt(Instant.now());
+      response.success = true;
+      response.registrationPin = pin;
+      response.message = "Numero registrado no WhatsApp Cloud API. Guarde o PIN: sem ele o numero nao migra de provedor.";
+
+      try {
+        whatsAppClient.inscreverNoWebhook(config);
+        response.webhookInscrito = true;
+      } catch (RuntimeException erroDoWebhook) {
+        response.webhookInscrito = false;
+        response.message +=
+            " O envio esta liberado, mas a inscricao do webhook falhou — o salao ainda nao RECEBE"
+                + " mensagem. A Meta respondeu: " + sanitizeEmbeddedError(erroDoWebhook.getMessage());
+      }
+
+      tenantWhatsAppConfigRepository.save(config);
+      registrarAuditoria(tenantId, "WHATSAPP_NUMBER_REGISTER", tenantId.toString(), null,
+          java.util.Map.of("success", true, "webhookInscrito", response.webhookInscrito), true);
+      return response;
+    } catch (IllegalArgumentException | IllegalStateException ex) {
+      response.success = false;
+      response.message = mapTestConnectionError(ex);
+      registrarAuditoria(tenantId, "WHATSAPP_NUMBER_REGISTER", tenantId.toString(), null,
+          java.util.Map.of("success", false, "error", response.message), false);
+      return response;
+    }
+  }
+
   @Transactional
   public TenantWhatsAppDtos.TestMessageResponse enviarMensagemTeste(TenantWhatsAppDtos.TestMessageRequest request) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
@@ -321,13 +367,28 @@ public class ServicoTenantWhatsapp {
       config.setDisplayPhoneNumber(
           firstNonBlank(phoneDetails.displayPhoneNumber, request.setupInfo.phoneNumber, config.getDisplayPhoneNumber()));
       config.setWhatsappTokenSource(TOKEN_SOURCE_EMBEDDED);
+      ensureWebhookVerifyToken(config);
+
+      // O QUE FALTAVA. Guardar a credencial nao faz o numero enviar: enquanto ele nao for
+      // registrado no Cloud API, todo envio morre com "(#133010) Account not registered" — e a
+      // validacao antiga (`testConnection`, que por dentro e uma LEITURA) passava mesmo assim.
+      // Resultado: o onboarding dizia "conectado", ligava o WhatsApp e o salao so descobria quando
+      // um cliente reclamava de nao ter recebido a confirmacao.
+      //
+      // Registrar e inscrever o webhook sao acoes do PROVEDOR: feitas com o token da integracao,
+      // sem o cliente fazer nada.
+      String pin = ensureRegistrationPin(config);
+      whatsAppClient.registrarNumero(config, pin);
+      config.setWhatsappRegisteredAt(Instant.now());
+
+      // Sem a inscricao o salao envia mas nao RECEBE: nada do que o cliente responder chega aqui.
+      whatsAppClient.inscreverNoWebhook(config);
+
+      // So agora: conectado e o numero que REGISTRA e recebe, e nao o que responde a uma leitura.
       config.setWhatsappOnboardingStatus(ONBOARDING_CONNECTED);
       config.setEmbeddedSignupCompletedAt(Instant.now());
       config.setEmbeddedSignupLastError(null);
       config.setWhatsappEnabled(true);
-      ensureWebhookVerifyToken(config);
-
-      whatsAppClient.testConnection(config);
       tenantWhatsAppConfigRepository.save(config);
       TenantWhatsAppDtos.EmbeddedSignupStatusResponse signupResult = toEmbeddedSignupStatus(config);
       registrarAuditoria(tenantId, "WHATSAPP_EMBEDDED_SIGNUP_COMPLETE", tenantId.toString(), null, java.util.Map.of("status", ONBOARDING_CONNECTED), true);
@@ -385,6 +446,8 @@ public class ServicoTenantWhatsapp {
     response.businessId = config.getMetaBusinessId();
     response.displayPhoneNumber = config.getDisplayPhoneNumber();
     response.webhookVerifyToken = decryptWebhookVerifyToken(config);
+    response.numeroRegistrado = config.getWhatsappRegisteredAt() != null;
+    response.registrationPin = decryptRegistrationPin(config);
     response.accessTokenConfigured = hasAccessTokenConfigured(config);
     response.webhookVerifyTokenConfigured =
         config.getWhatsappWebhookVerifyTokenEnc() != null && !config.getWhatsappWebhookVerifyTokenEnc().isBlank();
@@ -488,6 +551,41 @@ public class ServicoTenantWhatsapp {
       return null;
     }
     return whatsAppClient.fetchPhoneNumberDetails(accessToken, phoneNumberId);
+  }
+
+  /**
+   * O PIN de 6 digitos do registro, criado uma vez e reaproveitado.
+   *
+   * <p>No modelo de provedor quem define o PIN de um numero novo e o Azzo — o dono do salao nao
+   * tem motivo para escolher um, e pedir seria atrito sem ganho. Mas guardar e obrigatorio: sem o
+   * PIN o numero nao pode ser re-registrado nem migrado para outro provedor depois, e isso e um
+   * direito do cliente sobre o numero dele. Fica criptografado e visivel ao dono na tela, igual ao
+   * verify token do webhook.
+   *
+   * <p>Reaproveitar em vez de sortear de novo e o que permite reconectar sem perder o acesso ao
+   * numero: um PIN novo nao substitui o antigo sem passar pelo antigo.
+   */
+  private String ensureRegistrationPin(TenantWhatsAppConfig config) {
+    String atual = decryptRegistrationPin(config);
+    if (atual != null) return atual;
+    String novo = String.format("%06d", new java.security.SecureRandom().nextInt(1_000_000));
+    config.setWhatsappRegistrationPinEnc(encryptionService.encrypt(novo));
+    return novo;
+  }
+
+  private String decryptRegistrationPin(TenantWhatsAppConfig config) {
+    if (config == null
+        || config.getWhatsappRegistrationPinEnc() == null
+        || config.getWhatsappRegistrationPinEnc().isBlank()) {
+      return null;
+    }
+    try {
+      return trimToNull(encryptionService.decrypt(config.getWhatsappRegistrationPinEnc()));
+    } catch (RuntimeException e) {
+      // Chave de criptografia trocada: melhor sortear um PIN novo do que travar o onboarding.
+      LOG.warn("whatsapp.registrationPin.decryptFailed tenantId={}", config.getTenantId());
+      return null;
+    }
   }
 
   private void ensureWebhookVerifyToken(TenantWhatsAppConfig config) {

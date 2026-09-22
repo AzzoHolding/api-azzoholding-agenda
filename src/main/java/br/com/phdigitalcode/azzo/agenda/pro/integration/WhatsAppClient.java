@@ -147,6 +147,135 @@ public class WhatsAppClient {
     }
   }
 
+  /**
+   * Registra o numero no Cloud API. <b>Sem isto o numero nao envia mensagem nenhuma.</b>
+   *
+   * <p>O numero pode estar verificado, aparecer com o nome certo e responder a toda consulta de
+   * leitura — e ainda assim recusar todo envio com {@code (#133010) Account not registered}. Foi o
+   * que aconteceu em producao com o numero do Azzo: o onboarding dizia "conectado" porque validava
+   * com uma LEITURA, e leitura funciona em numero mudo.
+   *
+   * <p><b>Idempotente de proposito.</b> Registrar duas vezes nao e erro, e a Meta responde de
+   * formas diferentes para "ja estava registrado" — tratar isso como falha faria o onboarding
+   * quebrar em toda reconexao de um numero que ja funcionava.
+   *
+   * @return {@code true} quando o numero ficou registrado, inclusive se ja estava.
+   */
+  public boolean registrarNumero(TenantWhatsAppConfig config, String pin) {
+    String token = getTenantTokenOrFail(config);
+    String phoneNumberId = getPhoneNumberIdOrFail(config);
+    if (pin == null || !pin.matches("[0-9]{6}")) {
+      throw new IllegalArgumentException("PIN do registro deve ter exatamente 6 digitos");
+    }
+
+    LOG.info(
+        "whatsappClient.register.started {}",
+        CorrelatedLogging.context("tenantId", config.getTenantId(), "phoneNumberId", phoneNumberId));
+
+    try {
+      restClient.post()
+          .uri(graphApiBase() + phoneNumberId + "/register")
+          .header("Authorization", "Bearer " + token)
+          .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+          .body(Map.of("messaging_product", "whatsapp", "pin", pin))
+          .retrieve()
+          .body(String.class);
+      LOG.info(
+          "whatsappClient.register.completed {}",
+          CorrelatedLogging.context("tenantId", config.getTenantId(), "phoneNumberId", phoneNumberId));
+      return true;
+    } catch (RestClientResponseException e) {
+      String corpo = e.getResponseBodyAsString();
+      if (jaRegistrado(corpo)) {
+        LOG.info(
+            "whatsappClient.register.alreadyDone {}",
+            CorrelatedLogging.context("tenantId", config.getTenantId(), "phoneNumberId", phoneNumberId));
+        return true;
+      }
+      String errorMessage = extractErrorMessage(corpo, "Falha ao registrar o numero no WhatsApp Cloud API");
+      LOG.error(
+          "whatsappClient.register.failed {}",
+          CorrelatedLogging.context(
+              "tenantId", config.getTenantId(),
+              "phoneNumberId", phoneNumberId,
+              "root", CorrelatedLogging.throwableSummary(e)),
+          e);
+      throw new IllegalStateException(errorMessage, e);
+    } catch (Exception e) {
+      LOG.error(
+          "whatsappClient.register.failed {}",
+          CorrelatedLogging.context(
+              "tenantId", config.getTenantId(),
+              "phoneNumberId", phoneNumberId,
+              "root", CorrelatedLogging.throwableSummary(e)),
+          e);
+      throw new IllegalStateException("Falha ao registrar o numero no WhatsApp Cloud API", e);
+    }
+  }
+
+  /**
+   * "Ja estava registrado" nao e falha.
+   *
+   * <p>A Meta sinaliza isso de mais de uma forma dependendo do estado do numero, e nenhuma delas
+   * significa que o onboarding deu errado.
+   */
+  private boolean jaRegistrado(String corpo) {
+    if (corpo == null) return false;
+    String texto = corpo.toLowerCase();
+    return texto.contains("already registered")
+        || texto.contains("already been registered")
+        || texto.contains("133005")
+        || texto.contains("133006");
+  }
+
+  /**
+   * Inscreve o app do Azzo no webhook da conta comercial do cliente.
+   *
+   * <p><b>Sem isto o salao envia mas nao RECEBE.</b> Nada do que o cliente responder chega ao
+   * Azzo — nem confirmacao, nem cancelamento, nem o agendamento pelo assistente. O verify token e
+   * gerado no onboarding; esta inscricao, que e o outro lado da mesma ponte, nunca era feita.
+   */
+  public boolean inscreverNoWebhook(TenantWhatsAppConfig config) {
+    String token = getTenantTokenOrFail(config);
+    String wabaId = config == null ? null : config.getWhatsappBusinessAccountId();
+    if (wabaId == null || wabaId.isBlank()) {
+      throw new IllegalArgumentException("Conta comercial do WhatsApp nao informada para o tenant");
+    }
+
+    LOG.info(
+        "whatsappClient.subscribeApp.started {}",
+        CorrelatedLogging.context("tenantId", config.getTenantId(), "wabaId", wabaId));
+
+    try {
+      restClient.post()
+          .uri(graphApiBase() + wabaId + "/subscribed_apps")
+          .header("Authorization", "Bearer " + token)
+          .retrieve()
+          .body(String.class);
+      LOG.info(
+          "whatsappClient.subscribeApp.completed {}",
+          CorrelatedLogging.context("tenantId", config.getTenantId(), "wabaId", wabaId));
+      return true;
+    } catch (RestClientResponseException e) {
+      String errorMessage =
+          extractErrorMessage(e.getResponseBodyAsString(), "Falha ao inscrever o webhook na conta do WhatsApp");
+      LOG.error(
+          "whatsappClient.subscribeApp.failed {}",
+          CorrelatedLogging.context(
+              "tenantId", config.getTenantId(),
+              "wabaId", wabaId,
+              "root", CorrelatedLogging.throwableSummary(e)),
+          e);
+      throw new IllegalStateException(errorMessage, e);
+    } catch (Exception e) {
+      LOG.error(
+          "whatsappClient.subscribeApp.failed {}",
+          CorrelatedLogging.context("tenantId", config.getTenantId(), "wabaId", wabaId),
+          e);
+      throw new IllegalStateException("Falha ao inscrever o webhook na conta do WhatsApp", e);
+    }
+  }
+
   public boolean testConnection(TenantWhatsAppConfig config) {
     fetchPhoneNumberDetails(config);
     return true;

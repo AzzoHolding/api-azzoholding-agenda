@@ -375,4 +375,70 @@ class ServicoTenantWhatsappTest {
     assertThat(response.hasMore).isTrue();
     assertThat(response.nextCursorSentAt).isNotNull();
   }
+
+  /**
+   * Registrar o numero e o que estava faltando: sem isso ele fica verificado e MUDO, recusando
+   * todo envio com "(#133010) Account not registered" — visto em producao no numero do Azzo, com
+   * as permissoes da Meta aprovadas desde julho.
+   */
+  @Test
+  void registrarNumeroDestravaOEnvioEInscreveOWebhook() {
+    TenantWhatsAppConfig config = configVazia();
+    when(repository.findByTenantIdOrCreate(tenantId)).thenReturn(config);
+    when(whatsAppClient.registrarNumero(any(TenantWhatsAppConfig.class), anyString())).thenReturn(true);
+    when(whatsAppClient.inscreverNoWebhook(any(TenantWhatsAppConfig.class))).thenReturn(true);
+
+    TenantWhatsAppDtos.RegistroDoNumeroResponse response = serviceEmbeddedHabilitado.registrarNumero();
+
+    assertThat(response.success).isTrue();
+    assertThat(response.webhookInscrito).isTrue();
+    assertThat(config.getWhatsappRegisteredAt()).isNotNull();
+    // O dono precisa do PIN para levar o numero para outro provedor; esconder seria prende-lo.
+    assertThat(response.registrationPin).hasSize(6).containsOnlyDigits();
+    verify(auditService).recordSuccess(any(AuditEventCommand.class));
+  }
+
+  /** Ficar mudo e pior que nao receber: registrar sozinho ja vale, mas o retorno precisa dizer. */
+  @Test
+  void webhookQueFalhaNaoAnulaORegistro() {
+    TenantWhatsAppConfig config = configVazia();
+    when(repository.findByTenantIdOrCreate(tenantId)).thenReturn(config);
+    when(whatsAppClient.registrarNumero(any(TenantWhatsAppConfig.class), anyString())).thenReturn(true);
+    when(whatsAppClient.inscreverNoWebhook(any(TenantWhatsAppConfig.class)))
+        .thenThrow(new IllegalStateException("(#131009) Parameter value is not valid"));
+
+    TenantWhatsAppDtos.RegistroDoNumeroResponse response = serviceEmbeddedHabilitado.registrarNumero();
+
+    assertThat(response.success).isTrue();
+    assertThat(response.webhookInscrito).isFalse();
+    assertThat(response.message).contains("ainda nao RECEBE");
+    assertThat(config.getWhatsappRegisteredAt()).isNotNull();
+  }
+
+  /** O PIN e sorteado uma vez e REAPROVEITADO: um PIN novo nao substitui o antigo sem ele. */
+  @Test
+  void oPinEReaproveitadoEntreRegistros() {
+    TenantWhatsAppConfig config = configVazia();
+    when(repository.findByTenantIdOrCreate(tenantId)).thenReturn(config);
+    when(whatsAppClient.registrarNumero(any(TenantWhatsAppConfig.class), anyString())).thenReturn(true);
+    when(whatsAppClient.inscreverNoWebhook(any(TenantWhatsAppConfig.class))).thenReturn(true);
+
+    String primeiro = serviceEmbeddedHabilitado.registrarNumero().registrationPin;
+    String segundo = serviceEmbeddedHabilitado.registrarNumero().registrationPin;
+
+    assertThat(segundo).isEqualTo(primeiro);
+  }
+
+  @Test
+  void registroRecusadoPelaMetaNaoMarcaONumeroComoRegistrado() {
+    TenantWhatsAppConfig config = configVazia();
+    when(repository.findByTenantIdOrCreate(tenantId)).thenReturn(config);
+    when(whatsAppClient.registrarNumero(any(TenantWhatsAppConfig.class), anyString()))
+        .thenThrow(new IllegalStateException("(#133010) Account not registered"));
+
+    TenantWhatsAppDtos.RegistroDoNumeroResponse response = serviceEmbeddedHabilitado.registrarNumero();
+
+    assertThat(response.success).isFalse();
+    assertThat(config.getWhatsappRegisteredAt()).isNull();
+  }
 }
