@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -69,10 +70,10 @@ class ServicoTenantWhatsappTest {
 
     serviceEmbeddedHabilitado = new ServicoTenantWhatsapp(
         contextoTenant, auditService, repository, encryptionService, webhookVerifyTokenHashService,
-        whatsAppClient, metaEmbeddedSignupClient, messageLogRepository, true);
+        whatsAppClient, metaEmbeddedSignupClient, messageLogRepository, true, "hello_world", "en_US");
     serviceEmbeddedDesabilitado = new ServicoTenantWhatsapp(
         contextoTenant, auditService, repository, encryptionService, webhookVerifyTokenHashService,
-        whatsAppClient, metaEmbeddedSignupClient, messageLogRepository, false);
+        whatsAppClient, metaEmbeddedSignupClient, messageLogRepository, false, "hello_world", "en_US");
   }
 
   private TenantWhatsAppConfig configVazia() {
@@ -175,7 +176,7 @@ class ServicoTenantWhatsappTest {
   @Test
   void numeroNaoRegistradoNoCloudApiNaoManda_revisar_credenciais() {
     when(repository.findByTenantIdOrCreate(tenantId)).thenReturn(configVazia());
-    when(whatsAppClient.sendMessage(any(TenantWhatsAppConfig.class), anyString(), anyString()))
+    when(whatsAppClient.enviarTemplate(any(TenantWhatsAppConfig.class), anyString(), anyString(), anyString()))
         .thenThrow(new IllegalStateException("(#133010) Account not registered"));
 
     TenantWhatsAppDtos.TestMessageRequest request = new TenantWhatsAppDtos.TestMessageRequest();
@@ -198,7 +199,7 @@ class ServicoTenantWhatsappTest {
   @Test
   void falhaNoEnvioDeTesteFicaRegistradaNoLogComOErroCruDaMeta() {
     when(repository.findByTenantIdOrCreate(tenantId)).thenReturn(configVazia());
-    when(whatsAppClient.sendMessage(any(TenantWhatsAppConfig.class), anyString(), anyString()))
+    when(whatsAppClient.enviarTemplate(any(TenantWhatsAppConfig.class), anyString(), anyString(), anyString()))
         .thenThrow(new IllegalStateException("(#133010) Account not registered"));
 
     TenantWhatsAppDtos.TestMessageRequest request = new TenantWhatsAppDtos.TestMessageRequest();
@@ -216,9 +217,9 @@ class ServicoTenantWhatsappTest {
   }
 
   @Test
-  void envioDeTesteBemSucedidoFicaRegistradoComoEntregue() {
+  void envioDeTesteBemSucedidoFicaRegistradoNoLog() {
     when(repository.findByTenantIdOrCreate(tenantId)).thenReturn(configVazia());
-    when(whatsAppClient.sendMessage(any(TenantWhatsAppConfig.class), anyString(), anyString()))
+    when(whatsAppClient.enviarTemplate(any(TenantWhatsAppConfig.class), anyString(), anyString(), anyString()))
         .thenReturn("wamid.999");
 
     TenantWhatsAppDtos.TestMessageRequest request = new TenantWhatsAppDtos.TestMessageRequest();
@@ -238,7 +239,7 @@ class ServicoTenantWhatsappTest {
   @Test
   void falhaAoGravarNoLogNaoDerrubaOEnvio() {
     when(repository.findByTenantIdOrCreate(tenantId)).thenReturn(configVazia());
-    when(whatsAppClient.sendMessage(any(TenantWhatsAppConfig.class), anyString(), anyString()))
+    when(whatsAppClient.enviarTemplate(any(TenantWhatsAppConfig.class), anyString(), anyString(), anyString()))
         .thenReturn("wamid.777");
     when(messageLogRepository.save(any(WhatsAppMessageLogEntity.class)))
         .thenThrow(new RuntimeException("banco fora"));
@@ -257,7 +258,7 @@ class ServicoTenantWhatsappTest {
   @Test
   void erroDesconhecidoDaMetaChegaNaTelaComOTextoDela() {
     when(repository.findByTenantIdOrCreate(tenantId)).thenReturn(configVazia());
-    when(whatsAppClient.sendMessage(any(TenantWhatsAppConfig.class), anyString(), anyString()))
+    when(whatsAppClient.enviarTemplate(any(TenantWhatsAppConfig.class), anyString(), anyString(), anyString()))
         .thenThrow(new IllegalStateException("(#131030) Recipient phone number not in allowed list"));
 
     TenantWhatsAppDtos.TestMessageRequest request = new TenantWhatsAppDtos.TestMessageRequest();
@@ -274,7 +275,7 @@ class ServicoTenantWhatsappTest {
   void enviarMensagemTesteComSucessoRegistraAuditoria() {
     TenantWhatsAppConfig config = configVazia();
     when(repository.findByTenantIdOrCreate(tenantId)).thenReturn(config);
-    when(whatsAppClient.sendMessage(any(TenantWhatsAppConfig.class), anyString(), anyString()))
+    when(whatsAppClient.enviarTemplate(any(TenantWhatsAppConfig.class), anyString(), anyString(), anyString()))
         .thenReturn("wamid.123");
 
     TenantWhatsAppDtos.TestMessageRequest request = new TenantWhatsAppDtos.TestMessageRequest();
@@ -502,5 +503,83 @@ class ServicoTenantWhatsappTest {
     serviceEmbeddedHabilitado.atualizar(configuracaoValida());
 
     verify(whatsAppClient, never()).registrarNumero(any(TenantWhatsAppConfig.class), anyString());
+  }
+
+  /**
+   * Texto livre so chega dentro de 24h da ultima mensagem do CLIENTE. O teste quase sempre e
+   * primeiro contato, e nesse caso a Meta aceita, devolve wamid e descarta — em 22/09/2026 foram
+   * tres envios com wamid valido, nenhum entregue, e a tela dizendo "Entregue".
+   */
+  @Test
+  void oTestePadraoMandaTemplate() {
+    when(repository.findByTenantIdOrCreate(tenantId)).thenReturn(configVazia());
+    when(whatsAppClient.enviarTemplate(any(TenantWhatsAppConfig.class), anyString(), anyString(), anyString()))
+        .thenReturn("wamid.tpl");
+
+    TenantWhatsAppDtos.TestMessageRequest request = new TenantWhatsAppDtos.TestMessageRequest();
+    request.destinationPhone = "+5511999998888";
+
+    TenantWhatsAppDtos.TestMessageResponse response =
+        serviceEmbeddedHabilitado.enviarMensagemTeste(request);
+
+    assertThat(response.success).isTrue();
+    verify(whatsAppClient)
+        .enviarTemplate(any(TenantWhatsAppConfig.class), anyString(), eq("hello_world"), eq("en_US"));
+    verify(whatsAppClient, never()).sendMessage(any(TenantWhatsAppConfig.class), anyString(), anyString());
+    // "Aceita", e nao "entregue": o wamid prova que a Meta aceitou, nao que alguem recebeu.
+    assertThat(response.message).contains("aceito pela Meta").doesNotContain("entregue");
+  }
+
+  /** Dentro da janela, texto livre funciona — e e o que o atendimento de verdade usa. */
+  @Test
+  void textoLivreContinuaDisponivelQuandoPedidoExplicitamente() {
+    when(repository.findByTenantIdOrCreate(tenantId)).thenReturn(configVazia());
+    when(whatsAppClient.sendMessage(any(TenantWhatsAppConfig.class), anyString(), anyString()))
+        .thenReturn("wamid.txt");
+
+    TenantWhatsAppDtos.TestMessageRequest request = new TenantWhatsAppDtos.TestMessageRequest();
+    request.destinationPhone = "+5511999998888";
+    request.message = "oi";
+
+    serviceEmbeddedHabilitado.enviarMensagemTeste(request);
+
+    verify(whatsAppClient).sendMessage(any(TenantWhatsAppConfig.class), anyString(), eq("oi"));
+    verify(whatsAppClient, never())
+        .enviarTemplate(any(TenantWhatsAppConfig.class), anyString(), anyString(), anyString());
+  }
+
+  @Test
+  void oTemplateEscolhidoPeloSalaoVenceOPadrao() {
+    when(repository.findByTenantIdOrCreate(tenantId)).thenReturn(configVazia());
+    when(whatsAppClient.enviarTemplate(any(TenantWhatsAppConfig.class), anyString(), anyString(), anyString()))
+        .thenReturn("wamid.tpl");
+
+    TenantWhatsAppDtos.TestMessageRequest request = new TenantWhatsAppDtos.TestMessageRequest();
+    request.destinationPhone = "+5511999998888";
+    request.templateName = "confirmacao_agendamento";
+    request.templateLanguage = "pt_BR";
+
+    serviceEmbeddedHabilitado.enviarMensagemTeste(request);
+
+    verify(whatsAppClient)
+        .enviarTemplate(any(TenantWhatsAppConfig.class), anyString(), eq("confirmacao_agendamento"), eq("pt_BR"));
+  }
+
+  /** O log precisa dizer QUAL template foi mandado: "Entregue" sozinho ja enganou uma vez. */
+  @Test
+  void oLogRegistraQualTemplateFoiEnviado() {
+    when(repository.findByTenantIdOrCreate(tenantId)).thenReturn(configVazia());
+    when(whatsAppClient.enviarTemplate(any(TenantWhatsAppConfig.class), anyString(), anyString(), anyString()))
+        .thenReturn("wamid.tpl");
+
+    TenantWhatsAppDtos.TestMessageRequest request = new TenantWhatsAppDtos.TestMessageRequest();
+    request.destinationPhone = "+5511999998888";
+
+    serviceEmbeddedHabilitado.enviarMensagemTeste(request);
+
+    ArgumentCaptor<WhatsAppMessageLogEntity> captor =
+        ArgumentCaptor.forClass(WhatsAppMessageLogEntity.class);
+    verify(messageLogRepository).save(captor.capture());
+    assertThat(captor.getValue().getMessageText()).contains("hello_world").contains("en_US");
   }
 }

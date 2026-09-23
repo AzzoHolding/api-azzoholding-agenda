@@ -48,6 +48,8 @@ public class ServicoTenantWhatsapp {
   private final MetaEmbeddedSignupGateway metaEmbeddedSignupClient;
   private final WhatsAppMessageLogRepository messageLogRepository;
   private final boolean embeddedSignupEnabled;
+  private final String templateDeTeste;
+  private final String idiomaDoTemplateDeTeste;
 
   public ServicoTenantWhatsapp(
       ContextoTenant contextoTenant,
@@ -58,7 +60,9 @@ public class ServicoTenantWhatsapp {
       WhatsAppClient whatsAppClient,
       MetaEmbeddedSignupGateway metaEmbeddedSignupClient,
       WhatsAppMessageLogRepository messageLogRepository,
-      @Value("${app.whatsapp.embedded-signup.enabled:false}") boolean embeddedSignupEnabled) {
+      @Value("${app.whatsapp.embedded-signup.enabled:false}") boolean embeddedSignupEnabled,
+      @Value("${app.whatsapp.test-template.name:hello_world}") String templateDeTeste,
+      @Value("${app.whatsapp.test-template.language:en_US}") String idiomaDoTemplateDeTeste) {
     this.contextoTenant = contextoTenant;
     this.auditService = auditService;
     this.tenantWhatsAppConfigRepository = tenantWhatsAppConfigRepository;
@@ -68,6 +72,8 @@ public class ServicoTenantWhatsapp {
     this.metaEmbeddedSignupClient = metaEmbeddedSignupClient;
     this.messageLogRepository = messageLogRepository;
     this.embeddedSignupEnabled = embeddedSignupEnabled;
+    this.templateDeTeste = templateDeTeste;
+    this.idiomaDoTemplateDeTeste = idiomaDoTemplateDeTeste;
   }
 
   @Transactional
@@ -279,13 +285,38 @@ public class ServicoTenantWhatsapp {
     TenantWhatsAppConfig config = tenantWhatsAppConfigRepository.findByTenantIdOrCreate(tenantId);
     TenantWhatsAppDtos.TestMessageResponse response = new TenantWhatsAppDtos.TestMessageResponse();
     String destino = trimToNull(request.destinationPhone);
-    String texto = firstNonBlank(trimToNull(request.message), "Mensagem de teste do AZZO Agenda Pro.");
+
+    // TEMPLATE por padrao, e nao texto livre.
+    //
+    // Texto livre so e entregue dentro de 24h da ultima mensagem do CLIENTE. O teste quase sempre
+    // e primeiro contato — ninguem escreveu para o salao ainda —, e nesse caso a Cloud API aceita,
+    // devolve wamid e DESCARTA: em 2026-09-22 foram tres envios com wamid valido, nenhum entregue,
+    // e a tela dizendo "Entregue". Um teste que "passa" sem nada chegar e pior que nao ter teste.
+    //
+    // Texto livre continua acessivel para quem pedir explicitamente (`message` preenchido): dentro
+    // da janela ele funciona, e e o que o atendimento de verdade usa.
+    String texto = trimToNull(request.message);
+    boolean porTemplate = texto == null;
+    String template = firstNonBlank(trimToNull(request.templateName), templateDeTeste);
+    String idioma = firstNonBlank(trimToNull(request.templateLanguage), idiomaDoTemplateDeTeste);
+    String descricaoNoLog = porTemplate ? "template: " + template + " (" + idioma + ")" : texto;
+
     try {
-      String providerMessageId = whatsAppClient.sendMessage(config, destino, texto);
+      String providerMessageId =
+          porTemplate
+              ? whatsAppClient.enviarTemplate(config, destino, template, idioma)
+              : whatsAppClient.sendMessage(config, destino, texto);
       response.success = true;
       response.providerMessageId = providerMessageId;
-      response.message = "Mensagem de teste enviada com sucesso.";
-      registrarNoLog(tenantId, destino, texto, providerMessageId, null);
+      // "Aceita pela Meta", e nao "entregue": o wamid prova que ela aceitou, e so o status por
+      // webhook diz se chegou. Prometer entrega aqui foi exatamente o que enganou em 22/09.
+      response.message =
+          porTemplate
+              ? "Template \"" + template + "\" aceito pela Meta. Se nao chegar, veja se ele esta"
+                  + " aprovado e se o idioma confere."
+              : "Mensagem aceita pela Meta. Texto livre so e entregue se o cliente escreveu para o"
+                  + " salao nas ultimas 24 horas.";
+      registrarNoLog(tenantId, destino, descricaoNoLog, providerMessageId, null);
       registrarAuditoria(tenantId, "WHATSAPP_TEST_MESSAGE", tenantId.toString(), null, java.util.Map.of("success", true, "destination", destino != null ? destino : ""), true);
       return response;
     } catch (IllegalArgumentException | IllegalStateException ex) {
@@ -294,7 +325,7 @@ public class ServicoTenantWhatsapp {
       // O erro CRU da Meta vai para o log da tela, e nao a versao traduzida: e o que permite
       // pesquisar o codigo depois, quando o aviso da tela ja sumiu.
       registrarNoLog(
-          tenantId, destino, texto, null,
+          tenantId, destino, descricaoNoLog, null,
           ex.getMessage() == null || ex.getMessage().isBlank() ? response.message : ex.getMessage().trim());
       registrarAuditoria(tenantId, "WHATSAPP_TEST_MESSAGE", tenantId.toString(), null, java.util.Map.of("success", false, "error", response.message), false);
       return response;

@@ -148,6 +148,84 @@ public class WhatsAppClient {
   }
 
   /**
+   * Envia um TEMPLATE aprovado.
+   *
+   * <p><b>E a unica forma de falar com quem nunca escreveu para o salao.</b> Texto livre so e
+   * entregue dentro das 24h seguintes a ultima mensagem do cliente; fora dessa janela a Cloud API
+   * <em>aceita, devolve o wamid e descarta</em> — a mensagem nunca chega, e a falha so aparece
+   * como status de webhook (131047). Foi o que aconteceu em producao em 2026-09-22: tres envios de
+   * teste com wamid valido, nenhum entregue, e o log dizendo "Entregue".
+   *
+   * <p>Primeiro contato — confirmacao de agendamento de cliente novo — cai sempre nesse caso.
+   */
+  public String enviarTemplate(
+      TenantWhatsAppConfig config, String to, String templateName, String languageCode) {
+    String token = getTenantTokenOrFail(config);
+    String phoneNumberId = getPhoneNumberIdOrFail(config);
+    if (to == null || to.isBlank()) throw new IllegalArgumentException("Destino do WhatsApp invalido");
+    if (templateName == null || templateName.isBlank()) {
+      throw new IllegalArgumentException("Nome do template do WhatsApp nao informado");
+    }
+    String idioma = languageCode == null || languageCode.isBlank() ? "en_US" : languageCode.trim();
+
+    String normalizedDestination = normalizeDestination(to);
+    LOG.info(
+        "whatsappClient.sendTemplate.started {}",
+        CorrelatedLogging.context(
+            "tenantId", config.getTenantId(),
+            "phoneNumberId", phoneNumberId,
+            "destination", normalizedDestination,
+            "template", templateName));
+
+    try {
+      Map<String, Object> payload = new HashMap<>();
+      payload.put("messaging_product", "whatsapp");
+      payload.put("to", normalizedDestination);
+      payload.put("type", "template");
+      payload.put("template", Map.of("name", templateName, "language", Map.of("code", idioma)));
+
+      String body = restClient.post()
+          .uri(graphApiBase() + phoneNumberId + "/messages")
+          .header("Authorization", "Bearer " + token)
+          .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+          .body(payload)
+          .retrieve()
+          .body(String.class);
+
+      String providerMessageId = extractMessageId(body);
+      LOG.info(
+          "whatsappClient.sendTemplate.completed {}",
+          CorrelatedLogging.context(
+              "tenantId", config.getTenantId(),
+              "destination", normalizedDestination,
+              "template", templateName,
+              "providerMessageId", providerMessageId));
+      return providerMessageId;
+    } catch (IllegalArgumentException e) {
+      throw e;
+    } catch (RestClientResponseException e) {
+      String errorMessage =
+          extractErrorMessage(e.getResponseBodyAsString(), "Falha ao enviar o template no WhatsApp");
+      LOG.error(
+          "whatsappClient.sendTemplate.failed {}",
+          CorrelatedLogging.context(
+              "tenantId", config.getTenantId(),
+              "destination", to,
+              "template", templateName,
+              "root", CorrelatedLogging.throwableSummary(e)),
+          e);
+      throw new IllegalStateException(errorMessage, e);
+    } catch (Exception e) {
+      LOG.error(
+          "whatsappClient.sendTemplate.failed {}",
+          CorrelatedLogging.context(
+              "tenantId", config.getTenantId(), "destination", to, "template", templateName),
+          e);
+      throw new IllegalStateException("Falha ao enviar o template no WhatsApp", e);
+    }
+  }
+
+  /**
    * Registra o numero no Cloud API. <b>Sem isto o numero nao envia mensagem nenhuma.</b>
    *
    * <p>O numero pode estar verificado, aparecer com o nome certo e responder a toda consulta de

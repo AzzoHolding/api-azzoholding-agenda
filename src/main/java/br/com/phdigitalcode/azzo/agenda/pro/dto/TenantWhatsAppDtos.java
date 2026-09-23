@@ -156,7 +156,17 @@ public final class TenantWhatsAppDtos {
   public static class TestMessageRequest {
     @NotBlank
     public String destinationPhone;
+    /**
+     * Texto livre. <b>So chega se o destinatario escreveu para o salao nas ultimas 24h.</b>
+     *
+     * Vazio — o caso normal do botao de teste — manda TEMPLATE, que e o unico que a Meta entrega
+     * em primeiro contato. Preencher e pedir explicitamente o caminho de texto livre.
+     */
     public String message;
+    /** Template a enviar. Vazio usa o configurado (`hello_world`, que todo numero novo tem). */
+    public String templateName;
+    /** Idioma do template, como cadastrado na Meta. Vazio usa o configurado (`en_US`). */
+    public String templateLanguage;
   }
 
   public static class TestMessageResponse {
