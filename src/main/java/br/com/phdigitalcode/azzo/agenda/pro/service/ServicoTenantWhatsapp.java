@@ -63,8 +63,8 @@ public class ServicoTenantWhatsapp {
       WhatsAppMessageLogRepository messageLogRepository,
       ServicoTemplatesDoWhatsapp servicoTemplates,
       @Value("${app.whatsapp.embedded-signup.enabled:false}") boolean embeddedSignupEnabled,
-      @Value("${app.whatsapp.test-template.name:hello_world}") String templateDeTeste,
-      @Value("${app.whatsapp.test-template.language:en_US}") String idiomaDoTemplateDeTeste) {
+      @Value("${app.whatsapp.test-template.name:teste_integracao}") String templateDeTeste,
+      @Value("${app.whatsapp.test-template.language:pt_BR}") String idiomaDoTemplateDeTeste) {
     this.contextoTenant = contextoTenant;
     this.auditService = auditService;
     this.tenantWhatsAppConfigRepository = tenantWhatsAppConfigRepository;
@@ -376,8 +376,26 @@ public class ServicoTenantWhatsapp {
     // da janela ele funciona, e e o que o atendimento de verdade usa.
     String texto = trimToNull(request.message);
     boolean porTemplate = texto == null;
-    String template = firstNonBlank(trimToNull(request.templateName), templateDeTeste);
-    String idioma = firstNonBlank(trimToNull(request.templateLanguage), idiomaDoTemplateDeTeste);
+    // O template do PROPRIO salao vem primeiro: `teste_integracao` e criado na conta dele, e e
+    // o que prova a integracao DELE. O valor de ambiente virou reserva — serve so enquanto a
+    // sincronizacao nao rodou, e para forcar outro template em diagnostico.
+    var testeDoSalao = servicoTemplates.templateDeTesteDoTenant(tenantId);
+    String template =
+        firstNonBlank(
+            trimToNull(request.templateName),
+            testeDoSalao.map(t -> t.getNome()).orElse(null),
+            templateDeTeste);
+    String idioma =
+        firstNonBlank(
+            trimToNull(request.templateLanguage),
+            testeDoSalao.map(t -> t.getIdioma()).orElse(null),
+            idiomaDoTemplateDeTeste);
+    // Template que a Meta ainda nao aprovou NAO entrega: dizer isso junto evita a pessoa culpar
+    // a credencial por uma recusa que e so de analise pendente.
+    String avisoDeAnalise =
+        testeDoSalao.filter(t -> !t.aprovado()).isPresent()
+            ? " O modelo ainda nao foi aprovado pela Meta, entao a recusa pode ser so isso."
+            : "";
     String descricaoNoLog = porTemplate ? "template: " + template + " (" + idioma + ")" : texto;
 
     try {
@@ -393,6 +411,7 @@ public class ServicoTenantWhatsapp {
           porTemplate
               ? "Template \"" + template + "\" aceito pela Meta. Se nao chegar, veja se ele esta"
                   + " aprovado e se o idioma confere."
+                  + avisoDeAnalise
               : "Mensagem aceita pela Meta. Texto livre so e entregue se o cliente escreveu para o"
                   + " salao nas ultimas 24 horas.";
       registrarNoLog(tenantId, destino, descricaoNoLog, providerMessageId, null);

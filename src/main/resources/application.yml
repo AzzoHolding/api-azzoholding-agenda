@@ -233,9 +233,11 @@ app:
     # O teste manda TEMPLATE, e nao texto livre: texto livre so e entregue dentro de 24h da
     # ultima mensagem do cliente, e o teste quase sempre e primeiro contato. `hello_world` e o
     # template que a Meta ja deixa pronto em todo numero novo.
+    # Reserva: o envio usa o `teste_integracao` do PROPRIO salao quando ele ja existe. Isto vale
+    # enquanto a sincronizacao nao rodou, e para forcar outro template em diagnostico.
     test-template:
-      name: ${WHATSAPP_TEST_TEMPLATE_NAME:hello_world}
-      language: ${WHATSAPP_TEST_TEMPLATE_LANGUAGE:en_US}
+      name: ${WHATSAPP_TEST_TEMPLATE_NAME:teste_integracao}
+      language: ${WHATSAPP_TEST_TEMPLATE_LANGUAGE:pt_BR}
   agenda:
     debug: ${APP_AGENDA_DEBUG:false}
   cors:

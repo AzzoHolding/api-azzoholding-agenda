@@ -62,6 +62,7 @@ class ServicoTenantWhatsappTest {
     metaEmbeddedSignupClient = mock(MetaEmbeddedSignupGateway.class);
     messageLogRepository = mock(WhatsAppMessageLogRepository.class);
     servicoTemplates = mock(ServicoTemplatesDoWhatsapp.class);
+    when(servicoTemplates.templateDeTesteDoTenant(any())).thenReturn(java.util.Optional.empty());
 
     when(contextoTenant.obterTenantIdOuFalhar()).thenReturn(tenantId);
     when(webhookVerifyTokenHashService.hash(anyString())).thenReturn("hashed-token");
@@ -72,10 +73,10 @@ class ServicoTenantWhatsappTest {
 
     serviceEmbeddedHabilitado = new ServicoTenantWhatsapp(
         contextoTenant, auditService, repository, encryptionService, webhookVerifyTokenHashService,
-        whatsAppClient, metaEmbeddedSignupClient, messageLogRepository, servicoTemplates, true, "hello_world", "en_US");
+        whatsAppClient, metaEmbeddedSignupClient, messageLogRepository, servicoTemplates, true, "teste_integracao", "pt_BR");
     serviceEmbeddedDesabilitado = new ServicoTenantWhatsapp(
         contextoTenant, auditService, repository, encryptionService, webhookVerifyTokenHashService,
-        whatsAppClient, metaEmbeddedSignupClient, messageLogRepository, servicoTemplates, false, "hello_world", "en_US");
+        whatsAppClient, metaEmbeddedSignupClient, messageLogRepository, servicoTemplates, false, "teste_integracao", "pt_BR");
   }
 
   private TenantWhatsAppConfig configVazia() {
@@ -526,7 +527,7 @@ class ServicoTenantWhatsappTest {
 
     assertThat(response.success).isTrue();
     verify(whatsAppClient)
-        .enviarTemplate(any(TenantWhatsAppConfig.class), anyString(), eq("hello_world"), eq("en_US"));
+        .enviarTemplate(any(TenantWhatsAppConfig.class), anyString(), eq("teste_integracao"), eq("pt_BR"));
     verify(whatsAppClient, never()).sendMessage(any(TenantWhatsAppConfig.class), anyString(), anyString());
     // "Aceita", e nao "entregue": o wamid prova que a Meta aceitou, nao que alguem recebeu.
     assertThat(response.message).contains("aceito pela Meta").doesNotContain("entregue");
@@ -582,6 +583,53 @@ class ServicoTenantWhatsappTest {
     ArgumentCaptor<WhatsAppMessageLogEntity> captor =
         ArgumentCaptor.forClass(WhatsAppMessageLogEntity.class);
     verify(messageLogRepository).save(captor.capture());
-    assertThat(captor.getValue().getMessageText()).contains("hello_world").contains("en_US");
+    assertThat(captor.getValue().getMessageText()).contains("teste_integracao").contains("pt_BR");
+  }
+
+  /**
+   * O template do PROPRIO salao vence o do ambiente: `teste_integracao` e criado na conta dele e
+   * e o que prova a integracao DELE. O valor de ambiente virou reserva.
+   */
+  @Test
+  void oTesteUsaOTemplateDoProprioSalao() {
+    when(repository.findByTenantIdOrCreate(tenantId)).thenReturn(configVazia());
+    br.com.phdigitalcode.azzo.agenda.pro.entity.WhatsAppTemplateEntity doSalao =
+        new br.com.phdigitalcode.azzo.agenda.pro.entity.WhatsAppTemplateEntity();
+    doSalao.setNome("teste_integracao");
+    doSalao.setIdioma("pt_BR");
+    doSalao.setStatus("APPROVED");
+    when(servicoTemplates.templateDeTesteDoTenant(any())).thenReturn(java.util.Optional.of(doSalao));
+    when(whatsAppClient.enviarTemplate(any(TenantWhatsAppConfig.class), anyString(), anyString(), anyString()))
+        .thenReturn("wamid.tpl");
+
+    TenantWhatsAppDtos.TestMessageRequest request = new TenantWhatsAppDtos.TestMessageRequest();
+    request.destinationPhone = "+5511999998888";
+
+    TenantWhatsAppDtos.TestMessageResponse response =
+        serviceEmbeddedHabilitado.enviarMensagemTeste(request);
+
+    assertThat(response.success).isTrue();
+    verify(whatsAppClient)
+        .enviarTemplate(any(TenantWhatsAppConfig.class), anyString(), eq("teste_integracao"), eq("pt_BR"));
+  }
+
+  /** Recusa por analise pendente nao pode ser confundida com credencial errada. */
+  @Test
+  void templateNaoAprovadoAvisaQueAAnaliseEstaPendente() {
+    when(repository.findByTenantIdOrCreate(tenantId)).thenReturn(configVazia());
+    br.com.phdigitalcode.azzo.agenda.pro.entity.WhatsAppTemplateEntity pendente =
+        new br.com.phdigitalcode.azzo.agenda.pro.entity.WhatsAppTemplateEntity();
+    pendente.setNome("teste_integracao");
+    pendente.setIdioma("pt_BR");
+    pendente.setStatus("PENDING");
+    when(servicoTemplates.templateDeTesteDoTenant(any())).thenReturn(java.util.Optional.of(pendente));
+    when(whatsAppClient.enviarTemplate(any(TenantWhatsAppConfig.class), anyString(), anyString(), anyString()))
+        .thenReturn("wamid.tpl");
+
+    TenantWhatsAppDtos.TestMessageRequest request = new TenantWhatsAppDtos.TestMessageRequest();
+    request.destinationPhone = "+5511999998888";
+
+    assertThat(serviceEmbeddedHabilitado.enviarMensagemTeste(request).message)
+        .contains("ainda nao foi aprovado");
   }
 }
