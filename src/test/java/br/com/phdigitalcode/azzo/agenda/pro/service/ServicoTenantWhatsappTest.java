@@ -46,6 +46,7 @@ class ServicoTenantWhatsappTest {
   private WhatsAppClient whatsAppClient;
   private MetaEmbeddedSignupGateway metaEmbeddedSignupClient;
   private WhatsAppMessageLogRepository messageLogRepository;
+  private ServicoTemplatesDoWhatsapp servicoTemplates;
 
   private ServicoTenantWhatsapp serviceEmbeddedHabilitado;
   private ServicoTenantWhatsapp serviceEmbeddedDesabilitado;
@@ -60,6 +61,7 @@ class ServicoTenantWhatsappTest {
     whatsAppClient = mock(WhatsAppClient.class);
     metaEmbeddedSignupClient = mock(MetaEmbeddedSignupGateway.class);
     messageLogRepository = mock(WhatsAppMessageLogRepository.class);
+    servicoTemplates = mock(ServicoTemplatesDoWhatsapp.class);
 
     when(contextoTenant.obterTenantIdOuFalhar()).thenReturn(tenantId);
     when(webhookVerifyTokenHashService.hash(anyString())).thenReturn("hashed-token");
@@ -70,10 +72,10 @@ class ServicoTenantWhatsappTest {
 
     serviceEmbeddedHabilitado = new ServicoTenantWhatsapp(
         contextoTenant, auditService, repository, encryptionService, webhookVerifyTokenHashService,
-        whatsAppClient, metaEmbeddedSignupClient, messageLogRepository, true, "hello_world", "en_US");
+        whatsAppClient, metaEmbeddedSignupClient, messageLogRepository, servicoTemplates, true, "hello_world", "en_US");
     serviceEmbeddedDesabilitado = new ServicoTenantWhatsapp(
         contextoTenant, auditService, repository, encryptionService, webhookVerifyTokenHashService,
-        whatsAppClient, metaEmbeddedSignupClient, messageLogRepository, false, "hello_world", "en_US");
+        whatsAppClient, metaEmbeddedSignupClient, messageLogRepository, servicoTemplates, false, "hello_world", "en_US");
   }
 
   private TenantWhatsAppConfig configVazia() {

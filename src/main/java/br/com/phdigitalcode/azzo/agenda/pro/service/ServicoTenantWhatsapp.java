@@ -47,6 +47,7 @@ public class ServicoTenantWhatsapp {
   private final WhatsAppClient whatsAppClient;
   private final MetaEmbeddedSignupGateway metaEmbeddedSignupClient;
   private final WhatsAppMessageLogRepository messageLogRepository;
+  private final ServicoTemplatesDoWhatsapp servicoTemplates;
   private final boolean embeddedSignupEnabled;
   private final String templateDeTeste;
   private final String idiomaDoTemplateDeTeste;
@@ -60,6 +61,7 @@ public class ServicoTenantWhatsapp {
       WhatsAppClient whatsAppClient,
       MetaEmbeddedSignupGateway metaEmbeddedSignupClient,
       WhatsAppMessageLogRepository messageLogRepository,
+      ServicoTemplatesDoWhatsapp servicoTemplates,
       @Value("${app.whatsapp.embedded-signup.enabled:false}") boolean embeddedSignupEnabled,
       @Value("${app.whatsapp.test-template.name:hello_world}") String templateDeTeste,
       @Value("${app.whatsapp.test-template.language:en_US}") String idiomaDoTemplateDeTeste) {
@@ -71,6 +73,7 @@ public class ServicoTenantWhatsapp {
     this.whatsAppClient = whatsAppClient;
     this.metaEmbeddedSignupClient = metaEmbeddedSignupClient;
     this.messageLogRepository = messageLogRepository;
+    this.servicoTemplates = servicoTemplates;
     this.embeddedSignupEnabled = embeddedSignupEnabled;
     this.templateDeTeste = templateDeTeste;
     this.idiomaDoTemplateDeTeste = idiomaDoTemplateDeTeste;
@@ -186,6 +189,44 @@ public class ServicoTenantWhatsapp {
     return response;
   }
 
+  @Transactional(readOnly = true)
+  public TenantWhatsAppDtos.TemplatesResponse listarTemplates() {
+    UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    return paraResposta(servicoTemplates.listarDoTenant(tenantId));
+  }
+
+  @Transactional
+  public TenantWhatsAppDtos.TemplatesResponse criarTemplatesDasMensagens() {
+    UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    servicoTemplates.criarTemplatesDasMensagens(tenantId);
+    TenantWhatsAppDtos.TemplatesResponse resposta =
+        paraResposta(servicoTemplates.listarDoTenant(tenantId));
+    registrarAuditoria(tenantId, "WHATSAPP_TEMPLATES_CREATE", tenantId.toString(), null,
+        java.util.Map.of("quantidade", resposta.items.size()), true);
+    return resposta;
+  }
+
+  private TenantWhatsAppDtos.TemplatesResponse paraResposta(
+      java.util.List<br.com.phdigitalcode.azzo.agenda.pro.entity.WhatsAppTemplateEntity> templates) {
+    TenantWhatsAppDtos.TemplatesResponse resposta = new TenantWhatsAppDtos.TemplatesResponse();
+    resposta.items =
+        templates.stream()
+            .map(
+                template -> {
+                  TenantWhatsAppDtos.TemplateItem item = new TenantWhatsAppDtos.TemplateItem();
+                  item.finalidade = template.getFinalidade();
+                  item.nome = template.getNome();
+                  item.idioma = template.getIdioma();
+                  item.status = template.getStatus();
+                  item.motivoRecusa = template.getMotivoRecusa();
+                  item.corpo = template.getCorpo();
+                  item.variaveis = template.getVariaveis();
+                  return item;
+                })
+            .toList();
+    return resposta;
+  }
+
   /**
    * Guarda o template que o salao aprovou na Meta para a confirmacao.
    *
@@ -250,6 +291,10 @@ public class ServicoTenantWhatsapp {
           "whatsapp.autoSubscribe.failed tenantId={} reason={}",
           config.getTenantId(), sanitizeEmbeddedError(erro.getMessage()));
     }
+
+    // Os templates do Azzo nao existem na conta do salao — template pertence a WABA. Criar o de
+    // teste aqui e o que permite provar a integracao sem o dono aprovar nada na Meta.
+    servicoTemplates.criarTemplateDeTeste(config);
     return true;
   }
 
