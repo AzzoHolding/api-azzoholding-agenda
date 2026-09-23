@@ -268,4 +268,74 @@ class ServicoTemplatesDoWhatsappTest {
 
     verify(dispatcher).sendText(any());
   }
+
+  /**
+   * O caso legado: quem conectou antes de 2026-09-23 tem numero registrado e ZERO template,
+   * porque a criacao automatica so roda no fim do Embedded Signup. Refazer o popup so para
+   * disparar isso seria absurdo — o botao "Sincronizar" existe para esses.
+   */
+  @Test
+  @DisplayName("sincronizar cria o que falta numa conexao antiga")
+  void sincronizarCriaOQueFaltaNoLegado() {
+    TenantWhatsAppConfig config = config();
+    config.setConfirmationMessageTemplate("Olá {cliente}!");
+    when(configRepository.findByTenantIdOrCreate(tenantId)).thenReturn(config);
+    when(whatsAppClient.criarTemplate(any(), anyString(), anyString(), anyString(), anyString(), anyList()))
+        .thenReturn(criado("PENDING"));
+    when(templateRepository.findByTenantId(tenantId)).thenReturn(List.of());
+    when(whatsAppClient.listarTemplates(any())).thenReturn(List.of());
+
+    servico.sincronizar(tenantId);
+
+    ArgumentCaptor<String> nomes = ArgumentCaptor.forClass(String.class);
+    verify(whatsAppClient, org.mockito.Mockito.times(2))
+        .criarTemplate(any(), nomes.capture(), anyString(), anyString(), anyString(), anyList());
+    assertThat(nomes.getAllValues()).containsExactly("teste_integracao", "azzo_confirmacao");
+  }
+
+  /** Nao saber o status ainda e diferente de a criacao ter dado errado. */
+  @Test
+  @DisplayName("consulta que falha nao derruba a sincronizacao")
+  void consultaQueFalhaNaoDerrubaASincronizacao() {
+    TenantWhatsAppConfig config = config();
+    when(configRepository.findByTenantIdOrCreate(tenantId)).thenReturn(config);
+    when(whatsAppClient.criarTemplate(any(), anyString(), anyString(), anyString(), anyString(), anyList()))
+        .thenReturn(criado("PENDING"));
+
+    WhatsAppTemplateEntity teste = new WhatsAppTemplateEntity();
+    teste.setTenantId(tenantId);
+    teste.setFinalidade(WhatsAppTemplateEntity.TESTE);
+    teste.setNome("teste_integracao");
+    teste.setStatus(WhatsAppTemplateEntity.PENDING);
+    when(templateRepository.findByTenantId(tenantId)).thenReturn(List.of(teste));
+    when(whatsAppClient.listarTemplates(any()))
+        .thenThrow(new IllegalStateException("(#190) token expirado"));
+
+    assertThat(servico.sincronizar(tenantId)).hasSize(1);
+  }
+
+  @Test
+  @DisplayName("sincronizar tambem traz o status de quem ja existia")
+  void sincronizarAtualizaOStatusDeQuemJaExistia() {
+    TenantWhatsAppConfig config = config();
+    when(configRepository.findByTenantIdOrCreate(tenantId)).thenReturn(config);
+    when(whatsAppClient.criarTemplate(any(), anyString(), anyString(), anyString(), anyString(), anyList()))
+        .thenReturn(criado("PENDING"));
+
+    WhatsAppTemplateEntity teste = new WhatsAppTemplateEntity();
+    teste.setTenantId(tenantId);
+    teste.setFinalidade(WhatsAppTemplateEntity.TESTE);
+    teste.setNome("teste_integracao");
+    teste.setStatus(WhatsAppTemplateEntity.PENDING);
+    when(templateRepository.findByTenantId(tenantId)).thenReturn(List.of(teste));
+
+    WhatsAppClient.TemplateDetails naMeta = new WhatsAppClient.TemplateDetails();
+    naMeta.name = "teste_integracao";
+    naMeta.status = "APPROVED";
+    when(whatsAppClient.listarTemplates(any())).thenReturn(List.of(naMeta));
+
+    servico.sincronizar(tenantId);
+
+    assertThat(teste.getStatus()).isEqualTo("APPROVED");
+  }
 }

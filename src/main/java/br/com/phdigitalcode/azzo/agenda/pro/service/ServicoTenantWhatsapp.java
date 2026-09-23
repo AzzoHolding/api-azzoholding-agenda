@@ -196,6 +196,16 @@ public class ServicoTenantWhatsapp {
   }
 
   @Transactional
+  public TenantWhatsAppDtos.TemplatesResponse sincronizarTemplates() {
+    UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    TenantWhatsAppDtos.TemplatesResponse resposta =
+        paraResposta(servicoTemplates.sincronizar(tenantId));
+    registrarAuditoria(tenantId, "WHATSAPP_TEMPLATES_SYNC", tenantId.toString(), null,
+        java.util.Map.of("quantidade", resposta.items.size()), true);
+    return resposta;
+  }
+
+  @Transactional
   public TenantWhatsAppDtos.TemplatesResponse criarTemplatesDasMensagens() {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     servicoTemplates.criarTemplatesDasMensagens(tenantId);

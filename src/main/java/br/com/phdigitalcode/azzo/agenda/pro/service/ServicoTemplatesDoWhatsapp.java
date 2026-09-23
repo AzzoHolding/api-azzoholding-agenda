@@ -119,6 +119,35 @@ public class ServicoTemplatesDoWhatsapp {
     return criados;
   }
 
+  /**
+   * Poe a conta do salao em dia: cria o que falta e reconfere o que ja existe.
+   *
+   * <p><b>Existe pelo legado.</b> Quem conectou antes de 2026-09-23 tem numero registrado e
+   * nenhum template criado — a criacao automatica roda no fim do Embedded Signup, e refazer o
+   * popup so para disparar isso seria absurdo. O mesmo botao serve para reconferir na hora, sem
+   * esperar os 10 minutos do monitoramento.
+   *
+   * <p>Nao recria o que ja esta aprovado com o mesmo texto: isso devolveria o template para
+   * analise e deixaria o salao sem mandar nada ate a Meta decidir de novo.
+   */
+  @Transactional
+  public List<WhatsAppTemplateEntity> sincronizar(UUID tenantId) {
+    TenantWhatsAppConfig config = configRepository.findByTenantIdOrCreate(tenantId);
+
+    // O de teste primeiro: e o que prova a integracao, e o que tem menos chance de ser recusado.
+    criarTemplateDeTeste(config);
+    try {
+      criarTemplatesDasMensagens(tenantId);
+    } catch (RuntimeException erro) {
+      // Um modelo que a Meta recusou nao pode impedir a reconferencia dos outros.
+      LOG.warn("whatsapp.template.sync.criacaoFalhou tenantId={} motivo={}", tenantId, erro.getMessage());
+    }
+
+    List<WhatsAppTemplateEntity> doTenant = templateRepository.findByTenantId(tenantId);
+    atualizarStatus(config, doTenant);
+    return templateRepository.findByTenantId(tenantId);
+  }
+
   /** {@code azzo_confirmacao}, {@code azzo_cancelamento}, {@code azzo_lembrete} — iguais em todo salao. */
   static String nomePadrao(String finalidade) {
     return "azzo_" + finalidade.toLowerCase();
@@ -197,24 +226,48 @@ public class ServicoTemplatesDoWhatsapp {
         continue;
       }
 
-      for (WhatsAppTemplateEntity pendente : grupo.getValue()) {
-        WhatsAppClient.TemplateDetails detalhe =
-            naMeta.stream()
-                .filter(item -> pendente.getNome().equalsIgnoreCase(item.name))
-                .findFirst()
-                .orElse(null);
-        if (detalhe == null || detalhe.status == null) continue;
-        if (detalhe.status.equalsIgnoreCase(pendente.getStatus())) continue;
+      mudaram += aplicar(naMeta, grupo.getValue());
+    }
+    return mudaram;
+  }
 
-        pendente.setStatus(detalhe.status);
-        pendente.setMotivoRecusa(detalhe.rejectedReason);
-        templateRepository.save(pendente);
-        mudaram++;
-        LOG.info(
-            "whatsapp.template.status tenantId={} template={} status={} motivo={}",
-            pendente.getTenantId(), pendente.getNome(), detalhe.status,
-            detalhe.rejectedReason == null ? "-" : detalhe.rejectedReason);
-      }
+  /**
+   * Pergunta a Meta o estado dos templates deste salao e grava o que mudou.
+   *
+   * <p>Falhar aqui nao e erro do botao: o salao acabou de criar os templates, e nao saber o
+   * status ainda e diferente de a criacao ter dado errado.
+   */
+  private void atualizarStatus(TenantWhatsAppConfig config, List<WhatsAppTemplateEntity> templates) {
+    if (templates.isEmpty()) return;
+    try {
+      aplicar(whatsAppClient.listarTemplates(config), templates);
+    } catch (RuntimeException erro) {
+      LOG.warn(
+          "whatsapp.template.sync.consultaFalhou tenantId={} motivo={}",
+          config.getTenantId(), erro.getMessage());
+    }
+  }
+
+  private int aplicar(
+      List<WhatsAppClient.TemplateDetails> naMeta, List<WhatsAppTemplateEntity> locais) {
+    int mudaram = 0;
+    for (WhatsAppTemplateEntity local : locais) {
+      WhatsAppClient.TemplateDetails detalhe =
+          naMeta.stream()
+              .filter(item -> local.getNome() != null && local.getNome().equalsIgnoreCase(item.name))
+              .findFirst()
+              .orElse(null);
+      if (detalhe == null || detalhe.status == null) continue;
+      if (detalhe.status.equalsIgnoreCase(local.getStatus())) continue;
+
+      local.setStatus(detalhe.status);
+      local.setMotivoRecusa(detalhe.rejectedReason);
+      templateRepository.save(local);
+      mudaram++;
+      LOG.info(
+          "whatsapp.template.status tenantId={} template={} status={} motivo={}",
+          local.getTenantId(), local.getNome(), detalhe.status,
+          detalhe.rejectedReason == null ? "-" : detalhe.rejectedReason);
     }
     return mudaram;
   }
