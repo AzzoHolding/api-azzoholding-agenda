@@ -3,6 +3,7 @@ package br.com.phdigitalcode.azzo.agenda.pro.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
@@ -73,6 +74,7 @@ class ReminderProcessingServiceTest {
   private CommunicationChannelDispatcher communicationChannelDispatcher;
   private CustomerCommunicationChannelResolver customerCommunicationChannelResolver;
   private AssistantApiClient assistantApiClient;
+  private ServicoTemplatesDoWhatsapp servicoTemplates;
   private ReminderProcessingService service;
 
   @BeforeEach
@@ -88,8 +90,21 @@ class ReminderProcessingServiceTest {
     communicationChannelDispatcher = mock(CommunicationChannelDispatcher.class);
     customerCommunicationChannelResolver = mock(CustomerCommunicationChannelResolver.class);
     assistantApiClient = mock(AssistantApiClient.class);
+    servicoTemplates = mock(ServicoTemplatesDoWhatsapp.class);
+    // Sem template aprovado o servico cai no texto livre, que e o comportamento que estes testes
+    // ja cobriam — manter isso preserva o que eles verificam.
+    when(servicoTemplates.enviar(any(), anyString(), any(), anyString(), any(), anyString()))
+        .thenAnswer(
+            invocacao ->
+                communicationChannelDispatcher.sendText(
+                    new br.com.phdigitalcode.azzo.agenda.pro.service.channel.ChannelSendCommand(
+                        invocacao.getArgument(0),
+                        invocacao.getArgument(2),
+                        invocacao.getArgument(3),
+                        invocacao.getArgument(5))));
     service =
         new ReminderProcessingService(
+            servicoTemplates,
             agendamentoRepository,
             tenantRepository,
             tenantWhatsAppConfigRepository,
