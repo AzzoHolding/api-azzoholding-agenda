@@ -230,6 +230,12 @@ app:
   whatsapp:
     embedded-signup:
       enabled: ${WHATSAPP_EMBEDDED_SIGNUP_ENABLED:false}
+    # O teste manda TEMPLATE, e nao texto livre: texto livre so e entregue dentro de 24h da
+    # ultima mensagem do cliente, e o teste quase sempre e primeiro contato. `hello_world` e o
+    # template que a Meta ja deixa pronto em todo numero novo.
+    test-template:
+      name: ${WHATSAPP_TEST_TEMPLATE_NAME:hello_world}
+      language: ${WHATSAPP_TEST_TEMPLATE_LANGUAGE:en_US}
   agenda:
     debug: ${APP_AGENDA_DEBUG:false}
   cors:
