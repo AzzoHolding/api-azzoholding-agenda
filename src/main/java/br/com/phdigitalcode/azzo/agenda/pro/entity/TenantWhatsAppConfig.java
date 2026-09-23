@@ -77,6 +77,19 @@ public class TenantWhatsAppConfig {
   @Column(name = "whatsapp_registered_at")
   private Instant whatsappRegisteredAt;
 
+  /**
+   * Template aprovado na Meta para a confirmacao de agendamento.
+   *
+   * <p>Nulo significa que a confirmacao <b>nao chega a cliente novo</b>: sem template, so texto
+   * livre, e texto livre exige que o cliente tenha escrito para o salao nas ultimas 24h.
+   */
+  @Column(name = "confirmation_template_name", length = 120)
+  private String confirmationTemplateName;
+
+  /** Idioma do template, como cadastrado na Meta (ex.: {@code pt_BR}). */
+  @Column(name = "confirmation_template_language", length = 12)
+  private String confirmationTemplateLanguage;
+
   @Column(name = "embedded_signup_last_error", length = 500)
   private String embeddedSignupLastError;
 

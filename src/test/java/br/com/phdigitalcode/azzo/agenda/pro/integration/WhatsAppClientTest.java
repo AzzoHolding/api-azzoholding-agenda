@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.content;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
@@ -181,5 +182,72 @@ class WhatsAppClientTest {
     assertThatThrownBy(() -> client.fetchPhoneNumberDetails("plain-token", " "))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessage("phoneNumberId do WhatsApp nao configurado para o tenant");
+  }
+
+  /**
+   * Texto livre so e entregue dentro de 24h da ultima mensagem do CLIENTE; fora dessa janela a
+   * Meta aceita, devolve o wamid e descarta. Confirmacao de cliente novo e sempre primeiro
+   * contato, e so template chega.
+   */
+  @Test
+  void deveEnviarTemplateComAsVariaveisNaOrdem() {
+    TenantWhatsAppConfig config = configComToken();
+
+    server.expect(requestTo("https://graph.facebook.com/v18.0/1234567890/messages"))
+        .andExpect(method(HttpMethod.POST))
+        .andExpect(header("Authorization", "Bearer plain-token"))
+        .andExpect(content().string(org.hamcrest.Matchers.containsString("\"type\":\"template\"")))
+        .andExpect(content().string(org.hamcrest.Matchers.containsString("confirmacao_agendamento")))
+        .andExpect(content().string(org.hamcrest.Matchers.containsString("pt_BR")))
+        // A ordem e o que liga cada valor a {{1}}, {{2}}...: trocar duas posicoes manda o servico
+        // no lugar do nome, e a Meta aceita sem reclamar.
+        .andExpect(content().string(org.hamcrest.Matchers.containsString("Marina")))
+        .andExpect(content().string(org.hamcrest.Matchers.containsString("Corte")))
+        .andRespond(withSuccess("{\"messages\":[{\"id\":\"wamid.TPL\"}]}", MediaType.APPLICATION_JSON));
+
+    String providerMessageId =
+        client.enviarTemplate(
+            config, "5511999998888", "confirmacao_agendamento", "pt_BR",
+            java.util.List.of("Marina", "Corte", "23/09", "14:00"));
+
+    assertThat(providerMessageId).isEqualTo("wamid.TPL");
+    server.verify();
+  }
+
+  /** Template sem variaveis nao pode mandar um `components` vazio: a Meta recusa. */
+  @Test
+  void templateSemVariaveisNaoMandaComponents() {
+    TenantWhatsAppConfig config = configComToken();
+
+    server.expect(requestTo("https://graph.facebook.com/v18.0/1234567890/messages"))
+        .andExpect(content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("components"))))
+        .andRespond(withSuccess("{\"messages\":[{\"id\":\"wamid.HW\"}]}", MediaType.APPLICATION_JSON));
+
+    client.enviarTemplate(config, "5511999998888", "hello_world", "en_US");
+
+    server.verify();
+  }
+
+  /** Idioma vazio cai no padrao, e nao monta um template sem idioma que a Meta recusaria. */
+  @Test
+  void templateSemIdiomaUsaOPadrao() {
+    TenantWhatsAppConfig config = configComToken();
+
+    server.expect(requestTo("https://graph.facebook.com/v18.0/1234567890/messages"))
+        .andExpect(content().string(org.hamcrest.Matchers.containsString("en_US")))
+        .andRespond(withSuccess("{\"messages\":[{\"id\":\"wamid.HW\"}]}", MediaType.APPLICATION_JSON));
+
+    client.enviarTemplate(config, "5511999998888", "hello_world", "  ");
+
+    server.verify();
+  }
+
+  @Test
+  void templateSemNomeNaoVaiParaAMeta() {
+    TenantWhatsAppConfig config = configComToken();
+
+    assertThatThrownBy(() -> client.enviarTemplate(config, "5511999998888", "  ", "pt_BR"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("template");
   }
 }

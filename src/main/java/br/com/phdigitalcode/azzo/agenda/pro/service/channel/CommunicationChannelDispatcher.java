@@ -30,6 +30,15 @@ public class CommunicationChannelDispatcher {
         .orElseGet(() -> unsupported(command.channel()));
   }
 
+  public ChannelSendResult sendTemplate(ChannelTemplateCommand command) {
+    if (command == null) throw new IllegalArgumentException("Comando de envio obrigatorio.");
+    return adapters().stream()
+        .filter(adapter -> adapter.channel() == command.channel())
+        .findFirst()
+        .map(adapter -> adapter.sendTemplate(command))
+        .orElseGet(() -> unsupported(command.channel()));
+  }
+
   List<CommunicationChannelAdapter> adapters() {
     return adapters == null ? List.of() : adapters;
   }

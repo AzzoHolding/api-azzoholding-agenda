@@ -59,6 +59,13 @@ public class WhatsAppController {
    * ficou com um numero que nao envia — e reconectar pelo popup so para disparar o registro seria
    * absurdo. Este e o caminho para esses casos, e para quando o registro falhou na primeira vez.
    */
+  /** O salao cadastra o template que ele aprovou na Meta para a confirmacao de agendamento. */
+  @PostMapping("/confirmation-template")
+  public TenantWhatsAppDtos.ConfigResponse definirTemplateDeConfirmacao(
+      @RequestBody TenantWhatsAppDtos.TemplateDeConfirmacaoRequest request) {
+    return servicoTenantWhatsapp.definirTemplateDeConfirmacao(request);
+  }
+
   @PostMapping("/register-number")
   public TenantWhatsAppDtos.RegistroDoNumeroResponse registrarNumero() {
     return servicoTenantWhatsapp.registrarNumero();

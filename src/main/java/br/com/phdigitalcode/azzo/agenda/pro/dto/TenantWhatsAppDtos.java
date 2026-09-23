@@ -70,6 +70,20 @@ public final class TenantWhatsAppDtos {
      * aqui — o controller inteiro e `hasRole('OWNER')`.
      */
     public String registrationPin;
+    /**
+     * Template aprovado para a confirmacao de agendamento.
+     *
+     * Vazio = a confirmacao nao chega a cliente novo, porque texto livre so e entregue a quem
+     * escreveu para o salao nas ultimas 24 horas.
+     */
+    public String confirmationTemplateName;
+    public String confirmationTemplateLanguage;
+  }
+
+  /** O template de confirmacao e cadastrado pelo salao: cada um aprova o seu texto na Meta. */
+  public static class TemplateDeConfirmacaoRequest {
+    public String templateName;
+    public String templateLanguage;
   }
 
   public static class RegistroDoNumeroResponse {
