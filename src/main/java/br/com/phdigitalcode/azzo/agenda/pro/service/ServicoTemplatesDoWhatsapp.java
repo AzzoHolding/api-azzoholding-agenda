@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.slf4j.Logger;
@@ -326,6 +327,12 @@ public class ServicoTemplatesDoWhatsapp {
         .map(String::trim)
         .filter(nome -> !nome.isEmpty())
         .toList();
+  }
+
+  /** O template de teste DESTE salao, quando ja existe. */
+  @Transactional(readOnly = true)
+  public Optional<WhatsAppTemplateEntity> templateDeTesteDoTenant(UUID tenantId) {
+    return templateRepository.findByTenantIdAndFinalidade(tenantId, WhatsAppTemplateEntity.TESTE);
   }
 
   @Transactional(readOnly = true)
