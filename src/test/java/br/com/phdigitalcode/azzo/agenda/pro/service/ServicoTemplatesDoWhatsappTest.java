@@ -11,6 +11,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -24,6 +25,10 @@ import br.com.phdigitalcode.azzo.agenda.pro.entity.WhatsAppTemplateEntity;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.WhatsAppClient;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.TenantWhatsAppConfigRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.WhatsAppTemplateRepository;
+import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.ChatChannel;
+import br.com.phdigitalcode.azzo.agenda.pro.service.channel.ChannelSendResult;
+import br.com.phdigitalcode.azzo.agenda.pro.service.channel.ChannelTemplateCommand;
+import br.com.phdigitalcode.azzo.agenda.pro.service.channel.CommunicationChannelDispatcher;
 
 /**
  * Template pertence a WABA: os templates do Azzo nao existem na conta do salao, e no modelo de
@@ -36,6 +41,7 @@ class ServicoTemplatesDoWhatsappTest {
   private TenantWhatsAppConfigRepository configRepository;
   private WhatsAppTemplateRepository templateRepository;
   private WhatsAppClient whatsAppClient;
+  private CommunicationChannelDispatcher dispatcher;
   private ServicoTemplatesDoWhatsapp servico;
 
   @BeforeEach
@@ -43,7 +49,12 @@ class ServicoTemplatesDoWhatsappTest {
     configRepository = mock(TenantWhatsAppConfigRepository.class);
     templateRepository = mock(WhatsAppTemplateRepository.class);
     whatsAppClient = mock(WhatsAppClient.class);
-    servico = new ServicoTemplatesDoWhatsapp(configRepository, templateRepository, whatsAppClient);
+    dispatcher = mock(CommunicationChannelDispatcher.class);
+    when(dispatcher.sendText(any())).thenReturn(ChannelSendResult.sent("wamid.txt"));
+    when(dispatcher.sendTemplate(any())).thenReturn(ChannelSendResult.sent("wamid.tpl"));
+    servico =
+        new ServicoTemplatesDoWhatsapp(
+            configRepository, templateRepository, whatsAppClient, dispatcher);
 
     when(templateRepository.save(any(WhatsAppTemplateEntity.class)))
         .thenAnswer(invocacao -> invocacao.getArgument(0));
@@ -177,5 +188,84 @@ class ServicoTemplatesDoWhatsappTest {
 
     assertThat(servico.sincronizarPendentes()).isZero();
     assertThat(pendente.getStatus()).isEqualTo(WhatsAppTemplateEntity.PENDING);
+  }
+
+  private WhatsAppTemplateEntity aprovado(String variaveis) {
+    WhatsAppTemplateEntity template = new WhatsAppTemplateEntity();
+    template.setTenantId(tenantId);
+    template.setFinalidade(WhatsAppTemplateEntity.LEMBRETE);
+    template.setNome("azzo_lembrete");
+    template.setIdioma("pt_BR");
+    template.setStatus(WhatsAppTemplateEntity.APPROVED);
+    template.setVariaveis(variaveis);
+    return template;
+  }
+
+  @Test
+  @DisplayName("com template aprovado, manda template com as variaveis na ordem guardada")
+  void aprovadoMandaTemplateNaOrdem() {
+    when(templateRepository.findByTenantIdAndFinalidade(tenantId, WhatsAppTemplateEntity.LEMBRETE))
+        .thenReturn(Optional.of(aprovado("cliente,data,hora")));
+
+    servico.enviar(
+        tenantId, WhatsAppTemplateEntity.LEMBRETE, ChatChannel.WHATSAPP, "5511999998888",
+        Map.of("hora", "14:30", "cliente", "Marina", "data", "23/09/2026"),
+        "Lembrete: Marina, 23/09/2026 as 14:30.");
+
+    ArgumentCaptor<ChannelTemplateCommand> captor =
+        ArgumentCaptor.forClass(ChannelTemplateCommand.class);
+    verify(dispatcher).sendTemplate(captor.capture());
+    // A ordem e o contrato: e ela que liga {{1}} ao nome do cliente.
+    assertThat(captor.getValue().variaveis()).containsExactly("Marina", "23/09/2026", "14:30");
+    assertThat(captor.getValue().templateName()).isEqualTo("azzo_lembrete");
+    verify(dispatcher, never()).sendText(any());
+  }
+
+  /** Enquanto a Meta nao aprova, o template nao entrega nada — texto livre ao menos tenta. */
+  @Test
+  @DisplayName("template pendente ainda manda texto livre")
+  void pendenteCaiNoTextoLivre() {
+    WhatsAppTemplateEntity pendente = aprovado("cliente");
+    pendente.setStatus(WhatsAppTemplateEntity.PENDING);
+    when(templateRepository.findByTenantIdAndFinalidade(tenantId, WhatsAppTemplateEntity.LEMBRETE))
+        .thenReturn(Optional.of(pendente));
+
+    servico.enviar(
+        tenantId, WhatsAppTemplateEntity.LEMBRETE, ChatChannel.WHATSAPP, "5511999998888",
+        Map.of("cliente", "Marina"), "Lembrete para Marina.");
+
+    verify(dispatcher).sendText(any());
+    verify(dispatcher, never()).sendTemplate(any());
+  }
+
+  /**
+   * Mandar o template sem uma variavel poria um espaco em branco no lugar do nome do servico na
+   * mensagem que o cliente le — e a Meta aceitaria sem reclamar.
+   */
+  @Test
+  @DisplayName("faltando uma variavel, nao manda o template")
+  void variavelFaltandoNaoMandaTemplate() {
+    when(templateRepository.findByTenantIdAndFinalidade(tenantId, WhatsAppTemplateEntity.LEMBRETE))
+        .thenReturn(Optional.of(aprovado("cliente,servico")));
+
+    servico.enviar(
+        tenantId, WhatsAppTemplateEntity.LEMBRETE, ChatChannel.WHATSAPP, "5511999998888",
+        Map.of("cliente", "Marina"), "Lembrete para Marina.");
+
+    verify(dispatcher).sendText(any());
+    verify(dispatcher, never()).sendTemplate(any());
+  }
+
+  @Test
+  @DisplayName("sem template cadastrado, segue o texto livre de sempre")
+  void semTemplateSegueOTextoLivre() {
+    when(templateRepository.findByTenantIdAndFinalidade(tenantId, WhatsAppTemplateEntity.LEMBRETE))
+        .thenReturn(Optional.empty());
+
+    servico.enviar(
+        tenantId, WhatsAppTemplateEntity.LEMBRETE, ChatChannel.WHATSAPP, "5511999998888",
+        Map.of(), "Lembrete de sempre.");
+
+    verify(dispatcher).sendText(any());
   }
 }

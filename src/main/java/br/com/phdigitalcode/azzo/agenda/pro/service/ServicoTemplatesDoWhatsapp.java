@@ -15,7 +15,12 @@ import br.com.phdigitalcode.azzo.agenda.pro.entity.TenantWhatsAppConfig;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.WhatsAppTemplateEntity;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.WhatsAppClient;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.TenantWhatsAppConfigRepository;
+import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.ChatChannel;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.WhatsAppTemplateRepository;
+import br.com.phdigitalcode.azzo.agenda.pro.service.channel.ChannelSendCommand;
+import br.com.phdigitalcode.azzo.agenda.pro.service.channel.ChannelSendResult;
+import br.com.phdigitalcode.azzo.agenda.pro.service.channel.ChannelTemplateCommand;
+import br.com.phdigitalcode.azzo.agenda.pro.service.channel.CommunicationChannelDispatcher;
 
 /**
  * Cria e acompanha os templates de cada salao na conta DELE.
@@ -50,14 +55,17 @@ public class ServicoTemplatesDoWhatsapp {
   private final TenantWhatsAppConfigRepository configRepository;
   private final WhatsAppTemplateRepository templateRepository;
   private final WhatsAppClient whatsAppClient;
+  private final CommunicationChannelDispatcher dispatcher;
 
   public ServicoTemplatesDoWhatsapp(
       TenantWhatsAppConfigRepository configRepository,
       WhatsAppTemplateRepository templateRepository,
-      WhatsAppClient whatsAppClient) {
+      WhatsAppClient whatsAppClient,
+      CommunicationChannelDispatcher dispatcher) {
     this.configRepository = configRepository;
     this.templateRepository = templateRepository;
     this.whatsAppClient = whatsAppClient;
+    this.dispatcher = dispatcher;
   }
 
   /**
@@ -209,6 +217,62 @@ public class ServicoTemplatesDoWhatsapp {
       }
     }
     return mudaram;
+  }
+
+  /**
+   * Manda a mensagem pelo template APROVADO, e cai no texto livre quando nao da.
+   *
+   * <p>E aqui que o template deixa de ser cadastro e vira entrega. Texto livre so chega a quem
+   * escreveu para o salao nas ultimas 24h; lembrete e confirmacao sao quase sempre primeiro
+   * contato, e sem template a Meta aceita e descarta.
+   *
+   * <p><b>Falta uma variavel, nao manda o template.</b> Mandar assim mesmo poria um espaco em
+   * branco no lugar do nome do servico na mensagem que o cliente le — e a Meta aceitaria sem
+   * reclamar. Texto livre errado pelo menos nao chega; template errado chega errado.
+   */
+  @Transactional(readOnly = true)
+  public ChannelSendResult enviar(
+      UUID tenantId,
+      String finalidade,
+      ChatChannel canal,
+      String destino,
+      Map<String, String> valores,
+      String textoEquivalente) {
+
+    WhatsAppTemplateEntity template =
+        templateRepository.findByTenantIdAndFinalidade(tenantId, finalidade).orElse(null);
+
+    if (template == null || !template.aprovado()) {
+      return dispatcher.sendText(new ChannelSendCommand(tenantId, canal, destino, textoEquivalente));
+    }
+
+    List<String> nomes = variaveisDe(template);
+    List<String> ordenados = new ArrayList<>();
+    for (String nome : nomes) {
+      String valor = valores == null ? null : valores.get(nome);
+      if (valor == null || valor.isBlank()) {
+        LOG.warn(
+            "whatsapp.template.variavelFaltando tenantId={} template={} variavel={}",
+            tenantId, template.getNome(), nome);
+        return dispatcher.sendText(new ChannelSendCommand(tenantId, canal, destino, textoEquivalente));
+      }
+      ordenados.add(valor);
+    }
+
+    return dispatcher.sendTemplate(
+        new ChannelTemplateCommand(
+            tenantId, canal, destino, template.getNome(), template.getIdioma(), ordenados,
+            textoEquivalente));
+  }
+
+  /** A ordem guardada e o contrato: e ela que liga {@code {{1}}} ao nome do cliente. */
+  static List<String> variaveisDe(WhatsAppTemplateEntity template) {
+    String guardadas = template.getVariaveis();
+    if (guardadas == null || guardadas.isBlank()) return List.of();
+    return java.util.Arrays.stream(guardadas.split(","))
+        .map(String::trim)
+        .filter(nome -> !nome.isEmpty())
+        .toList();
   }
 
   @Transactional(readOnly = true)
