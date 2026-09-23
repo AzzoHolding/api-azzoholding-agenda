@@ -187,6 +187,30 @@ public class ServicoTenantWhatsapp {
   }
 
   /**
+   * Guarda o template que o salao aprovou na Meta para a confirmacao.
+   *
+   * <p>Nao da para adivinhar nem padronizar: o nome e o idioma sao os que a Meta aprovou para
+   * AQUELE salao, com o texto que ele escreveu. Vazio limpa, e volta a nao haver confirmacao para
+   * cliente novo.
+   */
+  @Transactional
+  public TenantWhatsAppDtos.ConfigResponse definirTemplateDeConfirmacao(
+      TenantWhatsAppDtos.TemplateDeConfirmacaoRequest request) {
+    UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    TenantWhatsAppConfig config = tenantWhatsAppConfigRepository.findByTenantIdOrCreate(tenantId);
+    config.setConfirmationTemplateName(trimToNull(request == null ? null : request.templateName));
+    config.setConfirmationTemplateLanguage(
+        trimToNull(request == null ? null : request.templateLanguage));
+    tenantWhatsAppConfigRepository.save(config);
+    TenantWhatsAppDtos.ConfigResponse resposta = toConfigResponse(config);
+    registrarAuditoria(tenantId, "WHATSAPP_CONFIRMATION_TEMPLATE_UPDATE", tenantId.toString(), null,
+        java.util.Map.of(
+            "template", config.getConfirmationTemplateName() == null ? "" : config.getConfirmationTemplateName()),
+        true);
+    return resposta;
+  }
+
+  /**
    * Registra o numero e inscreve o webhook, se ainda nao foi feito. <b>Nunca lanca.</b>
    *
    * <p>É o passo que faz o numero SAIR DO MUDO, e ele roda sozinho em todo caminho que configura
@@ -529,6 +553,8 @@ public class ServicoTenantWhatsapp {
     response.webhookVerifyToken = decryptWebhookVerifyToken(config);
     response.numeroRegistrado = config.getWhatsappRegisteredAt() != null;
     response.registrationPin = decryptRegistrationPin(config);
+    response.confirmationTemplateName = config.getConfirmationTemplateName();
+    response.confirmationTemplateLanguage = config.getConfirmationTemplateLanguage();
     response.accessTokenConfigured = hasAccessTokenConfigured(config);
     response.webhookVerifyTokenConfigured =
         config.getWhatsappWebhookVerifyTokenEnc() != null && !config.getWhatsappWebhookVerifyTokenEnc().isBlank();

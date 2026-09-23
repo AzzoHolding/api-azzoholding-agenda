@@ -2,6 +2,7 @@ package br.com.phdigitalcode.azzo.agenda.pro.integration;
 
 import java.time.Duration;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import org.slf4j.Logger;
@@ -160,6 +161,23 @@ public class WhatsAppClient {
    */
   public String enviarTemplate(
       TenantWhatsAppConfig config, String to, String templateName, String languageCode) {
+    return enviarTemplate(config, to, templateName, languageCode, List.of());
+  }
+
+  /**
+   * O mesmo envio, com as VARIAVEIS do corpo do template.
+   *
+   * <p>Uma confirmacao de agendamento nao e um texto fixo: ela diz o nome do cliente, o servico, o
+   * dia e a hora. No template aprovado esses pedacos sao {@code {{1}}, {{2}}...}, e a ordem desta
+   * lista e a ordem deles — trocar duas posicoes manda o servico no lugar do nome, sem erro
+   * nenhum da Meta.
+   */
+  public String enviarTemplate(
+      TenantWhatsAppConfig config,
+      String to,
+      String templateName,
+      String languageCode,
+      List<String> variaveis) {
     String token = getTenantTokenOrFail(config);
     String phoneNumberId = getPhoneNumberIdOrFail(config);
     if (to == null || to.isBlank()) throw new IllegalArgumentException("Destino do WhatsApp invalido");
@@ -182,7 +200,19 @@ public class WhatsAppClient {
       payload.put("messaging_product", "whatsapp");
       payload.put("to", normalizedDestination);
       payload.put("type", "template");
-      payload.put("template", Map.of("name", templateName, "language", Map.of("code", idioma)));
+      Map<String, Object> template = new HashMap<>();
+      template.put("name", templateName);
+      template.put("language", Map.of("code", idioma));
+      if (variaveis != null && !variaveis.isEmpty()) {
+        // "body" com parametros de texto, na ordem de {{1}}, {{2}}... Nulo viraria "null" no
+        // corpo da mensagem que o cliente le, entao vira vazio.
+        List<Map<String, String>> parametros =
+            variaveis.stream()
+                .map(valor -> Map.of("type", "text", "text", valor == null ? "" : valor))
+                .toList();
+        template.put("components", List.of(Map.of("type", "body", "parameters", parametros)));
+      }
+      payload.put("template", template);
 
       String body = restClient.post()
           .uri(graphApiBase() + phoneNumberId + "/messages")

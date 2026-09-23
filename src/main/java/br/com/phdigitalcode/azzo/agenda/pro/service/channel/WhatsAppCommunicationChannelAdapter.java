@@ -45,6 +45,32 @@ public class WhatsAppCommunicationChannelAdapter implements CommunicationChannel
     }
   }
 
+  /**
+   * No WhatsApp, template e template — e nao o texto equivalente.
+   *
+   * Mandar o texto aqui recriaria o problema que o template existe para resolver: fora da janela
+   * de 24h ele e aceito e descartado, e o cliente nao recebe nada.
+   */
+  @Override
+  public ChannelSendResult sendTemplate(ChannelTemplateCommand command) {
+    TenantWhatsAppConfig config = tenantWhatsAppConfigRepository.findById(command.tenantId()).orElse(null);
+    if (config == null || !config.isWhatsappEnabled()) {
+      return ChannelSendResult.failed("WHATSAPP_NOT_ENABLED", "WhatsApp nao habilitado para o tenant.");
+    }
+
+    try {
+      String providerMessageId = whatsAppClient.enviarTemplate(
+          config,
+          command.recipientExternalId(),
+          command.templateName(),
+          command.templateLanguage(),
+          command.variaveis());
+      return ChannelSendResult.sent(providerMessageId);
+    } catch (RuntimeException ex) {
+      return ChannelSendResult.failed("WHATSAPP_TEMPLATE_ERROR", safeError(ex.getMessage()));
+    }
+  }
+
   private String safeError(String value) {
     if (value == null || value.isBlank()) return "Falha ao enviar mensagem no WhatsApp";
     return value.length() > 500 ? value.substring(0, 500) : value;
