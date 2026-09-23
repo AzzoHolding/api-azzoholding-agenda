@@ -73,6 +73,18 @@ public class WhatsAppController {
   }
 
   /**
+   * Poe os modelos em dia: cria o que falta e reconfere o status na Meta.
+   *
+   * <p>Existe pelo legado — quem conectou antes de 2026-09-23 tem numero registrado e nenhum
+   * template criado, porque a criacao automatica roda no fim do Embedded Signup. Serve tambem
+   * para reconferir na hora, sem esperar os 10 minutos do monitoramento.
+   */
+  @PostMapping("/templates/sync")
+  public TenantWhatsAppDtos.TemplatesResponse sincronizarTemplates() {
+    return servicoTenantWhatsapp.sincronizarTemplates();
+  }
+
+  /**
    * Cria na Meta os templates das mensagens automaticas que o salao escreveu.
    *
    * <p>Criar nao e aprovar: a resposta volta com os pendentes, e o estado e reconferido sozinho.
