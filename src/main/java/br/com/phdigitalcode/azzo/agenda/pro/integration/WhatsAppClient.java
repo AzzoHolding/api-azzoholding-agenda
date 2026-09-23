@@ -255,6 +255,154 @@ public class WhatsAppClient {
     }
   }
 
+  /** O que a Meta devolveu ao criar ou consultar um template. */
+  public static class TemplateDetails {
+    public String id;
+    public String name;
+    public String status;
+    public String rejectedReason;
+  }
+
+  /**
+   * Cria um template na WABA do cliente.
+   *
+   * <p><b>Template pertence a WABA, e nao ao app</b>: os templates do Azzo nao existem na conta do
+   * salao. No modelo de provedor quem cria e o Azzo, que tem {@code whatsapp_business_management}
+   * sobre a conta dele — e assim o dono nunca precisa saber que "template" existe.
+   *
+   * <p>Criar nao e aprovar: a Meta devolve {@code PENDING} e analisa depois. So
+   * {@code APPROVED} entrega.
+   *
+   * @param exemplos um valor de exemplo por variavel, na ordem — a Meta EXIGE para analisar
+   */
+  public TemplateDetails criarTemplate(
+      TenantWhatsAppConfig config,
+      String nome,
+      String idioma,
+      String categoria,
+      String corpo,
+      List<String> exemplos) {
+    String token = getTenantTokenOrFail(config);
+    String wabaId = config == null ? null : config.getWhatsappBusinessAccountId();
+    if (wabaId == null || wabaId.isBlank()) {
+      throw new IllegalArgumentException("Conta comercial do WhatsApp nao informada para o tenant");
+    }
+    if (nome == null || nome.isBlank()) throw new IllegalArgumentException("Nome do template obrigatorio");
+    if (corpo == null || corpo.isBlank()) throw new IllegalArgumentException("Corpo do template obrigatorio");
+
+    Map<String, Object> componenteDoCorpo = new HashMap<>();
+    componenteDoCorpo.put("type", "BODY");
+    componenteDoCorpo.put("text", corpo);
+    if (exemplos != null && !exemplos.isEmpty()) {
+      // `body_text` e uma lista de LISTAS: um conjunto de exemplos por variacao analisada.
+      componenteDoCorpo.put("example", Map.of("body_text", List.of(exemplos)));
+    }
+
+    Map<String, Object> payload = new HashMap<>();
+    payload.put("name", nome);
+    payload.put("language", idioma == null || idioma.isBlank() ? "pt_BR" : idioma.trim());
+    payload.put("category", categoria == null || categoria.isBlank() ? "UTILITY" : categoria.trim());
+    payload.put("components", List.of(componenteDoCorpo));
+
+    LOG.info(
+        "whatsappClient.createTemplate.started {}",
+        CorrelatedLogging.context("tenantId", config.getTenantId(), "wabaId", wabaId, "template", nome));
+
+    try {
+      String body = restClient.post()
+          .uri(graphApiBase() + wabaId + "/message_templates")
+          .header("Authorization", "Bearer " + token)
+          .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+          .body(payload)
+          .retrieve()
+          .body(String.class);
+
+      JsonNode json = objectMapper.readTree(body);
+      TemplateDetails details = new TemplateDetails();
+      details.id = texto(json.path("id"));
+      details.name = nome;
+      // A Meta costuma devolver PENDING; ausente tratamos como PENDING, que e o seguro: assumir
+      // aprovado mandaria o salao usar um template que ainda nao entrega.
+      details.status = firstNonBlankValue(texto(json.path("status")), "PENDING");
+      LOG.info(
+          "whatsappClient.createTemplate.completed {}",
+          CorrelatedLogging.context(
+              "tenantId", config.getTenantId(), "template", nome, "status", details.status));
+      return details;
+    } catch (IllegalArgumentException e) {
+      throw e;
+    } catch (RestClientResponseException e) {
+      String errorMessage =
+          extractErrorMessage(e.getResponseBodyAsString(), "Falha ao criar o template no WhatsApp");
+      LOG.error(
+          "whatsappClient.createTemplate.failed {}",
+          CorrelatedLogging.context(
+              "tenantId", config.getTenantId(),
+              "template", nome,
+              "root", CorrelatedLogging.throwableSummary(e)),
+          e);
+      throw new IllegalStateException(errorMessage, e);
+    } catch (Exception e) {
+      LOG.error(
+          "whatsappClient.createTemplate.failed {}",
+          CorrelatedLogging.context("tenantId", config.getTenantId(), "template", nome),
+          e);
+      throw new IllegalStateException("Falha ao criar o template no WhatsApp", e);
+    }
+  }
+
+  /**
+   * Os templates da conta do cliente, com o estado da analise.
+   *
+   * <p>E o que o monitoramento usa: a Meta nao avisa quando aprova ou recusa, a menos que o
+   * webhook esteja recebendo {@code message_template_status_update}. Perguntar e o caminho que
+   * funciona mesmo com o webhook fora do ar.
+   */
+  public List<TemplateDetails> listarTemplates(TenantWhatsAppConfig config) {
+    String token = getTenantTokenOrFail(config);
+    String wabaId = config == null ? null : config.getWhatsappBusinessAccountId();
+    if (wabaId == null || wabaId.isBlank()) {
+      throw new IllegalArgumentException("Conta comercial do WhatsApp nao informada para o tenant");
+    }
+
+    try {
+      String body = restClient.get()
+          .uri(graphApiBase() + wabaId + "/message_templates?fields=id,name,status,rejected_reason&limit=100")
+          .header("Authorization", "Bearer " + token)
+          .retrieve()
+          .body(String.class);
+
+      JsonNode dados = objectMapper.readTree(body).path("data");
+      List<TemplateDetails> encontrados = new java.util.ArrayList<>();
+      if (dados.isArray()) {
+        for (JsonNode item : dados) {
+          TemplateDetails details = new TemplateDetails();
+          details.id = texto(item.path("id"));
+          details.name = texto(item.path("name"));
+          details.status = texto(item.path("status"));
+          details.rejectedReason = texto(item.path("rejected_reason"));
+          encontrados.add(details);
+        }
+      }
+      return encontrados;
+    } catch (RestClientResponseException e) {
+      throw new IllegalStateException(
+          extractErrorMessage(e.getResponseBodyAsString(), "Falha ao consultar os templates no WhatsApp"), e);
+    } catch (Exception e) {
+      throw new IllegalStateException("Falha ao consultar os templates no WhatsApp", e);
+    }
+  }
+
+  private String texto(JsonNode node) {
+    if (node == null || node.isNull()) return null;
+    String valor = node.asText();
+    return valor == null || valor.isBlank() ? null : valor.trim();
+  }
+
+  private String firstNonBlankValue(String valor, String padrao) {
+    return valor == null || valor.isBlank() ? padrao : valor;
+  }
+
   /**
    * Registra o numero no Cloud API. <b>Sem isto o numero nao envia mensagem nenhuma.</b>
    *

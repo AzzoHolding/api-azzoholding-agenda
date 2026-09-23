@@ -66,6 +66,22 @@ public class WhatsAppController {
     return servicoTenantWhatsapp.definirTemplateDeConfirmacao(request);
   }
 
+  /** Os templates do salao, com o estado da analise da Meta. */
+  @GetMapping("/templates")
+  public TenantWhatsAppDtos.TemplatesResponse listarTemplates() {
+    return servicoTenantWhatsapp.listarTemplates();
+  }
+
+  /**
+   * Cria na Meta os templates das mensagens automaticas que o salao escreveu.
+   *
+   * <p>Criar nao e aprovar: a resposta volta com os pendentes, e o estado e reconferido sozinho.
+   */
+  @PostMapping("/templates")
+  public TenantWhatsAppDtos.TemplatesResponse criarTemplates() {
+    return servicoTenantWhatsapp.criarTemplatesDasMensagens();
+  }
+
   @PostMapping("/register-number")
   public TenantWhatsAppDtos.RegistroDoNumeroResponse registrarNumero() {
     return servicoTenantWhatsapp.registrarNumero();

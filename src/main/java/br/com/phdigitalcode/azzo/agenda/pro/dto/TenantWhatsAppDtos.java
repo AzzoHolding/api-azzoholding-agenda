@@ -86,6 +86,26 @@ public final class TenantWhatsAppDtos {
     public String templateLanguage;
   }
 
+  /**
+   * Um template na conta do salao, com o estado da analise da Meta.
+   *
+   * <b>Criar nao e aprovar</b>: ate o status virar APPROVED, esse template nao entrega nada.
+   */
+  public static class TemplateItem {
+    public String finalidade;
+    public String nome;
+    public String idioma;
+    public String status;
+    public String motivoRecusa;
+    public String corpo;
+    /** As variaveis em ordem: e o que liga {{1}} ao nome do cliente no envio. */
+    public String variaveis;
+  }
+
+  public static class TemplatesResponse {
+    public java.util.List<TemplateItem> items = new java.util.ArrayList<>();
+  }
+
   public static class RegistroDoNumeroResponse {
     public boolean success;
     public String message;
