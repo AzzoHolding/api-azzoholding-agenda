@@ -3,6 +3,7 @@ package br.com.phdigitalcode.azzo.agenda.pro.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -62,7 +63,7 @@ class ServicoTenantWhatsappTest {
     metaEmbeddedSignupClient = mock(MetaEmbeddedSignupGateway.class);
     messageLogRepository = mock(WhatsAppMessageLogRepository.class);
     servicoTemplates = mock(ServicoTemplatesDoWhatsapp.class);
-    when(servicoTemplates.templateDeTesteDoTenant(any())).thenReturn(java.util.Optional.empty());
+    when(servicoTemplates.templateParaTeste(any())).thenReturn(java.util.Optional.empty());
 
     when(contextoTenant.obterTenantIdOuFalhar()).thenReturn(tenantId);
     when(webhookVerifyTokenHashService.hash(anyString())).thenReturn("hashed-token");
@@ -179,7 +180,7 @@ class ServicoTenantWhatsappTest {
   @Test
   void numeroNaoRegistradoNoCloudApiNaoManda_revisar_credenciais() {
     when(repository.findByTenantIdOrCreate(tenantId)).thenReturn(configVazia());
-    when(whatsAppClient.enviarTemplate(any(TenantWhatsAppConfig.class), anyString(), anyString(), anyString()))
+    when(whatsAppClient.enviarTemplate(any(TenantWhatsAppConfig.class), anyString(), anyString(), anyString(), anyList()))
         .thenThrow(new IllegalStateException("(#133010) Account not registered"));
 
     TenantWhatsAppDtos.TestMessageRequest request = new TenantWhatsAppDtos.TestMessageRequest();
@@ -202,7 +203,7 @@ class ServicoTenantWhatsappTest {
   @Test
   void falhaNoEnvioDeTesteFicaRegistradaNoLogComOErroCruDaMeta() {
     when(repository.findByTenantIdOrCreate(tenantId)).thenReturn(configVazia());
-    when(whatsAppClient.enviarTemplate(any(TenantWhatsAppConfig.class), anyString(), anyString(), anyString()))
+    when(whatsAppClient.enviarTemplate(any(TenantWhatsAppConfig.class), anyString(), anyString(), anyString(), anyList()))
         .thenThrow(new IllegalStateException("(#133010) Account not registered"));
 
     TenantWhatsAppDtos.TestMessageRequest request = new TenantWhatsAppDtos.TestMessageRequest();
@@ -222,7 +223,7 @@ class ServicoTenantWhatsappTest {
   @Test
   void envioDeTesteBemSucedidoFicaRegistradoNoLog() {
     when(repository.findByTenantIdOrCreate(tenantId)).thenReturn(configVazia());
-    when(whatsAppClient.enviarTemplate(any(TenantWhatsAppConfig.class), anyString(), anyString(), anyString()))
+    when(whatsAppClient.enviarTemplate(any(TenantWhatsAppConfig.class), anyString(), anyString(), anyString(), anyList()))
         .thenReturn("wamid.999");
 
     TenantWhatsAppDtos.TestMessageRequest request = new TenantWhatsAppDtos.TestMessageRequest();
@@ -242,7 +243,7 @@ class ServicoTenantWhatsappTest {
   @Test
   void falhaAoGravarNoLogNaoDerrubaOEnvio() {
     when(repository.findByTenantIdOrCreate(tenantId)).thenReturn(configVazia());
-    when(whatsAppClient.enviarTemplate(any(TenantWhatsAppConfig.class), anyString(), anyString(), anyString()))
+    when(whatsAppClient.enviarTemplate(any(TenantWhatsAppConfig.class), anyString(), anyString(), anyString(), anyList()))
         .thenReturn("wamid.777");
     when(messageLogRepository.save(any(WhatsAppMessageLogEntity.class)))
         .thenThrow(new RuntimeException("banco fora"));
@@ -261,7 +262,7 @@ class ServicoTenantWhatsappTest {
   @Test
   void erroDesconhecidoDaMetaChegaNaTelaComOTextoDela() {
     when(repository.findByTenantIdOrCreate(tenantId)).thenReturn(configVazia());
-    when(whatsAppClient.enviarTemplate(any(TenantWhatsAppConfig.class), anyString(), anyString(), anyString()))
+    when(whatsAppClient.enviarTemplate(any(TenantWhatsAppConfig.class), anyString(), anyString(), anyString(), anyList()))
         .thenThrow(new IllegalStateException("(#131030) Recipient phone number not in allowed list"));
 
     TenantWhatsAppDtos.TestMessageRequest request = new TenantWhatsAppDtos.TestMessageRequest();
@@ -278,7 +279,7 @@ class ServicoTenantWhatsappTest {
   void enviarMensagemTesteComSucessoRegistraAuditoria() {
     TenantWhatsAppConfig config = configVazia();
     when(repository.findByTenantIdOrCreate(tenantId)).thenReturn(config);
-    when(whatsAppClient.enviarTemplate(any(TenantWhatsAppConfig.class), anyString(), anyString(), anyString()))
+    when(whatsAppClient.enviarTemplate(any(TenantWhatsAppConfig.class), anyString(), anyString(), anyString(), anyList()))
         .thenReturn("wamid.123");
 
     TenantWhatsAppDtos.TestMessageRequest request = new TenantWhatsAppDtos.TestMessageRequest();
@@ -516,7 +517,7 @@ class ServicoTenantWhatsappTest {
   @Test
   void oTestePadraoMandaTemplate() {
     when(repository.findByTenantIdOrCreate(tenantId)).thenReturn(configVazia());
-    when(whatsAppClient.enviarTemplate(any(TenantWhatsAppConfig.class), anyString(), anyString(), anyString()))
+    when(whatsAppClient.enviarTemplate(any(TenantWhatsAppConfig.class), anyString(), anyString(), anyString(), anyList()))
         .thenReturn("wamid.tpl");
 
     TenantWhatsAppDtos.TestMessageRequest request = new TenantWhatsAppDtos.TestMessageRequest();
@@ -527,7 +528,7 @@ class ServicoTenantWhatsappTest {
 
     assertThat(response.success).isTrue();
     verify(whatsAppClient)
-        .enviarTemplate(any(TenantWhatsAppConfig.class), anyString(), eq("teste_integracao"), eq("pt_BR"));
+        .enviarTemplate(any(TenantWhatsAppConfig.class), anyString(), eq("teste_integracao"), eq("pt_BR"), anyList());
     verify(whatsAppClient, never()).sendMessage(any(TenantWhatsAppConfig.class), anyString(), anyString());
     // "Aceita", e nao "entregue": o wamid prova que a Meta aceitou, nao que alguem recebeu.
     assertThat(response.message).contains("aceito pela Meta").doesNotContain("entregue");
@@ -548,13 +549,13 @@ class ServicoTenantWhatsappTest {
 
     verify(whatsAppClient).sendMessage(any(TenantWhatsAppConfig.class), anyString(), eq("oi"));
     verify(whatsAppClient, never())
-        .enviarTemplate(any(TenantWhatsAppConfig.class), anyString(), anyString(), anyString());
+        .enviarTemplate(any(TenantWhatsAppConfig.class), anyString(), anyString(), anyString(), anyList());
   }
 
   @Test
   void oTemplateEscolhidoPeloSalaoVenceOPadrao() {
     when(repository.findByTenantIdOrCreate(tenantId)).thenReturn(configVazia());
-    when(whatsAppClient.enviarTemplate(any(TenantWhatsAppConfig.class), anyString(), anyString(), anyString()))
+    when(whatsAppClient.enviarTemplate(any(TenantWhatsAppConfig.class), anyString(), anyString(), anyString(), anyList()))
         .thenReturn("wamid.tpl");
 
     TenantWhatsAppDtos.TestMessageRequest request = new TenantWhatsAppDtos.TestMessageRequest();
@@ -565,14 +566,16 @@ class ServicoTenantWhatsappTest {
     serviceEmbeddedHabilitado.enviarMensagemTeste(request);
 
     verify(whatsAppClient)
-        .enviarTemplate(any(TenantWhatsAppConfig.class), anyString(), eq("confirmacao_agendamento"), eq("pt_BR"));
+        .enviarTemplate(
+            any(TenantWhatsAppConfig.class), anyString(), eq("confirmacao_agendamento"), eq("pt_BR"),
+            anyList());
   }
 
   /** O log precisa dizer QUAL template foi mandado: "Entregue" sozinho ja enganou uma vez. */
   @Test
   void oLogRegistraQualTemplateFoiEnviado() {
     when(repository.findByTenantIdOrCreate(tenantId)).thenReturn(configVazia());
-    when(whatsAppClient.enviarTemplate(any(TenantWhatsAppConfig.class), anyString(), anyString(), anyString()))
+    when(whatsAppClient.enviarTemplate(any(TenantWhatsAppConfig.class), anyString(), anyString(), anyString(), anyList()))
         .thenReturn("wamid.tpl");
 
     TenantWhatsAppDtos.TestMessageRequest request = new TenantWhatsAppDtos.TestMessageRequest();
@@ -593,13 +596,12 @@ class ServicoTenantWhatsappTest {
   @Test
   void oTesteUsaOTemplateDoProprioSalao() {
     when(repository.findByTenantIdOrCreate(tenantId)).thenReturn(configVazia());
-    br.com.phdigitalcode.azzo.agenda.pro.entity.WhatsAppTemplateEntity doSalao =
-        new br.com.phdigitalcode.azzo.agenda.pro.entity.WhatsAppTemplateEntity();
-    doSalao.setNome("teste_integracao");
-    doSalao.setIdioma("pt_BR");
-    doSalao.setStatus("APPROVED");
-    when(servicoTemplates.templateDeTesteDoTenant(any())).thenReturn(java.util.Optional.of(doSalao));
-    when(whatsAppClient.enviarTemplate(any(TenantWhatsAppConfig.class), anyString(), anyString(), anyString()))
+    when(servicoTemplates.templateParaTeste(any()))
+        .thenReturn(
+            java.util.Optional.of(
+                new ServicoTemplatesDoWhatsapp.TemplateParaTeste(
+                    "teste_integracao", "pt_BR", java.util.List.of(), true)));
+    when(whatsAppClient.enviarTemplate(any(TenantWhatsAppConfig.class), anyString(), anyString(), anyString(), anyList()))
         .thenReturn("wamid.tpl");
 
     TenantWhatsAppDtos.TestMessageRequest request = new TenantWhatsAppDtos.TestMessageRequest();
@@ -610,20 +612,19 @@ class ServicoTenantWhatsappTest {
 
     assertThat(response.success).isTrue();
     verify(whatsAppClient)
-        .enviarTemplate(any(TenantWhatsAppConfig.class), anyString(), eq("teste_integracao"), eq("pt_BR"));
+        .enviarTemplate(any(TenantWhatsAppConfig.class), anyString(), eq("teste_integracao"), eq("pt_BR"), anyList());
   }
 
   /** Recusa por analise pendente nao pode ser confundida com credencial errada. */
   @Test
   void templateNaoAprovadoAvisaQueAAnaliseEstaPendente() {
     when(repository.findByTenantIdOrCreate(tenantId)).thenReturn(configVazia());
-    br.com.phdigitalcode.azzo.agenda.pro.entity.WhatsAppTemplateEntity pendente =
-        new br.com.phdigitalcode.azzo.agenda.pro.entity.WhatsAppTemplateEntity();
-    pendente.setNome("teste_integracao");
-    pendente.setIdioma("pt_BR");
-    pendente.setStatus("PENDING");
-    when(servicoTemplates.templateDeTesteDoTenant(any())).thenReturn(java.util.Optional.of(pendente));
-    when(whatsAppClient.enviarTemplate(any(TenantWhatsAppConfig.class), anyString(), anyString(), anyString()))
+    when(servicoTemplates.templateParaTeste(any()))
+        .thenReturn(
+            java.util.Optional.of(
+                new ServicoTemplatesDoWhatsapp.TemplateParaTeste(
+                    "teste_integracao", "pt_BR", java.util.List.of(), false)));
+    when(whatsAppClient.enviarTemplate(any(TenantWhatsAppConfig.class), anyString(), anyString(), anyString(), anyList()))
         .thenReturn("wamid.tpl");
 
     TenantWhatsAppDtos.TestMessageRequest request = new TenantWhatsAppDtos.TestMessageRequest();
@@ -671,7 +672,7 @@ class ServicoTenantWhatsappTest {
     TenantWhatsAppConfig config = configVazia();
     config.setWhatsappRegisteredAt(java.time.Instant.now());
     when(repository.findByTenantIdOrCreate(tenantId)).thenReturn(config);
-    when(whatsAppClient.enviarTemplate(any(TenantWhatsAppConfig.class), anyString(), anyString(), anyString()))
+    when(whatsAppClient.enviarTemplate(any(TenantWhatsAppConfig.class), anyString(), anyString(), anyString(), anyList()))
         .thenThrow(new IllegalStateException("(#133010) Account not registered"));
 
     TenantWhatsAppDtos.TestMessageRequest request = new TenantWhatsAppDtos.TestMessageRequest();
@@ -689,7 +690,7 @@ class ServicoTenantWhatsappTest {
     java.time.Instant registradoEm = java.time.Instant.now();
     config.setWhatsappRegisteredAt(registradoEm);
     when(repository.findByTenantIdOrCreate(tenantId)).thenReturn(config);
-    when(whatsAppClient.enviarTemplate(any(TenantWhatsAppConfig.class), anyString(), anyString(), anyString()))
+    when(whatsAppClient.enviarTemplate(any(TenantWhatsAppConfig.class), anyString(), anyString(), anyString(), anyList()))
         .thenThrow(new IllegalStateException("(#131037) needs display name approval"));
 
     TenantWhatsAppDtos.TestMessageRequest request = new TenantWhatsAppDtos.TestMessageRequest();

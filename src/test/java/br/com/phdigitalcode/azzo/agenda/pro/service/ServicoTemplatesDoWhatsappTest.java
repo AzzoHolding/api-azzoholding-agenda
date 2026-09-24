@@ -338,4 +338,96 @@ class ServicoTemplatesDoWhatsappTest {
 
     assertThat(teste.getStatus()).isEqualTo("APPROVED");
   }
+
+  /**
+   * Criar de novo com o mesmo nome nao funciona — a Meta recusa nome repetido. Sem edicao, os
+   * modelos criados com o corpo "teste" ficariam assim para sempre (2026-09-23).
+   */
+  @Test
+  @DisplayName("template que ja existe na Meta e EDITADO, nao recriado")
+  void templateExistenteEEditado() {
+    TenantWhatsAppConfig config = config();
+    config.setConfirmationMessageTemplate("Olá {cliente}! Seu {servico} em {data}.");
+    when(configRepository.findByTenantIdOrCreate(tenantId)).thenReturn(config);
+
+    WhatsAppTemplateEntity existente = new WhatsAppTemplateEntity();
+    existente.setTenantId(tenantId);
+    existente.setFinalidade(WhatsAppTemplateEntity.CONFIRMACAO);
+    existente.setNome("azzo_confirmacao");
+    existente.setStatus(WhatsAppTemplateEntity.PENDING);
+    existente.setCorpo("teste");
+    existente.setMetaTemplateId("tpl-existente");
+    when(templateRepository.findByTenantIdAndFinalidade(tenantId, WhatsAppTemplateEntity.CONFIRMACAO))
+        .thenReturn(Optional.of(existente));
+    WhatsAppClient.TemplateDetails editado = new WhatsAppClient.TemplateDetails();
+    editado.id = "tpl-existente";
+    editado.status = "PENDING";
+    when(whatsAppClient.editarTemplate(any(), anyString(), anyString(), anyList(), anyString()))
+        .thenReturn(editado);
+
+    servico.criarTemplatesDasMensagens(tenantId);
+
+    verify(whatsAppClient).editarTemplate(any(), eq("tpl-existente"), eq("Olá {{1}}! Seu {{2}} em {{3}}."), anyList(), anyString());
+    verify(whatsAppClient, never())
+        .criarTemplate(any(), anyString(), anyString(), anyString(), anyString(), anyList());
+  }
+
+  /** O de teste virou aviso de CONFIGURACAO: anunciar que um sistema funcionou nao e utilidade. */
+  @Test
+  @DisplayName("o corpo do teste nao anuncia integracao, avisa da configuracao")
+  void corpoDoTesteEAvisoDeConfiguracao() {
+    when(whatsAppClient.criarTemplate(any(), anyString(), anyString(), anyString(), anyString(), anyList()))
+        .thenReturn(criado("PENDING"));
+
+    servico.criarTemplateDeTeste(config());
+
+    ArgumentCaptor<String> corpo = ArgumentCaptor.forClass(String.class);
+    verify(whatsAppClient)
+        .criarTemplate(any(), anyString(), anyString(), anyString(), corpo.capture(), anyList());
+    assertThat(corpo.getValue()).contains("conectado ao sistema de agendamentos");
+    assertThat(corpo.getValue()).doesNotContain("teste");
+  }
+
+  /** O teste deve provar o caminho que importa: a confirmacao, e nao um template paralelo. */
+  @Test
+  @DisplayName("o teste escolhe a confirmacao, com os exemplos das variaveis")
+  void oTesteEscolheAConfirmacaoComExemplos() {
+    WhatsAppTemplateEntity confirmacao = new WhatsAppTemplateEntity();
+    confirmacao.setTenantId(tenantId);
+    confirmacao.setFinalidade(WhatsAppTemplateEntity.CONFIRMACAO);
+    confirmacao.setNome("azzo_confirmacao");
+    confirmacao.setIdioma("pt_BR");
+    confirmacao.setStatus(WhatsAppTemplateEntity.APPROVED);
+    confirmacao.setVariaveis("cliente,servico");
+    when(templateRepository.findByTenantIdAndFinalidade(tenantId, WhatsAppTemplateEntity.CONFIRMACAO))
+        .thenReturn(Optional.of(confirmacao));
+
+    var escolhido = servico.templateParaTeste(tenantId).orElseThrow();
+
+    assertThat(escolhido.nome()).isEqualTo("azzo_confirmacao");
+    assertThat(escolhido.aprovado()).isTrue();
+    // Os mesmos exemplos que foram para a analise: a mensagem chega parecida com a de verdade.
+    assertThat(escolhido.exemplos()).containsExactly("Marina", "Corte feminino");
+  }
+
+  /** Sem confirmacao ainda, o de teste continua servindo. */
+  @Test
+  @DisplayName("sem confirmacao, o teste cai no template de teste")
+  void semConfirmacaoUsaOTemplateDeTeste() {
+    WhatsAppTemplateEntity teste = new WhatsAppTemplateEntity();
+    teste.setTenantId(tenantId);
+    teste.setFinalidade(WhatsAppTemplateEntity.TESTE);
+    teste.setNome("teste_integracao");
+    teste.setIdioma("pt_BR");
+    teste.setStatus(WhatsAppTemplateEntity.PENDING);
+    when(templateRepository.findByTenantIdAndFinalidade(tenantId, WhatsAppTemplateEntity.CONFIRMACAO))
+        .thenReturn(Optional.empty());
+    when(templateRepository.findByTenantIdAndFinalidade(tenantId, WhatsAppTemplateEntity.TESTE))
+        .thenReturn(Optional.of(teste));
+
+    var escolhido = servico.templateParaTeste(tenantId).orElseThrow();
+
+    assertThat(escolhido.nome()).isEqualTo("teste_integracao");
+    assertThat(escolhido.aprovado()).isFalse();
+  }
 }
