@@ -7,9 +7,13 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import br.com.phdigitalcode.azzo.agenda.pro.entity.Agendamento;
+import br.com.phdigitalcode.azzo.agenda.pro.service.ServicoConfirmacaoDeAgendamento;
 
 /**
- * PLACEHOLDER — cobre o unico ponto em que {@code settings} depende de
+ * PARCIALMENTE PLACEHOLDER. {@code sendConfirmation} passou a enviar de verdade em 2026-09-24;
+ * {@code sendCancellation} e {@code sendNoShow} continuam so logando.
+ *
+ * <p>Cobre o ponto em que {@code settings} depende de
  * {@code modules/tenant/application/WhatsAppAppointmentNotificationService.java}:
  * {@code sendCancellation(tenantId, agendamento)}, chamado por
  * {@link br.com.phdigitalcode.azzo.agenda.pro.service.SpecialClosureService} quando um fechamento e
@@ -32,18 +36,29 @@ public class WhatsAppAppointmentNotificationService {
   private static final Logger LOG =
       LoggerFactory.getLogger(WhatsAppAppointmentNotificationService.class);
 
+  private final ServicoConfirmacaoDeAgendamento servicoConfirmacao;
+
+  public WhatsAppAppointmentNotificationService(ServicoConfirmacaoDeAgendamento servicoConfirmacao) {
+    this.servicoConfirmacao = servicoConfirmacao;
+  }
+
   /** LGPD: nao loga nome nem telefone do cliente — apenas identificadores. */
   public void sendCancellation(UUID tenantId, Agendamento agendamento) {
     logNaoEnviado("cancelamento", tenantId, agendamento);
   }
 
   /**
-   * Confirmacao enviada ao cliente logo apos a criacao do agendamento. No original a chamada ja
-   * vem envolvida em {@code try/catch} vazio no {@code ServicoAgendamentos.criar} — falha de envio
-   * nunca aborta a criacao.
+   * Confirmacao enviada ao cliente logo apos a criacao do agendamento.
+   *
+   * <p><b>Deixou de ser placeholder em 2026-09-24.</b> Ate entao so logava: o cliente marcava um
+   * horario e nao recebia nada. Sai por template aprovado, porque confirmacao de cliente novo e
+   * sempre primeiro contato — e fora da janela de 24h o texto livre e aceito e descartado.
+   *
+   * <p>A chamada ja vem envolvida em {@code try/catch} no {@code ServicoAgendamentos.criar}, e o
+   * proprio servico nao lanca: falha de envio nunca aborta a criacao.
    */
   public void sendConfirmation(UUID tenantId, Agendamento agendamento) {
-    logNaoEnviado("confirmacao", tenantId, agendamento);
+    servicoConfirmacao.enviar(tenantId, agendamento);
   }
 
   /**
