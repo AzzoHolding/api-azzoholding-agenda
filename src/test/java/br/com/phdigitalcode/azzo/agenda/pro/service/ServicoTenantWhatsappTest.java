@@ -632,4 +632,70 @@ class ServicoTenantWhatsappTest {
     assertThat(serviceEmbeddedHabilitado.enviarMensagemTeste(request).message)
         .contains("ainda nao foi aprovado");
   }
+
+  /**
+   * O beco sem saida de 2026-09-23: o registro era gravado como flag da CONFIGURACAO, e nao do
+   * numero. Trocar de numero deixava a flag marcada pelo antigo — o registro automatico pulava, e
+   * o aviso e o botao da tela ficavam escondidos pelo mesmo motivo.
+   */
+  @Test
+  void trocarDeNumeroObrigaARegistrarDeNovo() {
+    TenantWhatsAppConfig config = configVazia();
+    config.setWhatsappPhoneNumberId("numero-antigo");
+    config.setWhatsappRegisteredAt(java.time.Instant.now());
+    when(repository.findByTenantIdOrCreate(tenantId)).thenReturn(config);
+    when(whatsAppClient.registrarNumero(any(TenantWhatsAppConfig.class), anyString())).thenReturn(true);
+    when(whatsAppClient.inscreverNoWebhook(any(TenantWhatsAppConfig.class))).thenReturn(true);
+
+    serviceEmbeddedHabilitado.atualizar(configuracaoValida());
+
+    // O numero novo passou pelo registro em vez de herdar a marca do anterior.
+    verify(whatsAppClient).registrarNumero(any(TenantWhatsAppConfig.class), anyString());
+  }
+
+  @Test
+  void manterOMesmoNumeroNaoRegistraDeNovo() {
+    TenantWhatsAppConfig config = configVazia();
+    config.setWhatsappPhoneNumberId("1234567890");
+    config.setWhatsappRegisteredAt(java.time.Instant.now());
+    when(repository.findByTenantIdOrCreate(tenantId)).thenReturn(config);
+
+    serviceEmbeddedHabilitado.atualizar(configuracaoValida());
+
+    verify(whatsAppClient, never()).registrarNumero(any(TenantWhatsAppConfig.class), anyString());
+  }
+
+  /** Confiar na flag contra a resposta da Meta e o que criava o beco sem saida. */
+  @Test
+  void metaDizendoNaoRegistradoDesmarcaAFlag() {
+    TenantWhatsAppConfig config = configVazia();
+    config.setWhatsappRegisteredAt(java.time.Instant.now());
+    when(repository.findByTenantIdOrCreate(tenantId)).thenReturn(config);
+    when(whatsAppClient.enviarTemplate(any(TenantWhatsAppConfig.class), anyString(), anyString(), anyString()))
+        .thenThrow(new IllegalStateException("(#133010) Account not registered"));
+
+    TenantWhatsAppDtos.TestMessageRequest request = new TenantWhatsAppDtos.TestMessageRequest();
+    request.destinationPhone = "+5511999998888";
+    serviceEmbeddedHabilitado.enviarMensagemTeste(request);
+
+    // Nulo e o que faz o aviso e o botao "Registrar numero" voltarem para a tela.
+    assertThat(config.getWhatsappRegisteredAt()).isNull();
+  }
+
+  /** Erro de outra natureza nao pode apagar um registro que esta correto. */
+  @Test
+  void outroErroDaMetaNaoDesmarcaORegistro() {
+    TenantWhatsAppConfig config = configVazia();
+    java.time.Instant registradoEm = java.time.Instant.now();
+    config.setWhatsappRegisteredAt(registradoEm);
+    when(repository.findByTenantIdOrCreate(tenantId)).thenReturn(config);
+    when(whatsAppClient.enviarTemplate(any(TenantWhatsAppConfig.class), anyString(), anyString(), anyString()))
+        .thenThrow(new IllegalStateException("(#131037) needs display name approval"));
+
+    TenantWhatsAppDtos.TestMessageRequest request = new TenantWhatsAppDtos.TestMessageRequest();
+    request.destinationPhone = "+5511999998888";
+    serviceEmbeddedHabilitado.enviarMensagemTeste(request);
+
+    assertThat(config.getWhatsappRegisteredAt()).isEqualTo(registradoEm);
+  }
 }

@@ -94,6 +94,13 @@ public class ServicoTenantWhatsapp {
     } else if (!hasAccessTokenConfigured(config)) {
       throw new IllegalArgumentException("Token do WhatsApp e obrigatorio na primeira configuracao");
     }
+    // O registro e do NUMERO, e nao da configuracao. Trocar de numero sem limpar isto deixava a
+    // flag marcada pelo numero ANTIGO: o registro automatico pulava (ele comeca por "ja
+    // registrado?"), e o aviso e o botao da tela ficavam escondidos pelo mesmo motivo. Beco sem
+    // saida — o sistema dizia registrado, nao registrava e nao oferecia o botao (2026-09-23).
+    if (mudouDeNumero(config.getWhatsappPhoneNumberId(), candidatePhoneNumberId)) {
+      config.setWhatsappRegisteredAt(null);
+    }
     config.setWhatsappPhoneNumberId(candidatePhoneNumberId);
     config.setWhatsappBusinessAccountId(trimToNull(request.businessAccountId));
     config.setMetaBusinessId(trimToNull(request.businessId));
@@ -198,6 +205,13 @@ public class ServicoTenantWhatsapp {
   @Transactional
   public TenantWhatsAppDtos.TemplatesResponse sincronizarTemplates() {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    // Sincronizar e "poe tudo em dia", e nao "poe os modelos em dia": criar template num numero
+    // que nao envia resolve metade do problema. Registrar aqui tambem resgata quem ficou com a
+    // flag de registro errada depois de trocar de numero.
+    TenantWhatsAppConfig config = tenantWhatsAppConfigRepository.findByTenantIdOrCreate(tenantId);
+    if (registrarSeNecessario(config)) {
+      tenantWhatsAppConfigRepository.save(config);
+    }
     TenantWhatsAppDtos.TemplatesResponse resposta =
         paraResposta(servicoTemplates.sincronizar(tenantId));
     registrarAuditoria(tenantId, "WHATSAPP_TEMPLATES_SYNC", tenantId.toString(), null,
@@ -259,6 +273,30 @@ public class ServicoTenantWhatsapp {
             "template", config.getConfirmationTemplateName() == null ? "" : config.getConfirmationTemplateName()),
         true);
     return resposta;
+  }
+
+  private boolean mudouDeNumero(String atual, String novo) {
+    if (atual == null || atual.isBlank()) return false;
+    return !atual.equals(novo);
+  }
+
+  /**
+   * A Meta disse que o numero nao esta registrado: a flag esta errada, e nao ela.
+   *
+   * <p>Confiar na flag contra a resposta da Meta e o que criava o beco sem saida. Limpar aqui faz
+   * o aviso e o botao voltarem para a tela, e a proxima sincronizacao registrar de novo — util
+   * tambem quando a Meta desregistra o numero por conta propria (troca de provedor, numero
+   * migrado).
+   */
+  private void esquecerRegistroSeAMetaDiscordar(TenantWhatsAppConfig config, String erroDaMeta) {
+    if (config == null || config.getWhatsappRegisteredAt() == null || erroDaMeta == null) return;
+    String texto = erroDaMeta.toLowerCase();
+    if (!texto.contains("133010") && !texto.contains("account not registered")) return;
+    config.setWhatsappRegisteredAt(null);
+    tenantWhatsAppConfigRepository.save(config);
+    LOG.warn(
+        "whatsapp.registro.desmarcado tenantId={} motivo=meta_respondeu_nao_registrado",
+        config.getTenantId());
   }
 
   /**
@@ -420,6 +458,9 @@ public class ServicoTenantWhatsapp {
     } catch (IllegalArgumentException | IllegalStateException ex) {
       response.success = false;
       response.message = mapTestConnectionError(ex);
+      // A Meta acabou de dizer que o numero nao esta registrado: a flag esta errada, e insistir
+      // nela esconderia o botao que resolve.
+      esquecerRegistroSeAMetaDiscordar(config, ex.getMessage());
       // O erro CRU da Meta vai para o log da tela, e nao a versao traduzida: e o que permite
       // pesquisar o codigo depois, quando o aviso da tela ja sumiu.
       registrarNoLog(
