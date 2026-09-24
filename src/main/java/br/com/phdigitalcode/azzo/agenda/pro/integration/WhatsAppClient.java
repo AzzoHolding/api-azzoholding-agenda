@@ -352,6 +352,87 @@ public class WhatsAppClient {
   }
 
   /**
+   * Troca o corpo de um template que JA existe na Meta.
+   *
+   * <p><b>Criar de novo com o mesmo nome nao funciona</b>: a Meta recusa nome repetido. Sem esta
+   * chamada, corrigir o texto de um modelo era impossivel — foi o que travou em 2026-09-23, quando
+   * os modelos foram criados com o corpo "teste" e a Meta os reclassificou como marketing.
+   *
+   * <p>Nem todo estado aceita edicao (um template em analise costuma recusar). O erro da Meta sobe
+   * como veio, para a tela poder dizer o motivo em vez de um "falhou" generico.
+   */
+  public TemplateDetails editarTemplate(
+      TenantWhatsAppConfig config,
+      String templateId,
+      String corpo,
+      List<String> exemplos,
+      String categoria) {
+    String token = getTenantTokenOrFail(config);
+    if (templateId == null || templateId.isBlank()) {
+      throw new IllegalArgumentException("Id do template obrigatorio para editar");
+    }
+    if (corpo == null || corpo.isBlank()) {
+      throw new IllegalArgumentException("Corpo do template obrigatorio");
+    }
+
+    Map<String, Object> componenteDoCorpo = new HashMap<>();
+    componenteDoCorpo.put("type", "BODY");
+    componenteDoCorpo.put("text", corpo);
+    if (exemplos != null && !exemplos.isEmpty()) {
+      componenteDoCorpo.put("example", Map.of("body_text", List.of(exemplos)));
+    }
+
+    Map<String, Object> payload = new HashMap<>();
+    payload.put("components", List.of(componenteDoCorpo));
+    if (categoria != null && !categoria.isBlank()) {
+      payload.put("category", categoria.trim());
+    }
+
+    LOG.info(
+        "whatsappClient.editTemplate.started {}",
+        CorrelatedLogging.context("tenantId", config.getTenantId(), "templateId", templateId));
+
+    try {
+      restClient.post()
+          .uri(graphApiBase() + templateId)
+          .header("Authorization", "Bearer " + token)
+          .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+          .body(payload)
+          .retrieve()
+          .body(String.class);
+
+      TemplateDetails details = new TemplateDetails();
+      details.id = templateId;
+      // Editar devolve o template para analise: assumir aprovado aqui faria o sistema mandar um
+      // template que a Meta ainda esta olhando.
+      details.status = "PENDING";
+      LOG.info(
+          "whatsappClient.editTemplate.completed {}",
+          CorrelatedLogging.context("tenantId", config.getTenantId(), "templateId", templateId));
+      return details;
+    } catch (IllegalArgumentException e) {
+      throw e;
+    } catch (RestClientResponseException e) {
+      String errorMessage =
+          extractErrorMessage(e.getResponseBodyAsString(), "Falha ao editar o template no WhatsApp");
+      LOG.error(
+          "whatsappClient.editTemplate.failed {}",
+          CorrelatedLogging.context(
+              "tenantId", config.getTenantId(),
+              "templateId", templateId,
+              "root", CorrelatedLogging.throwableSummary(e)),
+          e);
+      throw new IllegalStateException(errorMessage, e);
+    } catch (Exception e) {
+      LOG.error(
+          "whatsappClient.editTemplate.failed {}",
+          CorrelatedLogging.context("tenantId", config.getTenantId(), "templateId", templateId),
+          e);
+      throw new IllegalStateException("Falha ao editar o template no WhatsApp", e);
+    }
+  }
+
+  /**
    * Os templates da conta do cliente, com o estado da analise.
    *
    * <p>E o que o monitoramento usa: a Meta nao avisa quando aprova ou recusa, a menos que o

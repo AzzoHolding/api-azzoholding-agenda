@@ -414,24 +414,30 @@ public class ServicoTenantWhatsapp {
     // da janela ele funciona, e e o que o atendimento de verdade usa.
     String texto = trimToNull(request.message);
     boolean porTemplate = texto == null;
-    // O template do PROPRIO salao vem primeiro: `teste_integracao` e criado na conta dele, e e
-    // o que prova a integracao DELE. O valor de ambiente virou reserva — serve so enquanto a
-    // sincronizacao nao rodou, e para forcar outro template em diagnostico.
-    var testeDoSalao = servicoTemplates.templateDeTesteDoTenant(tenantId);
+    // A CONFIRMACAO do proprio salao vem primeiro: e o caminho que importa de verdade, o que o
+    // cliente recebe ao marcar um horario. Testar por um template dedicado provava um caminho
+    // paralelo e gastava uma aprovacao a mais no ciclo da Meta.
+    var escolhido = servicoTemplates.templateParaTeste(tenantId);
     String template =
         firstNonBlank(
             trimToNull(request.templateName),
-            testeDoSalao.map(t -> t.getNome()).orElse(null),
+            escolhido.map(e -> e.nome()).orElse(null),
             templateDeTeste);
     String idioma =
         firstNonBlank(
             trimToNull(request.templateLanguage),
-            testeDoSalao.map(t -> t.getIdioma()).orElse(null),
+            escolhido.map(e -> e.idioma()).orElse(null),
             idiomaDoTemplateDeTeste);
+    // Os exemplos que foram para a analise da Meta: a mensagem de teste chega parecida com a de
+    // verdade, em vez de um template com buracos.
+    java.util.List<String> variaveisDoTeste =
+        trimToNull(request.templateName) != null
+            ? java.util.List.of()
+            : escolhido.map(e -> e.exemplos()).orElse(java.util.List.of());
     // Template que a Meta ainda nao aprovou NAO entrega: dizer isso junto evita a pessoa culpar
     // a credencial por uma recusa que e so de analise pendente.
     String avisoDeAnalise =
-        testeDoSalao.filter(t -> !t.aprovado()).isPresent()
+        escolhido.filter(e -> !e.aprovado()).isPresent()
             ? " O modelo ainda nao foi aprovado pela Meta, entao a recusa pode ser so isso."
             : "";
     String descricaoNoLog = porTemplate ? "template: " + template + " (" + idioma + ")" : texto;
@@ -439,7 +445,7 @@ public class ServicoTenantWhatsapp {
     try {
       String providerMessageId =
           porTemplate
-              ? whatsAppClient.enviarTemplate(config, destino, template, idioma)
+              ? whatsAppClient.enviarTemplate(config, destino, template, idioma, variaveisDoTeste)
               : whatsAppClient.sendMessage(config, destino, texto);
       response.success = true;
       response.providerMessageId = providerMessageId;

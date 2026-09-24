@@ -45,13 +45,19 @@ public class ServicoTemplatesDoWhatsapp {
   private static final String CATEGORIA = "UTILITY";
 
   /**
-   * O texto do teste nao tem variavel, de proposito.
+   * O texto do teste e um aviso de CONFIGURACAO, e nao um anuncio.
    *
-   * <p>Ele existe para provar que a ponte funciona; variavel a mais e mais coisa para a Meta
-   * recusar justamente no template que precisa passar primeiro.
+   * <p>A primeira versao dizia "integracao concluida, esta e uma mensagem de teste" — e a Meta
+   * reclassificou como marketing, com razao: anunciar que um sistema funcionou nao e utilidade.
+   * Aviso de que um canal passou a valer para a conta de alguem e, e essa e a categoria que a
+   * Meta aceita.
+   *
+   * <p>Sem variavel de proposito: cada variavel precisa de exemplo e e mais uma superficie para
+   * recusar, justamente no modelo que precisa passar primeiro.
    */
   private static final String CORPO_DO_TESTE =
-      "Integracao do AZZO Agenda Pro concluida. Esta e uma mensagem automatica de teste.";
+      "Este numero foi conectado ao sistema de agendamentos. Voce recebera por aqui as"
+          + " confirmacoes e os lembretes dos seus horarios.";
 
   private final TenantWhatsAppConfigRepository configRepository;
   private final WhatsAppTemplateRepository templateRepository;
@@ -178,8 +184,14 @@ public class ServicoTemplatesDoWhatsapp {
       return registro;
     }
 
+    // Criar de novo com o mesmo nome nao funciona: a Meta recusa nome repetido. Se o template ja
+    // existe lá, o caminho e EDITAR — sem isso, corrigir o texto era impossivel, e foi o que
+    // travou quando os modelos foram criados com o corpo "teste" (2026-09-23).
     WhatsAppClient.TemplateDetails detalhes =
-        whatsAppClient.criarTemplate(config, nome, IDIOMA_PADRAO, CATEGORIA, corpo, exemplos);
+        registro.getMetaTemplateId() == null || registro.getMetaTemplateId().isBlank()
+            ? whatsAppClient.criarTemplate(config, nome, IDIOMA_PADRAO, CATEGORIA, corpo, exemplos)
+            : whatsAppClient.editarTemplate(
+                config, registro.getMetaTemplateId(), corpo, exemplos, CATEGORIA);
 
     registro.setNome(nome);
     registro.setIdioma(IDIOMA_PADRAO);
@@ -328,6 +340,40 @@ public class ServicoTemplatesDoWhatsapp {
         .filter(nome -> !nome.isEmpty())
         .toList();
   }
+
+  /**
+   * O template que o teste deve mandar, e os valores de exemplo dele.
+   *
+   * <p><b>A CONFIRMACAO vem primeiro.</b> Ela e o caminho que importa de verdade — o que o cliente
+   * recebe quando marca um horario. Testar por um template dedicado provava um caminho paralelo, e
+   * gastava uma aprovacao a mais no ciclo da Meta.
+   *
+   * <p>Os valores vem do proprio vocabulario da conversao, os mesmos exemplos que foram para a
+   * Meta na analise — entao a mensagem de teste chega parecida com a de verdade.
+   */
+  @Transactional(readOnly = true)
+  public Optional<TemplateParaTeste> templateParaTeste(UUID tenantId) {
+    return escolherParaTeste(tenantId, WhatsAppTemplateEntity.CONFIRMACAO)
+        .or(() -> escolherParaTeste(tenantId, WhatsAppTemplateEntity.TESTE));
+  }
+
+  private Optional<TemplateParaTeste> escolherParaTeste(UUID tenantId, String finalidade) {
+    return templateRepository
+        .findByTenantIdAndFinalidade(tenantId, finalidade)
+        .map(
+            template -> {
+              List<String> valores =
+                  variaveisDe(template).stream()
+                      .map(nome -> ModeloParaTemplate.VARIAVEIS_CONHECIDAS.getOrDefault(nome, nome))
+                      .toList();
+              return new TemplateParaTeste(
+                  template.getNome(), template.getIdioma(), valores, template.aprovado());
+            });
+  }
+
+  /** O template escolhido para o teste, com os exemplos das variaveis dele. */
+  public record TemplateParaTeste(
+      String nome, String idioma, List<String> exemplos, boolean aprovado) {}
 
   /** O template de teste DESTE salao, quando ja existe. */
   @Transactional(readOnly = true)
