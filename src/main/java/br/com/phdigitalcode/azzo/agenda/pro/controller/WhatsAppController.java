@@ -116,9 +116,18 @@ public class WhatsAppController {
     return servicoTenantWhatsapp.concluirEmbeddedSignup(request);
   }
 
+  /**
+   * O log de mensagens, com filtro de situacao e periodo.
+   *
+   * <p>Sem filtro no servidor, a tela so poderia filtrar a pagina carregada — e uma mensagem que
+   * falhou tres dias atras ficaria invisivel justamente para quem esta procurando por ela.
+   */
   @GetMapping("/message-log")
   public TenantWhatsAppDtos.MessageLogResponse listarMensagens(
-      @RequestParam(name = "limit", defaultValue = "50") int limit) {
-    return servicoTenantWhatsapp.listarMensagens(limit);
+      @RequestParam(name = "limit", defaultValue = "50") int limit,
+      @RequestParam(name = "status", required = false) String status,
+      @RequestParam(name = "de", required = false) String de,
+      @RequestParam(name = "ate", required = false) String ate) {
+    return servicoTenantWhatsapp.listarMensagens(limit, status, de, ate);
   }
 }

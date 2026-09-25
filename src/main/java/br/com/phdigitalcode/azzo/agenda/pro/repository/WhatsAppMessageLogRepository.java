@@ -1,5 +1,6 @@
 package br.com.phdigitalcode.azzo.agenda.pro.repository;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -23,6 +24,26 @@ public interface WhatsAppMessageLogRepository extends JpaRepository<WhatsAppMess
    * original.
    */
   List<WhatsAppMessageLogEntity> findByTenantIdOrderBySentAtDesc(UUID tenantId, Pageable pageable);
+
+  /**
+   * O log com filtro de situacao e periodo.
+   *
+   * <p>JPQL, e nao consulta nativa: em nativa o {@code :de is null} nao da ao Postgres como deduzir
+   * o tipo do parametro e ele recusa a consulta INTEIRA — foi o que quebrou os filtros da auditoria
+   * em 2026-09-20. Em JPQL o Hibernate tipa o parametro, e o padrao funciona.
+   */
+  @Query(
+      "select m from WhatsAppMessageLogEntity m where m.tenantId = :tenantId "
+          + "and (:status is null or m.status = :status) "
+          + "and (:de is null or m.sentAt >= :de) "
+          + "and (:ate is null or m.sentAt <= :ate) "
+          + "order by m.sentAt desc")
+  List<WhatsAppMessageLogEntity> filtrar(
+      @Param("tenantId") UUID tenantId,
+      @Param("status") String status,
+      @Param("de") Instant de,
+      @Param("ate") Instant ate,
+      Pageable pageable);
 
   /**
    * A linha do log que corresponde a um {@code wamid}.
