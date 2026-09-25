@@ -46,6 +46,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.repository.TenantWhatsAppConfigRepos
 import br.com.phdigitalcode.azzo.agenda.pro.repository.WhatsAppBookingReactivationCycleRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.security.WebhookVerifyTokenHashService;
 import br.com.phdigitalcode.azzo.agenda.pro.service.ChatMessageStatusService;
+import br.com.phdigitalcode.azzo.agenda.pro.service.ServicoStatusDeEntrega;
 import br.com.phdigitalcode.azzo.agenda.pro.service.ChatService;
 import br.com.phdigitalcode.azzo.agenda.pro.service.LicenseStatusService;
 import br.com.phdigitalcode.azzo.agenda.pro.service.NotificationPublisher;
@@ -67,6 +68,7 @@ class WhatsAppWebhookControllerTest {
   private NotificationPublisher notificationPublisher;
   private WhatsAppClient whatsAppClient;
   private WebhookVerifyTokenHashService webhookVerifyTokenHashService;
+  private ServicoStatusDeEntrega servicoStatusDeEntrega;
   private ChatMessageStatusService chatMessageStatusService;
   private ChatService chatService;
   private WhatsAppBookingReactivationService whatsAppBookingReactivationService;
@@ -86,6 +88,7 @@ class WhatsAppWebhookControllerTest {
     notificationPublisher = mock(NotificationPublisher.class);
     whatsAppClient = mock(WhatsAppClient.class);
     webhookVerifyTokenHashService = mock(WebhookVerifyTokenHashService.class);
+    servicoStatusDeEntrega = mock(ServicoStatusDeEntrega.class);
     chatMessageStatusService = mock(ChatMessageStatusService.class);
     chatService = mock(ChatService.class);
     whatsAppBookingReactivationService = mock(WhatsAppBookingReactivationService.class);
@@ -118,6 +121,7 @@ class WhatsAppWebhookControllerTest {
         notificationPublisher,
         whatsAppClient,
         webhookVerifyTokenHashService,
+        servicoStatusDeEntrega,
         chatMessageStatusService,
         chatService,
         whatsAppBookingReactivationService,
@@ -139,6 +143,7 @@ class WhatsAppWebhookControllerTest {
         notificationPublisher,
         whatsAppClient,
         webhookVerifyTokenHashService,
+        servicoStatusDeEntrega,
         chatMessageStatusService,
         chatService,
         whatsAppBookingReactivationService,

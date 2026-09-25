@@ -1,6 +1,7 @@
 package br.com.phdigitalcode.azzo.agenda.pro.repository;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.data.domain.Pageable;
@@ -22,6 +23,16 @@ public interface WhatsAppMessageLogRepository extends JpaRepository<WhatsAppMess
    * original.
    */
   List<WhatsAppMessageLogEntity> findByTenantIdOrderBySentAtDesc(UUID tenantId, Pageable pageable);
+
+  /**
+   * A linha do log que corresponde a um {@code wamid}.
+   *
+   * <p>E o que liga o status que a Meta manda pelo webhook a mensagem que aparece na tela: sem
+   * isso, "Aceita" nunca virava "Entregue" nem "Falhou", e o motivo da nao-entrega existia so na
+   * resposta da Meta que ninguem lia.
+   */
+  Optional<WhatsAppMessageLogEntity> findByTenantIdAndProviderMessageId(
+      UUID tenantId, String providerMessageId);
 
   /**
    * Apaga numero e texto das mensagens enviadas ao titular anonimizado.
