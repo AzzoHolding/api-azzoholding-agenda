@@ -370,7 +370,9 @@ class ServicoTenantWhatsappTest {
     m2.setDestinationPhone("5511999997777");
     m2.setSentAt(Instant.now().minusSeconds(60));
 
-    when(messageLogRepository.findByTenantIdOrderBySentAtDesc(org.mockito.ArgumentMatchers.eq(tenantId), any(Pageable.class)))
+    // A listagem passou a filtrar no servidor (situacao e periodo), entao vai por `filtrar`.
+    when(messageLogRepository.filtrar(
+            org.mockito.ArgumentMatchers.eq(tenantId), any(), any(), any(), any(Pageable.class)))
         .thenReturn(List.of(m1, m2));
 
     TenantWhatsAppDtos.MessageLogResponse response = serviceEmbeddedHabilitado.listarMensagens(1);
@@ -698,5 +700,38 @@ class ServicoTenantWhatsappTest {
     serviceEmbeddedHabilitado.enviarMensagemTeste(request);
 
     assertThat(config.getWhatsappRegisteredAt()).isEqualTo(registradoEm);
+  }
+
+  /**
+   * Filtrar no SERVIDOR: a tela so alcancaria a pagina carregada, e a mensagem que falhou dias
+   * atras ficaria invisivel justamente para quem esta procurando por ela.
+   */
+  @Test
+  void aSituacaoEOPeriodoChegamAoRepositorio() {
+    when(messageLogRepository.filtrar(any(), any(), any(), any(), any(Pageable.class)))
+        .thenReturn(List.of());
+
+    serviceEmbeddedHabilitado.listarMensagens(50, "failed", "2026-09-01", "2026-09-25");
+
+    ArgumentCaptor<String> status = ArgumentCaptor.forClass(String.class);
+    ArgumentCaptor<java.time.Instant> de = ArgumentCaptor.forClass(java.time.Instant.class);
+    verify(messageLogRepository)
+        .filtrar(any(), status.capture(), de.capture(), any(), any(Pageable.class));
+    // A situacao vai em maiusculo porque e assim que fica gravada na coluna.
+    assertThat(status.getValue()).isEqualTo("FAILED");
+    assertThat(de.getValue()).isNotNull();
+  }
+
+  /** Data invalida vira ausencia de filtro: mostrar mais e melhor que uma tela quebrada. */
+  @Test
+  void dataInvalidaNaoViraFiltroNemErro() {
+    when(messageLogRepository.filtrar(any(), any(), any(), any(), any(Pageable.class)))
+        .thenReturn(List.of());
+
+    serviceEmbeddedHabilitado.listarMensagens(50, null, "ontem", null);
+
+    ArgumentCaptor<java.time.Instant> de = ArgumentCaptor.forClass(java.time.Instant.class);
+    verify(messageLogRepository).filtrar(any(), any(), de.capture(), any(), any(Pageable.class));
+    assertThat(de.getValue()).isNull();
   }
 }

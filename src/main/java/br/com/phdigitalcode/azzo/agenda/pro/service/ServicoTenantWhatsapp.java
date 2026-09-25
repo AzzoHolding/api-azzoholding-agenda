@@ -637,10 +637,29 @@ public class ServicoTenantWhatsapp {
   }
 
   public TenantWhatsAppDtos.MessageLogResponse listarMensagens(int limit) {
+    return listarMensagens(limit, null, null, null);
+  }
+
+  /**
+   * O log com filtro de situacao e periodo.
+   *
+   * <p>Filtrar no SERVIDOR: a tela so alcancaria a pagina carregada, e uma mensagem que falhou
+   * tres dias atras ficaria invisivel justamente para quem esta procurando por ela.
+   *
+   * <p>Data invalida e tratada como ausencia de filtro, e nao como erro: o pior que acontece e
+   * mostrar mais do que se pediu, e isso e melhor que uma tela quebrada.
+   */
+  public TenantWhatsAppDtos.MessageLogResponse listarMensagens(
+      int limit, String status, String de, String ate) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     int normalizedLimit = Math.max(1, Math.min(limit <= 0 ? 50 : limit, 200));
     List<WhatsAppMessageLogEntity> fetched =
-        messageLogRepository.findByTenantIdOrderBySentAtDesc(tenantId, PageRequest.of(0, normalizedLimit + 1));
+        messageLogRepository.filtrar(
+            tenantId,
+            trimToNull(status) == null ? null : status.trim().toUpperCase(),
+            paraInstante(de),
+            paraInstante(ate),
+            PageRequest.of(0, normalizedLimit + 1));
     boolean hasMore = fetched.size() > normalizedLimit;
     List<WhatsAppMessageLogEntity> page = fetched.stream().limit(normalizedLimit).toList();
     TenantWhatsAppDtos.MessageLogResponse response = new TenantWhatsAppDtos.MessageLogResponse();
@@ -663,6 +682,25 @@ public class ServicoTenantWhatsapp {
       response.nextCursorSentAt = last.getSentAt() != null ? last.getSentAt().toString() : null;
     }
     return response;
+  }
+
+  /** Data em ISO vira instante; qualquer coisa fora disso vira ausencia de filtro. */
+  private Instant paraInstante(String valor) {
+    String texto = trimToNull(valor);
+    if (texto == null) return null;
+    try {
+      return Instant.parse(texto);
+    } catch (RuntimeException naoEInstante) {
+      try {
+        // A tela manda "2026-09-25": o dia inteiro, na hora de Brasilia.
+        return java.time.LocalDate.parse(texto)
+            .atStartOfDay(java.time.ZoneId.of("America/Sao_Paulo"))
+            .toInstant();
+      } catch (RuntimeException naoEData) {
+        LOG.debug("whatsapp.log.filtroDeDataIgnorado valor={}", texto);
+        return null;
+      }
+    }
   }
 
   private TenantWhatsAppDtos.ConfigResponse toConfigResponse(TenantWhatsAppConfig config) {
