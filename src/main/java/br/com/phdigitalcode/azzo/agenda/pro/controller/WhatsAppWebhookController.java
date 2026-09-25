@@ -52,6 +52,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.repository.TenantRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.TenantWhatsAppConfigRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.WhatsAppBookingReactivationCycleRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.security.WebhookVerifyTokenHashService;
+import br.com.phdigitalcode.azzo.agenda.pro.service.ServicoStatusDeEntrega;
 import br.com.phdigitalcode.azzo.agenda.pro.service.ChatMessageStatusService;
 import br.com.phdigitalcode.azzo.agenda.pro.service.ChatService;
 import br.com.phdigitalcode.azzo.agenda.pro.service.LicenseStatusService;
@@ -86,6 +87,7 @@ public class WhatsAppWebhookController {
   private final NotificationPublisher notificationPublisher;
   private final WhatsAppClient whatsAppClient;
   private final WebhookVerifyTokenHashService webhookVerifyTokenHashService;
+  private final ServicoStatusDeEntrega servicoStatusDeEntrega;
   private final ChatMessageStatusService chatMessageStatusService;
   private final ChatService chatService;
   private final WhatsAppBookingReactivationService whatsAppBookingReactivationService;
@@ -106,6 +108,7 @@ public class WhatsAppWebhookController {
       NotificationPublisher notificationPublisher,
       WhatsAppClient whatsAppClient,
       WebhookVerifyTokenHashService webhookVerifyTokenHashService,
+      ServicoStatusDeEntrega servicoStatusDeEntrega,
       ChatMessageStatusService chatMessageStatusService,
       ChatService chatService,
       WhatsAppBookingReactivationService whatsAppBookingReactivationService,
@@ -123,6 +126,7 @@ public class WhatsAppWebhookController {
     this.notificationPublisher = notificationPublisher;
     this.whatsAppClient = whatsAppClient;
     this.webhookVerifyTokenHashService = webhookVerifyTokenHashService;
+    this.servicoStatusDeEntrega = servicoStatusDeEntrega;
     this.chatMessageStatusService = chatMessageStatusService;
     this.chatService = chatService;
     this.whatsAppBookingReactivationService = whatsAppBookingReactivationService;
@@ -404,6 +408,12 @@ public class WhatsAppWebhookController {
 
     boolean updated = chatMessageStatusService.applyProviderStatus(
         tenantId, providerMessageId, providerStatus, errorCode, errorMessage, occurredAt);
+    // O mesmo status vale para o log de "Mensagens enviadas": confirmacao, lembrete e envio de
+    // teste nao sao mensagens de chat, e sem isto o status deles nunca saia de "Aceita".
+    boolean logAtualizado =
+        servicoStatusDeEntrega.aplicar(
+            tenantId, providerMessageId, providerStatus, errorCode, errorMessage);
+    updated = updated || logAtualizado;
     if (updated) {
       response.details.add("status atualizado: " + providerStatus + " providerMessageId=" + providerMessageId);
     } else {
