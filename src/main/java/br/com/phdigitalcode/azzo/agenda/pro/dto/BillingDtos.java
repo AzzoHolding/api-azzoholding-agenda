@@ -225,7 +225,6 @@ public final class BillingDtos {
     public String tenantNome;
     public String tenantEmail;
     public String planStatus;
-    public String billingType;
     public String validUntil;
     public int diasRestantes;
     public boolean vencido;

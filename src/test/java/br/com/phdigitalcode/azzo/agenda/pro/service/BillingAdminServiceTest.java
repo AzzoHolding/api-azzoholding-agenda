@@ -737,7 +737,6 @@ class BillingAdminServiceTest {
               "Salao Z",
               "z@x.com",
               "ACTIVE",
-              "CREDIT_CARD",
               "2026-05-01T00:00:00Z",
               12,
               false,
@@ -750,7 +749,6 @@ class BillingAdminServiceTest {
     assertThat(item.tenantNome).isEqualTo("Salao Z");
     assertThat(item.tenantEmail).isEqualTo("z@x.com");
     assertThat(item.planStatus).isEqualTo("ACTIVE");
-    assertThat(item.billingType).isEqualTo("CREDIT_CARD");
     assertThat(item.validUntil).isEqualTo("2026-05-01T00:00:00Z");
     assertThat(item.diasRestantes).isEqualTo(12);
     assertThat(item.vencido).isFalse();
@@ -761,9 +759,7 @@ class BillingAdminServiceTest {
   void diasRestantesNuloViraMenosUm() {
     stubNativeQuery(
         List.<Object[]>of(
-            new Object[] {
-              tenantId.toString(), "Salao Y", null, "ACTIVE", null, null, null, null, null
-            }));
+            new Object[] {tenantId.toString(), "Salao Y", null, "ACTIVE", null, null, null, null}));
 
     BillingDtos.LicencasAdminReportItem item = service.relatorioLicencas().items.get(0);
 
@@ -798,7 +794,6 @@ class BillingAdminServiceTest {
       "Tenant",
       "t@x.com",
       planStatus,
-      "PIX",
       "2026-05-01T00:00:00Z",
       5,
       vencido,
