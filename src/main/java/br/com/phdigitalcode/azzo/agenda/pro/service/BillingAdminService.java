@@ -56,15 +56,16 @@ import jakarta.persistence.PersistenceContext;
  *       {@code listarAtivosNaoTrialMaisRecentesPrimeiro}), preservando filtros e ordenacoes.
  * </ul>
  *
- * <p><b>⚠️ DEFEITO PRESERVADO DO ORIGINAL — {@link #relatorioLicencas}.</b> O SQL nativo consulta
- * {@code FROM checkout_orders} e seleciona {@code co.billing_type}. Nenhum dos dois existe: a
- * tabela do {@code CheckoutOrder} chama-se {@code orders} (ver {@code @Table} da entidade e
- * {@code V1__baseline_unified.sql}) e {@code orders} nao tem coluna {@code billing_type}. O
- * endpoint {@code GET /api/v1/billing/admin/reports/licencas} portanto <b>falha em producao
- * hoje</b>, no Quarkus, com erro de SQL. O SQL foi portado <b>verbatim</b> para manter paridade —
- * corrigir exigiria decidir de onde tirar o {@code billing_type}, o que e mudanca de produto, nao
- * de migracao. A montagem/contagem do relatorio (que roda sobre o resultado) esta portada e
- * testada.
+ * <p><b>Defeito do original corrigido em {@link #relatorioLicencas} (26/09/2026).</b> O SQL nativo
+ * consultava {@code FROM checkout_orders} e selecionava {@code co.billing_type} — nenhum dos dois
+ * existe: a tabela do {@code CheckoutOrder} chama-se {@code orders}, e {@code orders} nunca teve
+ * coluna {@code billing_type} (ela mora em {@code subscriptions}, uma entidade diferente). O
+ * endpoint {@code GET /api/v1/billing/admin/reports/licencas} falhava em producao com erro de SQL
+ * — confirmado empiricamente antes desta correcao. Corrigido trocando a tabela para {@code orders}
+ * e removendo {@code billing_type} do relatorio: decidir se esse campo deveria vir de
+ * {@code subscriptions} (e qual assinatura, dado que um tenant pode ter mais de uma ao longo do
+ * tempo) e mudanca de produto, nao algo para inferir numa correcao de bug. O relatorio funciona
+ * sem ele; se um dia for necessario, entra como decisao propria.
  */
 @Service
 public class BillingAdminService {
@@ -546,7 +547,6 @@ public class BillingAdminService {
                   t.name,
                   t.email,
                   ps.code AS plan_status,
-                  co.billing_type,
                   co.valid_until::text,
                   COALESCE((co.valid_until::date - CURRENT_DATE)::int, -1) AS dias_restantes,
                   CASE WHEN co.valid_until IS NOT NULL AND co.valid_until < NOW() THEN true ELSE false END AS vencido,
@@ -554,8 +554,8 @@ public class BillingAdminService {
                 FROM tenants t
                 JOIN plan_status ps ON ps.id = t.plan_status_id
                 LEFT JOIN LATERAL (
-                  SELECT o.billing_type, o.valid_until
-                  FROM checkout_orders o
+                  SELECT o.valid_until
+                  FROM orders o
                   WHERE o.tenant_id = t.id
                   ORDER BY o.created_at DESC
                   LIMIT 1
@@ -574,11 +574,10 @@ public class BillingAdminService {
       item.tenantNome = row[1] != null ? row[1].toString() : null;
       item.tenantEmail = row[2] != null ? row[2].toString() : null;
       item.planStatus = row[3] != null ? row[3].toString() : null;
-      item.billingType = row[4] != null ? row[4].toString() : null;
-      item.validUntil = row[5] != null ? row[5].toString() : null;
-      item.diasRestantes = row[6] != null ? ((Number) row[6]).intValue() : -1;
-      item.vencido = Boolean.TRUE.equals(row[7]);
-      item.createdAt = row[8] != null ? row[8].toString() : null;
+      item.validUntil = row[4] != null ? row[4].toString() : null;
+      item.diasRestantes = row[5] != null ? ((Number) row[5]).intValue() : -1;
+      item.vencido = Boolean.TRUE.equals(row[6]);
+      item.createdAt = row[7] != null ? row[7].toString() : null;
       response.items.add(item);
 
       String status = item.planStatus != null ? item.planStatus : "";
