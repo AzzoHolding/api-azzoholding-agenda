@@ -141,6 +141,61 @@ public class SystemAdminService {
     return response;
   }
 
+  /**
+   * Sem equivalente no Quarkus original — adicionado em 26/09/2026 para a tela `/operacao` da
+   * zona `plataforma` do gerenciamento. Não havia endpoint administrativo cruzando tenants para
+   * status de WhatsApp; o dado por tenant já existia ({@code tenant_whatsapp_config}), só faltava
+   * a agregação.
+   *
+   * <p>"Conectado" usa a mesma regra que {@link ServicoTenantWhatsapp} já usa para o próprio
+   * tenant (onboarding {@code CONNECTED}). "Quebrado" é quem tentou usar (habilitado ou com
+   * onboarding além de {@code NOT_STARTED}) mas não está conectado — cobre tanto quem falhou
+   * quanto quem ficou pendente no meio do fluxo.
+   */
+  @SuppressWarnings("unchecked")
+  @Transactional(readOnly = true)
+  public SystemAdminDtos.WhatsAppOverviewResponse whatsappOverview() {
+    List<Object[]> rows = entityManager.createNativeQuery("""
+        SELECT
+          t.id::text,
+          t.name,
+          COALESCE(w.whatsapp_enabled, false),
+          COALESCE(w.whatsapp_onboarding_status, 'NOT_STARTED'),
+          w.display_phone_number,
+          w.embedded_signup_last_error
+        FROM tenants t
+        LEFT JOIN tenant_whatsapp_config w ON w.tenant_id = t.id
+        ORDER BY t.name ASC
+        """).getResultList();
+
+    SystemAdminDtos.WhatsAppOverviewResponse response = new SystemAdminDtos.WhatsAppOverviewResponse();
+    response.items = new ArrayList<>();
+
+    for (Object[] row : rows) {
+      SystemAdminDtos.WhatsAppTenantStatusItem item = new SystemAdminDtos.WhatsAppTenantStatusItem();
+      item.tenantId = row[0] != null ? row[0].toString() : null;
+      item.tenantName = row[1] != null ? row[1].toString() : null;
+      item.whatsappEnabled = Boolean.TRUE.equals(row[2]);
+      item.onboardingStatus = row[3] != null ? row[3].toString() : "NOT_STARTED";
+      item.displayPhoneNumber = row[4] != null ? row[4].toString() : null;
+      item.lastError = row[5] != null ? row[5].toString() : null;
+      response.items.add(item);
+
+      boolean conectado = "CONNECTED".equals(item.onboardingStatus);
+      boolean tentouUsar = item.whatsappEnabled || !"NOT_STARTED".equals(item.onboardingStatus);
+      if (conectado) {
+        response.connectedCount++;
+      } else if (tentouUsar) {
+        response.brokenCount++;
+      } else {
+        response.notConfiguredCount++;
+      }
+    }
+
+    response.totalTenants = response.items.size();
+    return response;
+  }
+
   @SuppressWarnings("unchecked")
   @Transactional(readOnly = true)
   public SystemAdminDtos.GlobalAuditListResponse listGlobalAudits(

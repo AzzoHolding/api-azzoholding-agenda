@@ -29,6 +29,29 @@ public final class SystemAdminDtos {
     public long count;
   }
 
+  /**
+   * Sem equivalente no Quarkus original — adicionado em 26/09/2026 para a tela `/operacao` da
+   * zona `plataforma` do gerenciamento ("quantos clientes têm o WhatsApp quebrado agora?"). Não
+   * existia endpoint administrativo cruzando tenants para isso; o único endpoint de WhatsApp era
+   * {@code hasRole('OWNER')}, escopado ao próprio tenant.
+   */
+  public static class WhatsAppTenantStatusItem {
+    public String tenantId;
+    public String tenantName;
+    public boolean whatsappEnabled;
+    public String onboardingStatus;
+    public String displayPhoneNumber;
+    public String lastError;
+  }
+
+  public static class WhatsAppOverviewResponse {
+    public int totalTenants;
+    public int connectedCount;
+    public int brokenCount;
+    public int notConfiguredCount;
+    public List<WhatsAppTenantStatusItem> items = new ArrayList<>();
+  }
+
   public static class GlobalAuditListResponse {
     public List<GlobalAuditItem> items = new ArrayList<>();
     public int limit;
