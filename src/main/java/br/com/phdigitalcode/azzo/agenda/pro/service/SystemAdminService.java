@@ -992,7 +992,7 @@ public class SystemAdminService {
       after.put("priority", product.getPriority());
       after.put("exclusivoVendaInterna", product.isExclusivoVendaInterna());
       command.after = after;
-      auditService.recordSuccess(command);
+      auditService.recordSuccessIsolated(command);
     } catch (Exception ignored) {
       // Auditoria nao deve quebrar o fluxo administrativo.
     }
@@ -1015,7 +1015,7 @@ public class SystemAdminService {
       after.put("replyTo", config.getReplyTo());
       after.put("subjectTemplate", config.getSubjectTemplate());
       command.after = after;
-      auditService.recordSuccess(command);
+      auditService.recordSuccessIsolated(command);
     } catch (Exception ignored) {
     }
   }
@@ -1031,7 +1031,7 @@ public class SystemAdminService {
       command.entityId = templateType.name();
       command.sourceChannel = AuditConstants.SourceChannel.API;
       command.metadata = Map.of("templateType", templateType.name());
-      auditService.recordSuccess(command);
+      auditService.recordSuccessIsolated(command);
     } catch (Exception ignored) {
     }
   }

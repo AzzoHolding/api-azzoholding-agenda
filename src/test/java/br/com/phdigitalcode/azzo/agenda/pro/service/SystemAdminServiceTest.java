@@ -643,7 +643,7 @@ class SystemAdminServiceTest {
 
     assertThat(item.currency).isEqualTo("BRL");
     verify(productRepository).save(any(Product.class));
-    verify(auditService).recordSuccess(any(AuditEventCommand.class));
+    verify(auditService).recordSuccessIsolated(any(AuditEventCommand.class));
   }
 
   @Test
@@ -809,7 +809,7 @@ class SystemAdminServiceTest {
 
     assertThat(response.subjectTemplate).isEqualTo("Assunto novo");
     verify(emailTemplateConfigRepository).save(any(EmailTemplateConfig.class));
-    verify(auditService).recordSuccess(any(AuditEventCommand.class));
+    verify(auditService).recordSuccessIsolated(any(AuditEventCommand.class));
   }
 
   @Test
@@ -885,7 +885,7 @@ class SystemAdminServiceTest {
     assertThat(response.configured).isFalse();
     assertThat(response.subjectTemplate).isEqualTo("assunto padrao");
     verify(emailTemplateConfigRepository).delete(config);
-    verify(auditService).recordSuccess(any(AuditEventCommand.class));
+    verify(auditService).recordSuccessIsolated(any(AuditEventCommand.class));
   }
 
   @Test

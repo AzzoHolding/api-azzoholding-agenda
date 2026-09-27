@@ -131,6 +131,30 @@ public class AuditService {
     return persist(command, AuditConstants.Status.DENIED);
   }
 
+  /**
+   * Sucesso "melhor esforco" de uma acao SEM tenant (admin de plataforma: planos, templates de
+   * e-mail), gravado numa transacao PROPRIA.
+   *
+   * <p>{@code audit_events.tenant_id} e {@code NOT NULL} (a tabela e por design um livro de
+   * tenant) e {@link #persist} recusa {@code tenantId == null} com {@link IllegalArgumentException}
+   * — inevitavel para uma acao de plataforma, que nao tem tenant. Os chamadores (ver
+   * {@code SystemAdminService.recordPlanAudit}) sempre envolveram essa chamada num
+   * {@code catch (Exception ignored)} com a intencao explicita de "auditoria nao deve quebrar o
+   * fluxo administrativo" — mas com {@code recordSuccess} comum (propagation REQUIRES, mesma
+   * transacao) essa excecao marcava a transacao INTEIRA como rollback-only antes de ser engolida:
+   * o {@code createPlan}/{@code saveEmailTemplate} retornava normalmente, mas o commit final
+   * lancava {@code UnexpectedRollbackException} e nada era persistido — silenciosamente, sem
+   * nenhuma mensagem util para quem chamou a API (achado em producao em 27/09/2026, ver
+   * {@code SystemAdminServiceCreatePlanIntegrationTest}). {@code REQUIRES_NEW} isola essa falha
+   * (que continua acontecendo — o evento em si nunca e gravado, por falta de tenant) na PROPRIA
+   * transacao, exatamente como {@link #recordDeniedIsolated} ja fazia para o caso de acesso
+   * negado, e deixa a acao administrativa de verdade seguir e comitar.
+   */
+  @Transactional(propagation = Propagation.REQUIRES_NEW)
+  public AuditEvent recordSuccessIsolated(AuditEventCommand command) {
+    return persist(command, AuditConstants.Status.SUCCESS);
+  }
+
   private AuditEvent persist(AuditEventCommand command, String status) {
     Timer.Sample sample = meterRegistry != null ? Timer.start(meterRegistry) : null;
     if (command == null) throw new IllegalArgumentException("AuditEventCommand obrigatorio");
