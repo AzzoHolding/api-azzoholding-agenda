@@ -28,15 +28,21 @@ public interface WhatsAppMessageLogRepository extends JpaRepository<WhatsAppMess
   /**
    * O log com filtro de situacao e periodo.
    *
-   * <p>JPQL, e nao consulta nativa: em nativa o {@code :de is null} nao da ao Postgres como deduzir
-   * o tipo do parametro e ele recusa a consulta INTEIRA — foi o que quebrou os filtros da auditoria
-   * em 2026-09-20. Em JPQL o Hibernate tipa o parametro, e o padrao funciona.
+   * <p><b>{@code de}/{@code ate} nunca chegam nulos aqui</b> — quem chama (
+   * {@code ServicoTenantWhatsapp.listarMensagens}) resolve a ausencia de filtro para os limites
+   * praticos ({@code Instant.EPOCH}/{@code agora + 100 anos}) antes de invocar esta consulta.
+   * {@code :status is null or ...} continua seguro (String, Hibernate infere o tipo sem ajuda),
+   * mas o mesmo padrao com {@code :de}/{@code :ate} (Instant) gerava
+   * {@code PSQLException: could not determine data type of parameter} em produ&ccedil;&atilde;o —
+   * mesma familia do achado de 2026-09-20 na auditoria, mas em JPQL, nao em consulta nativa; o
+   * comentario anterior ("em JPQL funciona") estava errado para parametro temporal nulo. Sem
+   * "is null" no lado do parametro, o Postgres nao precisa adivinhar tipo nenhum.
    */
   @Query(
       "select m from WhatsAppMessageLogEntity m where m.tenantId = :tenantId "
           + "and (:status is null or m.status = :status) "
-          + "and (:de is null or m.sentAt >= :de) "
-          + "and (:ate is null or m.sentAt <= :ate) "
+          + "and m.sentAt >= :de "
+          + "and m.sentAt <= :ate "
           + "order by m.sentAt desc")
   List<WhatsAppMessageLogEntity> filtrar(
       @Param("tenantId") UUID tenantId,

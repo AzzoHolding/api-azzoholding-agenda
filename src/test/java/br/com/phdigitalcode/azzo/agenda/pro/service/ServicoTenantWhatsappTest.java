@@ -722,7 +722,15 @@ class ServicoTenantWhatsappTest {
     assertThat(de.getValue()).isNotNull();
   }
 
-  /** Data invalida vira ausencia de filtro: mostrar mais e melhor que uma tela quebrada. */
+  /**
+   * Data invalida vira ausencia de filtro: mostrar mais e melhor que uma tela quebrada.
+   *
+   * <p>O repositorio nunca recebe {@code null} em {@code de}/{@code ate} (ver javadoc de
+   * {@code WhatsAppMessageLogRepository.filtrar} — {@code :de is null} com parametro {@code
+   * Instant} nulo gerava {@code PSQLException: could not determine data type of parameter} em
+   * producao). "Ausencia de filtro" agora e {@code Instant.EPOCH}, um limite inferior que
+   * qualquer {@code sentAt} real satisfaz.
+   */
   @Test
   void dataInvalidaNaoViraFiltroNemErro() {
     when(messageLogRepository.filtrar(any(), any(), any(), any(), any(Pageable.class)))
@@ -732,6 +740,6 @@ class ServicoTenantWhatsappTest {
 
     ArgumentCaptor<java.time.Instant> de = ArgumentCaptor.forClass(java.time.Instant.class);
     verify(messageLogRepository).filtrar(any(), any(), de.capture(), any(), any(Pageable.class));
-    assertThat(de.getValue()).isNull();
+    assertThat(de.getValue()).isEqualTo(java.time.Instant.EPOCH);
   }
 }

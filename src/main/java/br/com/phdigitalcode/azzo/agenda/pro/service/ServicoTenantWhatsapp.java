@@ -653,12 +653,15 @@ public class ServicoTenantWhatsapp {
       int limit, String status, String de, String ate) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     int normalizedLimit = Math.max(1, Math.min(limit <= 0 ? 50 : limit, 200));
+    // de/ate nunca vao nulos para a consulta — ver javadoc de WhatsAppMessageLogRepository.filtrar.
+    Instant desde = paraInstante(de) != null ? paraInstante(de) : Instant.EPOCH;
+    Instant ateInstante = paraInstante(ate) != null ? paraInstante(ate) : Instant.now().plusSeconds(100L * 365 * 24 * 60 * 60);
     List<WhatsAppMessageLogEntity> fetched =
         messageLogRepository.filtrar(
             tenantId,
             trimToNull(status) == null ? null : status.trim().toUpperCase(),
-            paraInstante(de),
-            paraInstante(ate),
+            desde,
+            ateInstante,
             PageRequest.of(0, normalizedLimit + 1));
     boolean hasMore = fetched.size() > normalizedLimit;
     List<WhatsAppMessageLogEntity> page = fetched.stream().limit(normalizedLimit).toList();
