@@ -16,6 +16,7 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 import br.com.phdigitalcode.azzo.agenda.pro.security.InternalApiKeyFilter;
 import br.com.phdigitalcode.azzo.agenda.pro.security.JwtAuthenticationFilter;
+import br.com.phdigitalcode.azzo.agenda.pro.security.LicenseFilter;
 import br.com.phdigitalcode.azzo.agenda.pro.security.RequestAuditContextFilter;
 import br.com.phdigitalcode.azzo.agenda.pro.security.SecurityHeadersFilter;
 
@@ -42,6 +43,7 @@ public class SecurityConfig {
   private final SecurityHeadersFilter securityHeadersFilter;
   private final InternalApiKeyFilter internalApiKeyFilter;
   private final RequestAuditContextFilter requestAuditContextFilter;
+  private final LicenseFilter licenseFilter;
 
   @Value("${app.cors.origins:http://localhost:5173,http://127.0.0.1:5173,https://localhost:5173,https://127.0.0.1:5173}")
   private List<String> corsOrigins;
@@ -49,11 +51,13 @@ public class SecurityConfig {
   public SecurityConfig(JwtAuthenticationFilter jwtAuthenticationFilter,
       SecurityHeadersFilter securityHeadersFilter,
       InternalApiKeyFilter internalApiKeyFilter,
-      RequestAuditContextFilter requestAuditContextFilter) {
+      RequestAuditContextFilter requestAuditContextFilter,
+      LicenseFilter licenseFilter) {
     this.jwtAuthenticationFilter = jwtAuthenticationFilter;
     this.securityHeadersFilter = securityHeadersFilter;
     this.internalApiKeyFilter = internalApiKeyFilter;
     this.requestAuditContextFilter = requestAuditContextFilter;
+    this.licenseFilter = licenseFilter;
   }
 
   @Bean
@@ -91,6 +95,10 @@ public class SecurityConfig {
         // reproduz "The Filter class ... does not have a registered order" na subida real da app
         // (nao aparece em teste porque SecurityFilterChain nao e exercitado no MockMvc padrao).
         .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
+        // Depois do JWT: precisa do SecurityContext ja resolvido (JwtPrincipal/tenant) para
+        // decidir se bloqueia por plano vencido. Ver LicenseFilter — achado de 28/09/2026, nunca
+        // tinha sido portado do Quarkus original.
+        .addFilterAfter(licenseFilter, JwtAuthenticationFilter.class)
         // RequestAuditContextFilter roda antes de tudo (Priority(AUTHENTICATION - 10) no
         // original): preenche requestId/ip/userAgent para o AuditService, mesmo em requisicoes
         // nao autenticadas ou rejeitadas na autenticacao.
