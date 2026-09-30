@@ -129,7 +129,7 @@ app:
   chat:
     retention:
       days:
-        completed: ${CHAT_RETENTION_DAYS_COMPLETED:1}
+        completed: ${CHAT_RETENTION_DAYS_COMPLETED:2}
         canceled: ${CHAT_RETENTION_DAYS_CANCELED:2}
         default: ${CHAT_RETENTION_DAYS_DEFAULT:5}
     reactivation:

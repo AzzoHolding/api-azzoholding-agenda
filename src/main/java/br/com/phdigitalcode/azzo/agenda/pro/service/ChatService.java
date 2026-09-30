@@ -100,7 +100,7 @@ public class ChatService {
       ChatRealtimePublisher chatRealtimePublisher,
       WhatsAppBookingReactivationService whatsAppBookingReactivationService,
       PlatformTransactionManager transactionManager,
-      @Value("${app.chat.retention.days.completed:1}") int retentionCompletedDays,
+      @Value("${app.chat.retention.days.completed:2}") int retentionCompletedDays,
       @Value("${app.chat.retention.days.canceled:2}") int retentionCanceledDays,
       @Value("${app.chat.retention.days.default:5}") int retentionDefaultDays,
       @Value("${app.chat.manual-mode.duration-hours:24}") int manualModeDurationHours) {
