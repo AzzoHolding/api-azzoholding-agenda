@@ -75,10 +75,19 @@ public class SpecialClosureController {
     return ResponseEntity.status(HttpStatus.CONFLICT).body(result);
   }
 
+  /**
+   * ⚠️ {@code notifyClients} nao existia aqui (achado em 29/09/2026): o endpoint sempre chamava o
+   * overload de dois argumentos do service, que fixa {@code notifyClients=false}. Resultado: a
+   * tela nao tinha como pedir "cancelar e avisar o cliente" — o fechamento era confirmado e os
+   * agendamentos impactados ficavam intocados, mesmo quando a pessoa queria cancela-los. Ver nota
+   * em {@code DECISOES-E-PENDENCIAS.md}.
+   */
   @PostMapping("/confirm")
-  public ResponseEntity<SpecialClosureImpactDto> confirmar(@RequestBody SpecialClosureDto dto) {
+  public ResponseEntity<SpecialClosureImpactDto> confirmar(
+      @RequestBody SpecialClosureDto dto,
+      @RequestParam(required = false, defaultValue = "false") boolean notifyClients) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
-    SpecialClosureImpactDto result = specialClosureService.confirmar(tenantId, dto);
+    SpecialClosureImpactDto result = specialClosureService.confirmar(tenantId, dto, notifyClients);
     return ResponseEntity.status(HttpStatus.CREATED).body(result);
   }
 
