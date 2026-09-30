@@ -79,6 +79,10 @@ public class Tenant {
   @Column(name = "asaas_customer_id", unique = true)
   private String asaasCustomerId;
 
+  /** Trocas de CPF/CNPJ depois do cadastro. Ver `ServicoSalonProfile.LIMITE_DE_TROCAS_DO_DOCUMENTO`. */
+  @Column(name = "document_change_count", nullable = false)
+  private Integer documentChangeCount = 0;
+
   @Column(name = "trial_document_hash")
   private String trialDocumentHash;
 

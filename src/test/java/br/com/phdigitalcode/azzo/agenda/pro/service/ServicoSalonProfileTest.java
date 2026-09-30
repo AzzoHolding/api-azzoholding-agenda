@@ -20,6 +20,7 @@ import org.junit.jupiter.api.Test;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.SalonDtos;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.Tenant;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.TenantAddress;
+import br.com.phdigitalcode.azzo.agenda.pro.exception.ApiClientErrorException;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.MinioStorageService;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.TenantAddressRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.TenantRepository;
@@ -214,6 +215,95 @@ class ServicoSalonProfileTest {
 
     assertThat(existingAddress.getStreet()).isEqualTo("Rua Nova");
     verify(tenantAddressRepository).save(existingAddress);
+  }
+
+  // ─── limite de trocas do CPF/CNPJ ───────────────────────────────────────
+
+  private SalonDtos.SalonProfile pedidoComDocumento(String documento) {
+    SalonDtos.SalonProfile request = new SalonDtos.SalonProfile();
+    request.salonName = "Salao QA";
+    request.salonSlug = "salao-qa";
+    request.salonCpfCnpj = documento;
+    return request;
+  }
+
+  private Tenant tenantComDocumento(UUID tenantId, String documento, int trocas) {
+    contextoTenant.definirTenantId(tenantId);
+    Tenant tenant = tenant(tenantId);
+    tenant.setDocument(documento);
+    tenant.setDocumentChangeCount(trocas);
+    when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+    when(tenantAddressRepository.findById(tenantId)).thenReturn(Optional.empty());
+    when(tenantAddressRepository.save(any(TenantAddress.class))).thenAnswer(inv -> inv.getArgument(0));
+    when(tenantOperationalSettingsService.getBusinessHours(tenantId)).thenReturn(List.of());
+    when(tenantOperationalSettingsService.getSpecialClosureDates(tenantId)).thenReturn(List.of());
+    when(publicBookingUrlService.buildPublicBookingUrl(any())).thenReturn("https://qa.local/agendar/salao-qa");
+    return tenant;
+  }
+
+  @Test
+  void definirOPrimeiroDocumentoDeSalaoLegadoNaoGastaTroca() {
+    Tenant tenant = tenantComDocumento(UUID.randomUUID(), null, 0);
+
+    SalonDtos.SalonProfile result = service.atualizarPrivado(pedidoComDocumento("12345678901"));
+
+    assertThat(tenant.getDocumentChangeCount()).isZero();
+    assertThat(result.documentChangesRemaining).isEqualTo(2);
+    assertThat(result.documentChangeLimit).isEqualTo(2);
+  }
+
+  /** A tela reenvia o perfil inteiro a cada gravacao, com o documento igual. */
+  @Test
+  void reenviarOMesmoDocumentoNaoGastaTroca() {
+    Tenant tenant = tenantComDocumento(UUID.randomUUID(), "12345678901", 0);
+
+    service.atualizarPrivado(pedidoComDocumento("123.456.789-01"));
+
+    assertThat(tenant.getDocumentChangeCount()).isZero();
+  }
+
+  @Test
+  void trocarODocumentoGastaUmaTrocaEInformaQuantasRestam() {
+    Tenant tenant = tenantComDocumento(UUID.randomUUID(), "12345678901", 0);
+
+    SalonDtos.SalonProfile primeira = service.atualizarPrivado(pedidoComDocumento("98765432100"));
+    assertThat(tenant.getDocument()).isEqualTo("98765432100");
+    assertThat(primeira.documentChangesRemaining).isEqualTo(1);
+
+    SalonDtos.SalonProfile segunda = service.atualizarPrivado(pedidoComDocumento("11222333000181"));
+    assertThat(tenant.getDocument()).isEqualTo("11222333000181");
+    assertThat(segunda.documentChangesRemaining).isZero();
+  }
+
+  @Test
+  void aTerceiraTrocaERecusadaENadaMuda() {
+    Tenant tenant = tenantComDocumento(UUID.randomUUID(), "11222333000181", 2);
+    SalonDtos.SalonProfile pedido = pedidoComDocumento("98765432100");
+    pedido.salonName = "Outro Nome";
+
+    assertThatThrownBy(() -> service.atualizarPrivado(pedido))
+        .isInstanceOfSatisfying(
+            ApiClientErrorException.class,
+            erro -> {
+              assertThat(erro.getStatus()).isEqualTo(409);
+              assertThat(erro.getMessage()).contains("2 vezes").contains("suporte");
+            });
+
+    assertThat(tenant.getDocument()).isEqualTo("11222333000181");
+    assertThat(tenant.getName()).isEqualTo("Salao QA");
+    assertThat(tenant.getDocumentChangeCount()).isEqualTo(2);
+  }
+
+  @Test
+  void noLimiteAindaPodeGravarOutrosCamposComODocumentoIgual() {
+    Tenant tenant = tenantComDocumento(UUID.randomUUID(), "11222333000181", 2);
+    SalonDtos.SalonProfile pedido = pedidoComDocumento("11.222.333/0001-81");
+    pedido.salonName = "Novo Nome";
+
+    SalonDtos.SalonProfile result = service.atualizarPrivado(pedido);
+
+    assertThat(tenant.getName()).isEqualTo("Novo Nome");
+    assertThat(result.documentChangesRemaining).isZero();
   }
 
   @Test
