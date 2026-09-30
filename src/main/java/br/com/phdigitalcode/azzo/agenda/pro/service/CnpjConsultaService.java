@@ -53,6 +53,15 @@ public class CnpjConsultaService {
     return cached;
   }
 
+  /**
+   * Consulta so o que e cacheavel — sem a segunda chamada ao CNPJ.ws atras de e-mail e telefone.
+   * E o que a consulta publica usa: contato nao sai sem login (LGPD).
+   */
+  public CnpjConsultaResponse consultarSemContato(String cnpj) {
+    LOG.info("Consulta publica de CNPJ {}", CnpjValidator.mask(cnpj));
+    return cnpjLookupCache.consultarCacheado(cnpj);
+  }
+
   private String normalizeOrNull(String value) {
     return (value == null || value.isBlank()) ? null : value.trim();
   }
