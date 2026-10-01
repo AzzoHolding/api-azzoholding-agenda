@@ -10,6 +10,7 @@ import org.springframework.transaction.annotation.Transactional;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.SalonDtos;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.Tenant;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.TenantAddress;
+import br.com.phdigitalcode.azzo.agenda.pro.exception.ApiClientErrorException;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.MinioStorageService;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.TenantAddressRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.TenantRepository;
@@ -46,6 +47,15 @@ public class ServicoSalonProfile {
     this.minioStorageService = minioStorageService;
   }
 
+  /**
+   * Quantas vezes o salao pode trocar o CPF/CNPJ depois do cadastro.
+   *
+   * <p>O documento identifica o periodo de avaliacao (um por CPF/CNPJ, para sempre) e o cliente da
+   * cobranca. Sem limite, trocar de documento a cada troca de avaliacao seria so questao de
+   * digitar. Acima do limite a troca so pelo suporte.
+   */
+  public static final int LIMITE_DE_TROCAS_DO_DOCUMENTO = 2;
+
   @Transactional(readOnly = true)
   public SalonDtos.SalonProfile obterPrivado() {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
@@ -68,6 +78,8 @@ public class ServicoSalonProfile {
     if (document.length() != 11 && document.length() != 14) {
       throw new IllegalArgumentException("CPF deve ter 11 digitos ou CNPJ deve ter 14 digitos.");
     }
+
+    registrarTrocaDeDocumentoOuFalhar(tenant, document);
 
     tenant.setName(request.salonName);
     tenant.setSlug(request.salonSlug);
@@ -185,7 +197,41 @@ public class ServicoSalonProfile {
     dto.zipCode = address != null ? address.getZipCode() : null;
     dto.businessHours = tenantOperationalSettingsService.getBusinessHours(tenant.getId());
     dto.specialClosureDates = tenantOperationalSettingsService.getSpecialClosureDates(tenant.getId());
+    dto.documentChangesRemaining = trocasRestantes(tenant);
+    dto.documentChangeLimit = LIMITE_DE_TROCAS_DO_DOCUMENTO;
     return dto;
+  }
+
+  /**
+   * Conta a troca de CPF/CNPJ e recusa a que passa do limite.
+   *
+   * <p>So conta quando os DIGITOS mudam: a tela reenvia o perfil inteiro a cada gravacao, inclusive
+   * o documento igual, e isso nao pode gastar troca. Salao sem documento anterior (legado) define o
+   * primeiro sem contar — nao ha o que "trocar". Roda ANTES de qualquer campo ser alterado.
+   */
+  private void registrarTrocaDeDocumentoOuFalhar(Tenant tenant, String novoDocumento) {
+    String atual = onlyDigitsOrNull(tenant.getDocument());
+    if (atual == null || atual.equals(novoDocumento)) return;
+
+    int trocas = tenant.getDocumentChangeCount() == null ? 0 : tenant.getDocumentChangeCount();
+    if (trocas >= LIMITE_DE_TROCAS_DO_DOCUMENTO) {
+      throw new ApiClientErrorException(
+          "O CPF/CNPJ do salao ja foi alterado "
+              + LIMITE_DE_TROCAS_DO_DOCUMENTO
+              + " vezes e nao pode mais ser trocado por aqui. Para corrigir, fale com o suporte.",
+          409);
+    }
+    tenant.setDocumentChangeCount(trocas + 1);
+    LOG.info(
+        "CPF/CNPJ do salao alterado (tenantId={}, trocas={}/{})",
+        tenant.getId(),
+        trocas + 1,
+        LIMITE_DE_TROCAS_DO_DOCUMENTO);
+  }
+
+  private int trocasRestantes(Tenant tenant) {
+    int trocas = tenant.getDocumentChangeCount() == null ? 0 : tenant.getDocumentChangeCount();
+    return Math.max(0, LIMITE_DE_TROCAS_DO_DOCUMENTO - trocas);
   }
 
   private String onlyDigitsOrNull(String value) {
