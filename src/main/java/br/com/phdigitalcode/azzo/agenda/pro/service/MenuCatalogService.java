@@ -324,7 +324,12 @@ public class MenuCatalogService {
               .collect(Collectors.toList()));
       payload.put("recordedAt", Instant.now().toString());
       command.after = payload;
-      auditService.recordSuccess(command);
+      // ISOLADO (REQUIRES_NEW): quem edita o catalogo e ADMIN de plataforma, sem tenant, e o
+      // `persist` exige tenantId. Com `recordSuccess` (mesma transacao) essa excecao marcava a
+      // transacao inteira como rollback-only antes de ser engolida aqui: o save logava "salvo",
+      // o commit lancava UnexpectedRollbackException (400 generico) e NADA era gravado — achado em
+      // 30/09/2026, mesmo defeito dos planos de 27/09 (ver AuditService.recordSuccessIsolated).
+      auditService.recordSuccessIsolated(command);
     } catch (Exception ignored) {
       // Nao bloquear fluxo principal por auditoria.
     }
