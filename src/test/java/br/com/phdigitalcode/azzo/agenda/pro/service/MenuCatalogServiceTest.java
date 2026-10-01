@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -173,7 +174,10 @@ class MenuCatalogServiceTest {
 
     assertThat(response.id).isEqualTo(itemId.toString());
     assertThat(response.route).isEqualTo("/novo");
-    verify(auditService).recordSuccess(any(AuditEventCommand.class));
+    // Auditoria ISOLADA: a acao e de ADMIN de plataforma (sem tenant), e o audit comum na mesma
+    // transacao a derrubava inteira com UnexpectedRollbackException (achado em 30/09/2026).
+    verify(auditService).recordSuccessIsolated(any(AuditEventCommand.class));
+    verify(auditService, never()).recordSuccess(any(AuditEventCommand.class));
   }
 
   @Test
