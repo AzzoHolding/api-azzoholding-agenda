@@ -155,6 +155,63 @@ public class AuditService {
     return persist(command, AuditConstants.Status.SUCCESS);
   }
 
+  /**
+   * As chaves que, num evento de {@code CLIENT}, sao dado pessoal do titular. Ate 02/10/2026 o
+   * `ClienteService` gravava aqui o retrato inteiro do cliente — e a anonimizacao nao tocava na
+   * auditoria, entao "anonimizado" e "excluido" mantinham nome, telefone e endereco por 365 dias.
+   * Hoje o `ClienteService` nem grava esses valores; esta lista cobre os eventos ANTIGOS.
+   */
+  public static final Set<String> CHAVES_PESSOAIS_DO_CLIENTE =
+      Set.of(
+          "name", "email", "phone", "avatar", "birthDate", "notes", "zipCode", "street", "number",
+          "complement", "neighborhood", "city", "state", "cpfCnpj");
+
+  private static final String REDIGIDO = "[REDIGIDO]";
+
+  /**
+   * Redige o dado pessoal de TODOS os eventos de auditoria do cliente (troca o valor por
+   * {@code [REDIGIDO]}, mantem a chave) e marca {@code redacted_at}. Idempotente: so olha o que ainda
+   * nao foi redigido.
+   *
+   * <p>Sem exceder o necessario: o evento fica (quem, quando, o que), so some o VALOR pessoal. O
+   * {@code event_hash} nao e recalculado — ver {@link AuditEvent#getRedactedAt()}. Falha de JSON
+   * invalido LANCA: engolir deixaria o dado pessoal no lugar e a anonimizacao diria que terminou.
+   *
+   * @return quantos eventos foram redigidos
+   */
+  @Transactional
+  public int redigirDadosPessoaisDoCliente(UUID tenantId, UUID clientId) {
+    if (tenantId == null || clientId == null) return 0;
+    List<AuditEvent> eventos =
+        auditEventRepository.findNaoRedigidosDaEntidade(tenantId, "CLIENT", clientId.toString());
+    if (eventos.isEmpty()) return 0;
+
+    Instant agora = Instant.now();
+    for (AuditEvent evento : eventos) {
+      evento.setBeforeJson(redigirChaves(evento.getBeforeJson()));
+      evento.setAfterJson(redigirChaves(evento.getAfterJson()));
+      evento.setMetadataJson(redigirChaves(evento.getMetadataJson()));
+      evento.setRedactedAt(agora);
+    }
+    auditEventRepository.saveAll(eventos);
+    return eventos.size();
+  }
+
+  private String redigirChaves(String json) {
+    if (json == null || json.isBlank()) return json;
+    try {
+      JsonNode raiz = objectMapper.readTree(json);
+      if (!(raiz instanceof com.fasterxml.jackson.databind.node.ObjectNode objeto)) return json;
+      for (String chave : CHAVES_PESSOAIS_DO_CLIENTE) {
+        JsonNode valor = objeto.get(chave);
+        if (valor != null && !valor.isNull()) objeto.put(chave, REDIGIDO);
+      }
+      return objectMapper.writeValueAsString(objeto);
+    } catch (Exception e) {
+      throw new IllegalStateException("Nao foi possivel redigir o evento de auditoria", e);
+    }
+  }
+
   private AuditEvent persist(AuditEventCommand command, String status) {
     Timer.Sample sample = meterRegistry != null ? Timer.start(meterRegistry) : null;
     if (command == null) throw new IllegalArgumentException("AuditEventCommand obrigatorio");
