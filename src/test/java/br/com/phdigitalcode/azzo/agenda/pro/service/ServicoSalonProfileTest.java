@@ -177,7 +177,7 @@ class ServicoSalonProfileTest {
     SalonDtos.SalonProfile request = new SalonDtos.SalonProfile();
     request.salonName = "Novo Nome";
     request.salonSlug = "novo-slug";
-    request.salonCpfCnpj = "123.456.789-01";
+    request.salonCpfCnpj = "123.456.789-09";
     request.city = "Sao Paulo";
     request.state = "SP";
     request.businessHours = List.of();
@@ -185,7 +185,7 @@ class ServicoSalonProfileTest {
 
     SalonDtos.SalonProfile result = service.atualizarPrivado(request);
 
-    assertThat(tenant.getDocument()).isEqualTo("12345678901");
+    assertThat(tenant.getDocument()).isEqualTo("12345678909");
     assertThat(tenant.getName()).isEqualTo("Novo Nome");
     assertThat(result.city).isEqualTo("Sao Paulo");
     verify(tenantAddressRepository).save(any(TenantAddress.class));
@@ -208,7 +208,7 @@ class ServicoSalonProfileTest {
     when(publicBookingUrlService.buildPublicBookingUrl(any())).thenReturn("https://qa.local/agendar/slug");
 
     SalonDtos.SalonProfile request = new SalonDtos.SalonProfile();
-    request.salonCpfCnpj = "12345678901234"; // 14 digitos (CNPJ)
+    request.salonCpfCnpj = "11222333000181"; // 14 digitos (CNPJ valido)
     request.street = "Rua Nova";
 
     service.atualizarPrivado(request);
@@ -245,7 +245,7 @@ class ServicoSalonProfileTest {
   void definirOPrimeiroDocumentoDeSalaoLegadoNaoGastaTroca() {
     Tenant tenant = tenantComDocumento(UUID.randomUUID(), null, 0);
 
-    SalonDtos.SalonProfile result = service.atualizarPrivado(pedidoComDocumento("12345678901"));
+    SalonDtos.SalonProfile result = service.atualizarPrivado(pedidoComDocumento("12345678909"));
 
     assertThat(tenant.getDocumentChangeCount()).isZero();
     assertThat(result.documentChangesRemaining).isEqualTo(2);
@@ -255,16 +255,16 @@ class ServicoSalonProfileTest {
   /** A tela reenvia o perfil inteiro a cada gravacao, com o documento igual. */
   @Test
   void reenviarOMesmoDocumentoNaoGastaTroca() {
-    Tenant tenant = tenantComDocumento(UUID.randomUUID(), "12345678901", 0);
+    Tenant tenant = tenantComDocumento(UUID.randomUUID(), "12345678909", 0);
 
-    service.atualizarPrivado(pedidoComDocumento("123.456.789-01"));
+    service.atualizarPrivado(pedidoComDocumento("123.456.789-09"));
 
     assertThat(tenant.getDocumentChangeCount()).isZero();
   }
 
   @Test
   void trocarODocumentoGastaUmaTrocaEInformaQuantasRestam() {
-    Tenant tenant = tenantComDocumento(UUID.randomUUID(), "12345678901", 0);
+    Tenant tenant = tenantComDocumento(UUID.randomUUID(), "12345678909", 0);
 
     SalonDtos.SalonProfile primeira = service.atualizarPrivado(pedidoComDocumento("98765432100"));
     assertThat(tenant.getDocument()).isEqualTo("98765432100");

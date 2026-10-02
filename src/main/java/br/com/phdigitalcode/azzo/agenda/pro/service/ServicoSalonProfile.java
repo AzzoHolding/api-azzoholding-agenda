@@ -78,6 +78,9 @@ public class ServicoSalonProfile {
     if (document.length() != 11 && document.length() != 14) {
       throw new IllegalArgumentException("CPF deve ter 11 digitos ou CNPJ deve ter 14 digitos.");
     }
+    if (!br.com.phdigitalcode.azzo.agenda.pro.util.DocumentoValidator.cpfOuCnpjValido(document)) {
+      throw new IllegalArgumentException("CPF/CNPJ invalido. Confira os numeros.");
+    }
 
     registrarTrocaDeDocumentoOuFalhar(tenant, document);
 

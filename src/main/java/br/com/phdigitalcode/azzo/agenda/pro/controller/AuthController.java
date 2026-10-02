@@ -32,6 +32,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.security.AuthCookieService;
 import br.com.phdigitalcode.azzo.agenda.pro.security.JwtPrincipal;
 import br.com.phdigitalcode.azzo.agenda.pro.security.RefreshTokenService;
 import br.com.phdigitalcode.azzo.agenda.pro.mapper.UsuarioMapper;
+import br.com.phdigitalcode.azzo.agenda.pro.service.VerificacaoDoDocumentoNoCadastro;
 import br.com.phdigitalcode.azzo.agenda.pro.service.AuthService;
 import br.com.phdigitalcode.azzo.agenda.pro.util.CorrelatedLogging;
 import jakarta.servlet.http.HttpServletRequest;
@@ -63,18 +64,21 @@ public class AuthController {
   private final RefreshTokenService refreshTokenService;
   private final UsuarioRepository usuarioRepository;
   private final UsuarioMapper usuarioMapper;
+  private final VerificacaoDoDocumentoNoCadastro verificacaoDoDocumento;
 
   public AuthController(
       AuthService authService,
       AuthCookieService authCookieService,
       RefreshTokenService refreshTokenService,
       UsuarioRepository usuarioRepository,
-      UsuarioMapper usuarioMapper) {
+      UsuarioMapper usuarioMapper,
+      VerificacaoDoDocumentoNoCadastro verificacaoDoDocumento) {
     this.authService = authService;
     this.authCookieService = authCookieService;
     this.refreshTokenService = refreshTokenService;
     this.usuarioRepository = usuarioRepository;
     this.usuarioMapper = usuarioMapper;
+    this.verificacaoDoDocumento = verificacaoDoDocumento;
   }
 
   @PostMapping("/login")
@@ -95,6 +99,8 @@ public class AuthController {
       ipAddress = firstNonBlank(servletRequest.getHeader("X-Real-IP"), servletRequest.getHeader("x-real-ip"));
     }
 
+    // Chamada HTTP a Receita: fica FORA da transacao do cadastro.
+    verificacaoDoDocumento.verificarOuFalhar(request.cpfCnpj);
     AuthResponse authResponse = authService.registrar(request, requestId, ipAddress);
     return buildCookieAuthResponse(authResponse);
   }
