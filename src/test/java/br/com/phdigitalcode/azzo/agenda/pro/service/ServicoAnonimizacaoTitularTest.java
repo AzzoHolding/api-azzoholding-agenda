@@ -123,6 +123,17 @@ class ServicoAnonimizacaoTitularTest {
   }
 
   @Test
+  void anonimizarSoltaOVinculoComOAsaas() {
+    Cliente cliente = buildCliente();
+    cliente.setAsaasCustomerId("cus_000123");
+    when(clienteRepository.findByIdAndTenantId(clientId, tenantId)).thenReturn(Optional.of(cliente));
+
+    service.anonimizar(clientId);
+
+    assertThat(cliente.getAsaasCustomerId()).isNull();
+  }
+
+  @Test
   void anonimizarLimpaNotasDeAtendimentoAssociadas() {
     when(clienteRepository.findByIdAndTenantId(clientId, tenantId)).thenReturn(Optional.of(buildCliente()));
     AppointmentCustomerNote note = new AppointmentCustomerNote();

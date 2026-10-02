@@ -118,6 +118,9 @@ public class ServicoAnonimizacaoTitular {
     cliente.setWhatsappOptOut(true);
     cliente.setWhatsappOptInAt(null);
     cliente.setWhatsappOptOutAt(null);
+    // O id do cliente no Asaas liga ESTA ficha ao cadastro do titular la (nome e CPF/CNPJ). Soltar o
+    // vinculo e o que nos cabe aqui; o cadastro no Asaas e do gateway e fica fora desta rotina.
+    cliente.setAsaasCustomerId(null);
     cliente.setAnonymizedAt(now);
 
     // Anonimiza notas de atendimento associadas ao cliente
