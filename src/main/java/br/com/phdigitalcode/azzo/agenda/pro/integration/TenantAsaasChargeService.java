@@ -117,6 +117,12 @@ public class TenantAsaasChargeService {
 
   /** @throws IllegalArgumentException cliente sem CPF/CNPJ na primeira cobranca (exigido pelo Asaas). */
   public void ensureAsaasCustomer(String apiKey, Cliente cliente) {
+    // Titular anonimizado (LGPD) nao se cobra. Vem ANTES do atalho do id existente: um cliente
+    // anonimizado antes de a rotina soltar o vinculo ainda pode ter `asaas_customer_id`. E sem esta
+    // trava, um pedido de assinatura com CPF novo criaria no Asaas um cliente "[ANONIMIZADO]".
+    if (cliente.getAnonymizedAt() != null) {
+      throw new IllegalArgumentException("Cliente anonimizado nao pode ser cobrado.");
+    }
     if (trimToNull(cliente.getAsaasCustomerId()) != null) return;
     if (trimToNull(cliente.getCpfCnpj()) == null) {
       throw new IllegalArgumentException(
