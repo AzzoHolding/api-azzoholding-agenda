@@ -7,6 +7,8 @@ import org.springframework.stereotype.Component;
 
 import br.com.phdigitalcode.azzo.agenda.pro.dto.response.CnpjConsultaResponse;
 import br.com.phdigitalcode.azzo.agenda.pro.exception.CnpjApiIndisponivelException;
+import br.com.phdigitalcode.azzo.agenda.pro.exception.CnpjNaoEncontradoException;
+import org.springframework.web.client.HttpClientErrorException;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.BrasilApiCnpjClient;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.CnpjWsClient;
 import br.com.phdigitalcode.azzo.agenda.pro.util.CnpjValidator;
@@ -35,11 +37,13 @@ public class CnpjLookupCache {
   public CnpjConsultaResponse consultarCacheado(String cnpj) {
     LOG.info("Cache miss - consultando APIs externas para CNPJ {}", CnpjValidator.mask(cnpj));
 
+    boolean cnpjWsNaoEncontrou = false;
     try {
       CnpjWsClient.CnpjWsResponse raw = cnpjWsClient.buscar(cnpj);
       LOG.info("CNPJ {} obtido via CNPJ.ws", CnpjValidator.mask(cnpj));
       return CnpjResponseMapper.fromCnpjWs(raw);
     } catch (Exception e) {
+      cnpjWsNaoEncontrou = e instanceof HttpClientErrorException.NotFound;
       LOG.warn("Falha na CNPJ.ws para {} ({}), acionando fallback BrasilAPI", CnpjValidator.mask(cnpj), e.getClass().getSimpleName());
     }
 
@@ -48,6 +52,11 @@ public class CnpjLookupCache {
       LOG.info("CNPJ {} obtido via BrasilAPI (fallback)", CnpjValidator.mask(cnpj));
       return CnpjResponseMapper.fromBrasilApi(raw);
     } catch (Exception e) {
+      // 404 nos DOIS = o CNPJ nao existe. Qualquer outra falha (timeout, 5xx, 429) e indisponibilidade.
+      if (cnpjWsNaoEncontrou && e instanceof HttpClientErrorException.NotFound) {
+        LOG.info("CNPJ {} nao existe (404 nas duas APIs)", CnpjValidator.mask(cnpj));
+        throw new CnpjNaoEncontradoException();
+      }
       LOG.error("Ambas as APIs falharam para CNPJ {}: {}", CnpjValidator.mask(cnpj), e.getMessage());
       throw new CnpjApiIndisponivelException("Servico de consulta CNPJ temporariamente indisponivel. Tente novamente em instantes.");
     }

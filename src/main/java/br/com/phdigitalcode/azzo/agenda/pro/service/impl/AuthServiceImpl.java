@@ -65,6 +65,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.security.TotpService;
 import br.com.phdigitalcode.azzo.agenda.pro.service.AuthService;
 import br.com.phdigitalcode.azzo.agenda.pro.service.TermsService;
 import br.com.phdigitalcode.azzo.agenda.pro.util.CorrelatedLogging;
+import br.com.phdigitalcode.azzo.agenda.pro.util.DocumentoValidator;
 import br.com.phdigitalcode.azzo.agenda.pro.util.SlugUtil;
 
 /**
@@ -562,7 +563,7 @@ public class AuthServiceImpl implements AuthService {
       throw new IllegalArgumentException("CPF/CNPJ obrigatorio para ativar plano gratuito");
     }
     String digits = cpfCnpj.replaceAll("\\D", "");
-    if (digits.length() != 11 && digits.length() != 14) {
+    if (!DocumentoValidator.cpfOuCnpjValido(digits)) {
       throw new IllegalArgumentException("CPF/CNPJ invalido");
     }
     return digits;
