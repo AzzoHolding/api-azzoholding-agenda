@@ -118,6 +118,9 @@ public class ServicoAnonimizacaoTitular {
     cliente.setWhatsappOptOut(true);
     cliente.setWhatsappOptInAt(null);
     cliente.setWhatsappOptOutAt(null);
+    // O id do cliente no Asaas liga ESTA ficha ao cadastro do titular la (nome e CPF/CNPJ). Soltar o
+    // vinculo e o que nos cabe aqui; o cadastro no Asaas e do gateway e fica fora desta rotina.
+    cliente.setAsaasCustomerId(null);
     cliente.setAnonymizedAt(now);
 
     // Anonimiza notas de atendimento associadas ao cliente
@@ -137,6 +140,10 @@ public class ServicoAnonimizacaoTitular {
     int notificacoes = notificationRepository.anonimizarPorClienteRaw(tenantId, clientId);
     int mensagensWhatsapp = whatsAppMessageLogRepository.anonimizarPorClienteRaw(tenantId, clientId);
     int reativacoes = reactivationCycleRepository.anonimizarPorClienteRaw(tenantId, clientId);
+
+    // A trilha de auditoria guardava o retrato do cliente (nome, telefone, endereco...) e dura 365
+    // dias: tira o valor pessoal dos eventos dele. Sem try/catch — se falhar, a anonimizacao desfaz.
+    int eventosDeAuditoria = auditService.redigirDadosPessoaisDoCliente(tenantId, clientId);
 
     // Registra solicitação LGPD do tipo EXCLUSAO já encerrada (art. 18, VI)
     LgpdDataSubjectRequest lgpdRequest = new LgpdDataSubjectRequest();
@@ -167,7 +174,8 @@ public class ServicoAnonimizacaoTitular {
             + mensagens + " mensagem(ns) de chat, "
             + notificacoes + " notificacao(oes), "
             + mensagensWhatsapp + " mensagem(ns) de WhatsApp e "
-            + reativacoes + " ciclo(s) de reativacao anonimizados.");
+            + reativacoes + " ciclo(s) de reativacao anonimizados e "
+            + eventosDeAuditoria + " evento(s) de auditoria redigidos.");
     event.setActorUserId(obterActorId());
     eventRepository.save(event);
 
