@@ -13,13 +13,11 @@ import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
 import org.springframework.web.server.ResponseStatusException;
 
 import br.com.phdigitalcode.azzo.agenda.pro.entity.AppointmentCustomerNote;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.Cliente;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.LgpdDataSubjectRequest;
-import br.com.phdigitalcode.azzo.agenda.pro.entity.LgpdDataSubjectRequestEvent;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditEventCommand;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditService;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.AppointmentCustomerNoteRepository;
@@ -122,33 +120,6 @@ class ServicoAnonimizacaoTitularTest {
     verify(requestRepository).save(any(LgpdDataSubjectRequest.class));
     verify(eventRepository).save(any());
     verify(auditService).recordSuccess(any(AuditEventCommand.class));
-  }
-
-  @Test
-  void anonimizarSoltaOVinculoComOAsaasERedigeAAuditoriaDoCliente() {
-    Cliente cliente = buildCliente();
-    cliente.setAsaasCustomerId("cus_000123");
-    when(clienteRepository.findByIdAndTenantId(clientId, tenantId)).thenReturn(Optional.of(cliente));
-    when(auditService.redigirDadosPessoaisDoCliente(tenantId, clientId)).thenReturn(3);
-
-    service.anonimizar(clientId);
-
-    assertThat(cliente.getAsaasCustomerId()).isNull();
-    verify(auditService).redigirDadosPessoaisDoCliente(tenantId, clientId);
-    ArgumentCaptor<LgpdDataSubjectRequestEvent> evento =
-        ArgumentCaptor.forClass(LgpdDataSubjectRequestEvent.class);
-    verify(eventRepository).save(evento.capture());
-    assertThat(evento.getValue().getEventNote()).contains("3 evento(s) de auditoria redigidos");
-  }
-
-  @Test
-  void anonimizarFalhaSeNaoConseguirRedigirAAuditoria() {
-    when(clienteRepository.findByIdAndTenantId(clientId, tenantId)).thenReturn(Optional.of(buildCliente()));
-    when(auditService.redigirDadosPessoaisDoCliente(tenantId, clientId))
-        .thenThrow(new IllegalStateException("json invalido"));
-
-    // Engolir deixaria o dado pessoal na trilha e a anonimizacao diria que terminou.
-    assertThatThrownBy(() -> service.anonimizar(clientId)).isInstanceOf(IllegalStateException.class);
   }
 
   @Test

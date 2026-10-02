@@ -39,15 +39,6 @@ public interface AuditEventRepository
       @Param("entityId") String entityId,
       Limit limit);
 
-  /** Os eventos da entidade que ainda guardam o conteudo original (para a redacao de LGPD). */
-  @Query(
-      "select e from AuditEvent e where e.tenantId = :tenantId and e.entityType = :entityType "
-          + "and e.entityId = :entityId and e.redactedAt is null")
-  List<AuditEvent> findNaoRedigidosDaEntidade(
-      @Param("tenantId") UUID tenantId,
-      @Param("entityType") String entityType,
-      @Param("entityId") String entityId);
-
   /**
    * Guardas de entrada e normalizacao do original: argumento nulo/em branco devolve lista vazia sem
    * tocar no banco, {@code limit <= 0} vira 100 e o teto e 200.

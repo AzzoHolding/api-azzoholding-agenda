@@ -100,15 +100,6 @@ public class AuditEvent {
   @Column(name = "created_at", nullable = false)
   private Instant createdAt;
 
-  /**
-   * Quando os dados pessoais deste evento foram redigidos (LGPD). **O `event_hash` NAO muda**: ele
-   * continua sendo o hash do conteudo ORIGINAL, para a cadeia (`prev_event_hash`) seguir ligada. Quem
-   * verificar a cadeia deve tratar o evento com `redacted_at` como "conteudo removido por LGPD", e nao
-   * recalcular o hash dele.
-   */
-  @Column(name = "redacted_at")
-  private Instant redactedAt;
-
   @PrePersist
   void prePersist() {
     if (id == null) id = UUID.randomUUID();

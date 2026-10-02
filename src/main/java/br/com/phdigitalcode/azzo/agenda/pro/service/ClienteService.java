@@ -149,15 +149,11 @@ public class ClienteService {
 
     ClienteStats beforeStats = clienteStatsRepository.findStatsByTenantAndClient(tenantId, c.getId());
     Map<String, Object> before = resumoCliente(c, beforeStats);
-    Map<String, String> pessoaisAntes = camposPessoais(c);
     aplicar(req, c);
     clienteRepository.save(c);
 
     ClienteStats afterStats = clienteStatsRepository.findStatsByTenantAndClient(tenantId, c.getId());
-    Map<String, Object> after = resumoCliente(c, afterStats);
-    List<String> camposAlterados = nomesDosCamposAlterados(pessoaisAntes, camposPessoais(c));
-    if (!camposAlterados.isEmpty()) after.put("camposPessoaisAlterados", camposAlterados);
-    auditar(tenantId, "CLIENT_UPDATE", before, after, c.getId());
+    auditar(tenantId, "CLIENT_UPDATE", before, resumoCliente(c, afterStats), c.getId());
     LOG.info(
         "customers.update.completed {}",
         CorrelatedLogging.context(
@@ -193,10 +189,6 @@ public class ClienteService {
     clienteRepository.delete(before);
 
     auditar(tenantId, "CLIENT_DELETE", snapshot, null, id);
-    // Os eventos ANTIGOS do cliente (criacao/edicao) ainda guardam o retrato dele: tira o valor
-    // pessoal. Sem try/catch: se falhar, a exclusao falha junto, em vez de apagar o cliente e deixar
-    // o dado pessoal na trilha.
-    auditService.redigirDadosPessoaisDoCliente(tenantId, id);
     LOG.info("customers.delete.completed {}", CorrelatedLogging.context("tenantId", tenantId, "clientId", id));
   }
 
@@ -313,51 +305,27 @@ public class ClienteService {
     }
   }
 
-  /**
-   * O que a auditoria guarda do cliente: so o que NAO identifica ninguem (id e os totais). Nome,
-   * telefone, e-mail, documento, endereco e notas ficam FORA — a trilha dura 365 dias e e encadeada
-   * por hash, entao dado pessoal ali nao some quando o cliente e anonimizado ou excluido (achado de
-   * 02/10/2026). O que mudou numa edicao vai em {@code camposPessoaisAlterados}, so com os NOMES dos
-   * campos.
-   */
   private Map<String, Object> resumoCliente(Cliente c, ClienteStats stats) {
     if (c == null) return null;
     Map<String, Object> snapshot = new HashMap<>();
     snapshot.put("id", c.getId() != null ? c.getId().toString() : null);
+    snapshot.put("name", c.getName());
+    snapshot.put("email", c.getEmail());
+    snapshot.put("phone", c.getPhone());
+    snapshot.put("avatar", c.getAvatar());
+    snapshot.put("birthDate", c.getBirthDate() != null ? c.getBirthDate().toString() : null);
+    snapshot.put("notes", c.getNotes());
+    snapshot.put("zipCode", c.getZipCode());
+    snapshot.put("street", c.getStreet());
+    snapshot.put("number", c.getNumber());
+    snapshot.put("complement", c.getComplement());
+    snapshot.put("neighborhood", c.getNeighborhood());
+    snapshot.put("city", c.getCity());
+    snapshot.put("state", c.getState());
     snapshot.put("totalVisits", stats.totalVisits());
     snapshot.put("totalSpent", stats.totalSpent());
     snapshot.put("lastVisit", stats.lastVisit() != null ? stats.lastVisit().toString() : null);
     return snapshot;
-  }
-
-  /** Os campos pessoais do cliente como texto, SO para comparar antes/depois — nunca vai para a auditoria. */
-  private Map<String, String> camposPessoais(Cliente c) {
-    Map<String, String> campos = new java.util.LinkedHashMap<>();
-    campos.put("name", c.getName());
-    campos.put("email", c.getEmail());
-    campos.put("phone", c.getPhone());
-    campos.put("cpfCnpj", c.getCpfCnpj());
-    campos.put("avatar", c.getAvatar());
-    campos.put("birthDate", c.getBirthDate() != null ? c.getBirthDate().toString() : null);
-    campos.put("notes", c.getNotes());
-    campos.put("zipCode", c.getZipCode());
-    campos.put("street", c.getStreet());
-    campos.put("number", c.getNumber());
-    campos.put("complement", c.getComplement());
-    campos.put("neighborhood", c.getNeighborhood());
-    campos.put("city", c.getCity());
-    campos.put("state", c.getState());
-    return campos;
-  }
-
-  private List<String> nomesDosCamposAlterados(Map<String, String> antes, Map<String, String> depois) {
-    List<String> alterados = new java.util.ArrayList<>();
-    for (Map.Entry<String, String> campo : depois.entrySet()) {
-      if (!java.util.Objects.equals(antes.get(campo.getKey()), campo.getValue())) {
-        alterados.add(campo.getKey());
-      }
-    }
-    return alterados;
   }
 
   private UUID obterUsuarioId() {
