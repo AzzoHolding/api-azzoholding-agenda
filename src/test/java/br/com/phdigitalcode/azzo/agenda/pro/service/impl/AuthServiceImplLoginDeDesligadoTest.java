@@ -24,6 +24,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.dto.request.LoginRequest;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.Usuario;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.PapelUsuario;
 import br.com.phdigitalcode.azzo.agenda.pro.exception.ApiClientErrorException;
+import br.com.phdigitalcode.azzo.agenda.pro.service.ServicoConfirmacaoDeEmail;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditEventCommand;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditService;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.EmailJobService;
@@ -74,6 +75,7 @@ class AuthServiceImplLoginDeDesligadoTest {
   @Mock private CheckoutOrderRepository checkoutOrderRepository;
   @Mock private LicenseEventRepository licenseEventRepository;
   @Mock private AcessoDeProfissional acessoDeProfissional;
+  @Mock private ServicoConfirmacaoDeEmail confirmacaoDeEmail;
 
   private AuthServiceImpl service;
   private Usuario usuario;
@@ -87,7 +89,7 @@ class AuthServiceImplLoginDeDesligadoTest {
             refreshTokenService, encryptionService, totpService, auditService,
             passwordPolicyValidator, emailJobService, usuarioMapper, termsService,
             productRepository, checkoutIntentRepository, checkoutOrderRepository,
-            licenseEventRepository, acessoDeProfissional);
+            licenseEventRepository, acessoDeProfissional, confirmacaoDeEmail);
 
     usuario = new Usuario();
     usuario.setId(UUID.randomUUID());
@@ -131,6 +133,30 @@ class AuthServiceImplLoginDeDesligadoTest {
     assertThatThrownBy(() -> service.login(login("errada")))
         .hasMessageContaining("Credenciais invalidas");
     verify(acessoDeProfissional, never()).desativado(any());
+  }
+
+  @Test
+  void cadastroSemEmailConfirmadoNaoEntraENaoGanhaSessao() {
+    usuario.setEmailConfirmationPending(true);
+
+    assertThatThrownBy(() -> service.login(login("Senha@123")))
+        .isInstanceOf(ApiClientErrorException.class)
+        .hasMessageContaining("Confirme seu e-mail");
+
+    verify(refreshTokenService, never()).issueForUser(any());
+    verify(jwtService, never()).gerarToken(any());
+    ArgumentCaptor<AuditEventCommand> captor = ArgumentCaptor.forClass(AuditEventCommand.class);
+    verify(auditService).recordDenied(captor.capture());
+    assertThat(captor.getValue().action).isEqualTo("AUTH_LOGIN");
+  }
+
+  /** Senha errada nao revela que o e-mail existe e esta pendente: a checagem vem depois da senha. */
+  @Test
+  void senhaErradaNaoRevelaQueOEmailEstaPendente() {
+    usuario.setEmailConfirmationPending(true);
+
+    assertThatThrownBy(() -> service.login(login("errada")))
+        .hasMessageContaining("Credenciais invalidas");
   }
 
   @Test

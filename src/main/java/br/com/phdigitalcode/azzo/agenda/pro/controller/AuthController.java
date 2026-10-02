@@ -32,7 +32,9 @@ import br.com.phdigitalcode.azzo.agenda.pro.security.AuthCookieService;
 import br.com.phdigitalcode.azzo.agenda.pro.security.JwtPrincipal;
 import br.com.phdigitalcode.azzo.agenda.pro.security.RefreshTokenService;
 import br.com.phdigitalcode.azzo.agenda.pro.mapper.UsuarioMapper;
+import br.com.phdigitalcode.azzo.agenda.pro.service.ServicoConfirmacaoDeEmail;
 import br.com.phdigitalcode.azzo.agenda.pro.service.VerificacaoDoDocumentoNoCadastro;
+import br.com.phdigitalcode.azzo.agenda.pro.dto.request.ConfirmEmailRequest;
 import br.com.phdigitalcode.azzo.agenda.pro.service.AuthService;
 import br.com.phdigitalcode.azzo.agenda.pro.util.CorrelatedLogging;
 import jakarta.servlet.http.HttpServletRequest;
@@ -65,6 +67,7 @@ public class AuthController {
   private final UsuarioRepository usuarioRepository;
   private final UsuarioMapper usuarioMapper;
   private final VerificacaoDoDocumentoNoCadastro verificacaoDoDocumento;
+  private final ServicoConfirmacaoDeEmail confirmacaoDeEmail;
 
   public AuthController(
       AuthService authService,
@@ -72,13 +75,15 @@ public class AuthController {
       RefreshTokenService refreshTokenService,
       UsuarioRepository usuarioRepository,
       UsuarioMapper usuarioMapper,
-      VerificacaoDoDocumentoNoCadastro verificacaoDoDocumento) {
+      VerificacaoDoDocumentoNoCadastro verificacaoDoDocumento,
+      ServicoConfirmacaoDeEmail confirmacaoDeEmail) {
     this.authService = authService;
     this.authCookieService = authCookieService;
     this.refreshTokenService = refreshTokenService;
     this.usuarioRepository = usuarioRepository;
     this.usuarioMapper = usuarioMapper;
     this.verificacaoDoDocumento = verificacaoDoDocumento;
+    this.confirmacaoDeEmail = confirmacaoDeEmail;
   }
 
   @PostMapping("/login")
@@ -88,7 +93,7 @@ public class AuthController {
   }
 
   @PostMapping("/register")
-  public ResponseEntity<AuthResponse> register(
+  public GenericMessageResponse register(
       @Valid @RequestBody RegisterRequest request, HttpServletRequest servletRequest) {
     String requestId = firstNonBlank(
         servletRequest.getHeader("X-Request-Id"), servletRequest.getHeader("x-request-id"));
@@ -101,13 +106,24 @@ public class AuthController {
 
     // Chamada HTTP a Receita: fica FORA da transacao do cadastro.
     verificacaoDoDocumento.verificarOuFalhar(request.cpfCnpj);
-    AuthResponse authResponse = authService.registrar(request, requestId, ipAddress);
-    return buildCookieAuthResponse(authResponse);
+    // Sem sessao: a conta so entra depois de confirmar o e-mail (ver ServicoConfirmacaoDeEmail).
+    authService.registrar(request, requestId, ipAddress);
+    return new GenericMessageResponse(ServicoConfirmacaoDeEmail.MENSAGEM_DO_CADASTRO);
   }
 
   @PostMapping("/forgot-password")
   public GenericMessageResponse forgotPassword(@Valid @RequestBody ForgotPasswordRequest request) {
     return authService.requestPasswordReset(request.email);
+  }
+
+  @PostMapping("/confirm-email")
+  public GenericMessageResponse confirmEmail(@Valid @RequestBody ConfirmEmailRequest request) {
+    return confirmacaoDeEmail.confirmar(request.token);
+  }
+
+  @PostMapping("/resend-email-confirmation")
+  public GenericMessageResponse resendEmailConfirmation(@Valid @RequestBody ForgotPasswordRequest request) {
+    return confirmacaoDeEmail.reenviar(request.email);
   }
 
   @PostMapping("/reset-password")

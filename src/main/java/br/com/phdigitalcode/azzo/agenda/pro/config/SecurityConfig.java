@@ -74,6 +74,8 @@ public class SecurityConfig {
                 "/api/v1/auth/logout",
                 "/api/v1/auth/forgot-password",
                 "/api/v1/auth/reset-password",
+                "/api/v1/auth/confirm-email",
+                "/api/v1/auth/resend-email-confirmation",
                 "/api/v1/public/**",
                 "/api/v1/checkout/**",
                 "/api/v1/internal/**",

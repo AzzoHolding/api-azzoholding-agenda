@@ -63,6 +63,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.security.PasswordPolicyValidator;
 import br.com.phdigitalcode.azzo.agenda.pro.security.RefreshTokenService;
 import br.com.phdigitalcode.azzo.agenda.pro.security.TotpService;
 import br.com.phdigitalcode.azzo.agenda.pro.service.AuthService;
+import br.com.phdigitalcode.azzo.agenda.pro.service.ServicoConfirmacaoDeEmail;
 import br.com.phdigitalcode.azzo.agenda.pro.service.TermsService;
 import br.com.phdigitalcode.azzo.agenda.pro.util.CorrelatedLogging;
 import br.com.phdigitalcode.azzo.agenda.pro.util.DocumentoValidator;
@@ -131,6 +132,7 @@ public class AuthServiceImpl implements AuthService {
   private final CheckoutOrderRepository checkoutOrderRepository;
   private final LicenseEventRepository licenseEventRepository;
   private final AcessoDeProfissional acessoDeProfissional;
+  private final ServicoConfirmacaoDeEmail confirmacaoDeEmail;
 
   @Value("${app.public.booking.base-url:http://localhost:5173}")
   private String publicFrontendBaseUrl;
@@ -155,7 +157,8 @@ public class AuthServiceImpl implements AuthService {
       CheckoutIntentRepository checkoutIntentRepository,
       CheckoutOrderRepository checkoutOrderRepository,
       LicenseEventRepository licenseEventRepository,
-      AcessoDeProfissional acessoDeProfissional) {
+      AcessoDeProfissional acessoDeProfissional,
+      ServicoConfirmacaoDeEmail confirmacaoDeEmail) {
     this.tenantRepository = tenantRepository;
     this.usuarioRepository = usuarioRepository;
     this.rbacRoleRepository = rbacRoleRepository;
@@ -176,11 +179,12 @@ public class AuthServiceImpl implements AuthService {
     this.checkoutOrderRepository = checkoutOrderRepository;
     this.licenseEventRepository = licenseEventRepository;
     this.acessoDeProfissional = acessoDeProfissional;
+    this.confirmacaoDeEmail = confirmacaoDeEmail;
   }
 
   @Override
   @Transactional
-  public AuthResponse registrar(RegisterRequest request, String requestId, String ipAddress) {
+  public void registrar(RegisterRequest request, String requestId, String ipAddress) {
     validarAceiteObrigatorio(request);
     String email = normalizeEmail(request.email);
     String documento = normalizeCpfCnpj(request.cpfCnpj);
@@ -228,8 +232,11 @@ public class AuthServiceImpl implements AuthService {
     registrarAceitesTermos(usuario, termosDeUso, politicaDePrivacidade, requestId, ipAddress);
     garantirAcessoOwner(usuario.getId());
     ativarTrialTenant(tenant, usuario);
+    // Sem sessao aqui: o e-mail precisa ser confirmado antes (ServicoConfirmacaoDeEmail). Se o link
+    // nao puder ser enfileirado, o cadastro inteiro desfaz.
+    confirmacaoDeEmail.iniciar(usuario);
+    usuarioRepository.save(usuario);
 
-    AuthResponse response = montarResposta(usuario);
     registrarAuditoriaAuth(
         usuario.getTenantId(),
         usuario.getId(),
@@ -242,7 +249,6 @@ public class AuthServiceImpl implements AuthService {
         "userId", usuario.getId(),
         "email", usuario.getEmail(),
         "role", usuario.getRole().name()));
-    return response;
   }
 
   @Override
@@ -272,6 +278,21 @@ public class AuthServiceImpl implements AuthService {
       throw new IllegalArgumentException("Credenciais invalidas");
     }
     emailLoginAttempts.remove(normalizedEmail);
+
+    // Cadastro novo que ainda nao abriu o link do e-mail. DEPOIS da senha, de proposito: antes dela,
+    // a resposta diria a um estranho que aquele e-mail existe e esta pendente.
+    if (usuario.isEmailConfirmationPending()) {
+      LOG.warn(CorrelatedLogging.context(
+          "Login recusado", "tenantId", usuario.getTenantId(), "userId", usuario.getId(),
+          "email", usuario.getEmail(), "reason", "email_not_confirmed"));
+      registrarAuditoriaAuth(
+        usuario.getTenantId(),
+        usuario.getId(),
+        AuditConstants.Status.DENIED,
+        "AUTH_LOGIN",
+        Map.of("email", usuario.getEmail(), "reason", "EMAIL_NOT_CONFIRMED"));
+      throw new ApiClientErrorException(ServicoConfirmacaoDeEmail.MENSAGEM_DO_LOGIN, 403);
+    }
 
     // Quem saiu da equipe nao entra mais. A checagem vem DEPOIS da senha, de proposito: antes
     // dela, a resposta diria a um estranho que aquele e-mail existe e foi desligado.
@@ -409,6 +430,8 @@ public class AuthServiceImpl implements AuthService {
         });
 
     usuario.setPasswordHash(BCrypt.withDefaults().hashToString(12, request.password.toCharArray()));
+    // O link da redefinicao chegou a esta caixa de entrada: prova a mesma posse que a confirmacao.
+    usuario.setEmailConfirmationPending(false);
     usuarioRepository.save(usuario);
     token.setUsedAt(now);
     passwordResetTokenRepository.save(token);

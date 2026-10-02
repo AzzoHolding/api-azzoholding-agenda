@@ -63,6 +63,13 @@ public class Usuario {
   @Column(name = "mfa_enabled", nullable = false)
   private boolean mfaEnabled;
 
+  /**
+   * Cadastro novo que ainda nao abriu o link de confirmacao do e-mail: nao entra. SO o cadastro
+   * liga; contas existentes e as criadas por convite ficam {@code false}.
+   */
+  @Column(name = "email_confirmation_pending", nullable = false)
+  private boolean emailConfirmationPending;
+
   @Column(name = "mfa_secret_enc")
   private String mfaSecretEnc;
 
