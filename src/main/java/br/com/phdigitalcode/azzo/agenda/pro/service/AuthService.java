@@ -9,7 +9,8 @@ import br.com.phdigitalcode.azzo.agenda.pro.dto.response.GenericMessageResponse;
 /** Espelha {@code modules/auth/application/ServicoAuth.java}. */
 public interface AuthService {
 
-  AuthResponse registrar(RegisterRequest request, String requestId, String ipAddress);
+  /** Cria a conta SEM sessao: ela so entra depois de confirmar o e-mail. */
+  void registrar(RegisterRequest request, String requestId, String ipAddress);
 
   AuthResponse login(LoginRequest request);
 

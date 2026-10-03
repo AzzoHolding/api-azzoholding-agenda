@@ -121,7 +121,11 @@ public class RateLimitFilter extends OncePerRequestFilter {
           "/api/v1/auth/forgot-password",
           new RateLimitRule("auth-forgot-password", forgotMax, Duration.ofMinutes(forgotWindow)),
           "/api/v1/auth/reset-password",
-          new RateLimitRule("auth-reset-password", resetMax, Duration.ofMinutes(resetWindow)));
+          new RateLimitRule("auth-reset-password", resetMax, Duration.ofMinutes(resetWindow)),
+          "/api/v1/auth/confirm-email",
+          new RateLimitRule("auth-confirm-email", resetMax, Duration.ofMinutes(resetWindow)),
+          "/api/v1/auth/resend-email-confirmation",
+          new RateLimitRule("auth-resend-email-confirmation", forgotMax, Duration.ofMinutes(forgotWindow)));
 
       FilterRegistrationBean<RateLimitFilter> registration =
           new FilterRegistrationBean<>(new RateLimitFilter(rules));

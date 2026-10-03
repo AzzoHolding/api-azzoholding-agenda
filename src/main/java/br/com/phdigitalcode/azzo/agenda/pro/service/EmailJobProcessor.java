@@ -17,6 +17,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditConstants;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditEventCommand;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditService;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.CredentialsEmailService;
+import br.com.phdigitalcode.azzo.agenda.pro.integration.EmailVerificationEmailPayload;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.PasswordResetEmailPayload;
 
 /**
@@ -103,6 +104,21 @@ public class EmailJobProcessor {
           "PASSWORD_RESET_LINK");
     }
 
+    if (job.emailType() == EmailJobType.EMAIL_VERIFICATION) {
+      EmailVerificationEmailPayload payload =
+          readPayload(job.payloadJson(), EmailVerificationEmailPayload.class);
+      EmailTemplateRendererService.RenderedTemplate rendered =
+          emailTemplateRendererService.renderEmailVerification(job.recipientName(), payload.confirmUrl());
+      return credentialsEmailService.sendHtmlEmail(
+          job.recipientEmail(),
+          rendered.subject(),
+          rendered.html(),
+          rendered.fromEmail(),
+          rendered.fromName(),
+          rendered.replyTo(),
+          "EMAIL_VERIFICATION_LINK");
+    }
+
     throw new IllegalStateException("Tipo de email nao suportado: " + job.emailType());
   }
 
@@ -125,7 +141,10 @@ public class EmailJobProcessor {
       command.tenantId = job.tenantId();
       command.actorUserId = null;
       command.module = AuditConstants.Module.SYSTEM;
-      command.action = "AUTH_FORGOT_PASSWORD_EMAIL_DISPATCH";
+      command.action =
+          job.emailType() == EmailJobType.EMAIL_VERIFICATION
+              ? "AUTH_EMAIL_VERIFICATION_DISPATCH"
+              : "AUTH_FORGOT_PASSWORD_EMAIL_DISPATCH";
       command.entityType = "EMAIL_JOB";
       command.entityId = job.id() != null ? job.id().toString() : null;
       command.sourceChannel = AuditConstants.SourceChannel.SYSTEM;

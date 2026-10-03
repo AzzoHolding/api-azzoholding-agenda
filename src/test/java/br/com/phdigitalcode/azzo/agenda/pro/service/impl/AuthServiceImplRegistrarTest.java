@@ -38,6 +38,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.entity.TermsVersion;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.Usuario;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.StatusCheckout;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditConstants;
+import br.com.phdigitalcode.azzo.agenda.pro.service.ServicoConfirmacaoDeEmail;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditService;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.EmailJobService;
 import br.com.phdigitalcode.azzo.agenda.pro.mapper.UsuarioMapper;
@@ -89,6 +90,7 @@ class AuthServiceImplRegistrarTest {
   @Mock private CheckoutIntentRepository checkoutIntentRepository;
   @Mock private CheckoutOrderRepository checkoutOrderRepository;
   @Mock private LicenseEventRepository licenseEventRepository;
+  @Mock private ServicoConfirmacaoDeEmail confirmacaoDeEmail;
 
   private AuthServiceImpl service;
   private final UUID planStatusAtivo = UUID.randomUUID();
@@ -104,7 +106,8 @@ class AuthServiceImplRegistrarTest {
         encryptionService, totpService, auditService, passwordPolicyValidator, emailJobService,
         usuarioMapper, termsService, productRepository, checkoutIntentRepository,
         checkoutOrderRepository, licenseEventRepository,
-        org.mockito.Mockito.mock(br.com.phdigitalcode.azzo.agenda.pro.security.AcessoDeProfissional.class));
+        org.mockito.Mockito.mock(br.com.phdigitalcode.azzo.agenda.pro.security.AcessoDeProfissional.class),
+        confirmacaoDeEmail);
 
     termosDeUso = versao(AuditConstants.TermsDocumentType.TERMS_OF_USE);
     politicaDePrivacidade = versao(AuditConstants.TermsDocumentType.PRIVACY_POLICY);
@@ -158,6 +161,34 @@ class AuthServiceImplRegistrarTest {
     assertThat(tenant.getValue().getDocument()).isEqualTo("52998224725");
     // O que se compara e o HASH do documento, nunca o documento.
     assertThat(tenant.getValue().getTrialDocumentHash()).isEqualTo(sha256("52998224725"));
+  }
+
+  /** O cadastro nao devolve sessao: inicia a confirmacao do e-mail, no mesmo usuario que salva. */
+  @Test
+  void cadastroIniciaAConfirmacaoDoEmailEGravaOUsuarioPendente() {
+    org.mockito.Mockito.doAnswer(inv -> {
+      ((Usuario) inv.getArgument(0)).setEmailConfirmationPending(true);
+      return null;
+    }).when(confirmacaoDeEmail).iniciar(any(Usuario.class));
+
+    service.registrar(request(CPF), "req-1", "203.0.113.5");
+
+    ArgumentCaptor<Usuario> usuario = ArgumentCaptor.forClass(Usuario.class);
+    verify(confirmacaoDeEmail).iniciar(usuario.capture());
+    assertThat(usuario.getValue().getEmail()).isEqualTo("ana@salao.test");
+    verify(usuarioRepository, org.mockito.Mockito.atLeast(2)).save(usuario.getValue());
+    verify(refreshTokenService, never()).issueForUser(any());
+    verify(jwtService, never()).gerarToken(any());
+  }
+
+  /** Se o link nao puder ser enfileirado, o cadastro inteiro desfaz (a transacao propaga o erro). */
+  @Test
+  void seOLinkNaoPuderSerEnfileiradoOCadastroFalha() {
+    org.mockito.Mockito.doThrow(new IllegalStateException("base-url nao configurada"))
+        .when(confirmacaoDeEmail).iniciar(any(Usuario.class));
+
+    assertThatThrownBy(() -> service.registrar(request(CPF), "req-1", null))
+        .isInstanceOf(IllegalStateException.class);
   }
 
   /** O pedido CONFIRMADO e valido e o que o LicenseStatusService procura: sem ele, EXPIRED. */
