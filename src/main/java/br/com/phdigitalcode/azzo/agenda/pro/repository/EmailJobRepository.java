@@ -63,8 +63,44 @@ public interface EmailJobRepository extends JpaRepository<EmailJob, UUID> {
       @Param("fromEmail") String fromEmail,
       @Param("processedAt") Instant processedAt);
 
+  /** Jobs NEW que ja podem ser enviados: sem espera marcada, ou com a espera vencida. */
+  @Query(
+      """
+      select j from EmailJob j
+       where j.status = br.com.phdigitalcode.azzo.agenda.pro.entity.enums.EmailJobStatus.NEW
+         and (j.nextAttemptAt is null or j.nextAttemptAt <= :agora)
+       order by j.createdAt asc
+      """)
+  List<EmailJob> findProntosParaEnvio(@Param("agora") Instant agora, Pageable pageable);
+
+  /** Falha com tentativas sobrando: o job continua NEW e so volta ao lote em {@code proxima}. */
+  @Modifying
+  @Query(
+      """
+      update EmailJob j
+         set j.attempts = :tentativas,
+             j.nextAttemptAt = :proxima,
+             j.providerStatus = :providerStatus,
+             j.errorMessage = :errorMessage,
+             j.fromEmail = :fromEmail
+       where j.id = :jobId
+         and j.status = br.com.phdigitalcode.azzo.agenda.pro.entity.enums.EmailJobStatus.NEW
+      """)
+  int reagendarInternal(
+      @Param("jobId") UUID jobId,
+      @Param("tentativas") int tentativas,
+      @Param("proxima") Instant proxima,
+      @Param("providerStatus") String providerStatus,
+      @Param("errorMessage") String errorMessage,
+      @Param("fromEmail") String fromEmail);
+
+  default boolean reagendar(
+      UUID jobId, int tentativas, Instant proxima, String providerStatus, String errorMessage, String fromEmail) {
+    return reagendarInternal(jobId, tentativas, proxima, providerStatus, errorMessage, fromEmail) > 0;
+  }
+
   default List<EmailJob> findNextNewBatch(int limit) {
-    return findByStatusOrderByCreatedAtAsc(EmailJobStatus.NEW, PageRequest.of(0, Math.max(limit, 1)));
+    return findProntosParaEnvio(Instant.now(), PageRequest.of(0, Math.max(limit, 1)));
   }
 
   default boolean markProcessed(UUID jobId, String providerStatus, String fromEmail, Instant processedAt) {
