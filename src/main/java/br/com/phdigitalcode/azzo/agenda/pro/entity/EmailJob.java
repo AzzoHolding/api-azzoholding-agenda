@@ -73,6 +73,14 @@ public class EmailJob {
   @Column(name = "processed_at")
   private Instant processedAt;
 
+  /** Quantas vezes o envio ja foi tentado e falhou. */
+  @Column(name = "attempts", nullable = false)
+  private int attempts;
+
+  /** Enquanto estiver no futuro, o job (ainda NEW) espera: nao entra no lote do agendador. */
+  @Column(name = "next_attempt_at")
+  private Instant nextAttemptAt;
+
   @PrePersist
   void prePersist() {
     if (id == null) id = UUID.randomUUID();

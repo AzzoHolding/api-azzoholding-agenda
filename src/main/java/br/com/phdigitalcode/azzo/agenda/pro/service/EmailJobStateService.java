@@ -53,9 +53,37 @@ public class EmailJobStateService {
     return emailJobRepository.markProcessed(jobId, providerStatus, fromEmail, Instant.now());
   }
 
+  /** Tentativas de envio antes de o job virar FAILED de vez. */
+  public static final int MAX_TENTATIVAS = 5;
+
+  /**
+   * Espera ate a proxima tentativa, depois da falha de numero {@code tentativa} (1, 2, ...):
+   * 2 min, 10 min, 30 min, 2 h. Nao ha espera depois da ultima.
+   */
+  static java.time.Duration esperaApos(int tentativa) {
+    return switch (tentativa) {
+      case 1 -> java.time.Duration.ofMinutes(2);
+      case 2 -> java.time.Duration.ofMinutes(10);
+      case 3 -> java.time.Duration.ofMinutes(30);
+      default -> java.time.Duration.ofHours(2);
+    };
+  }
+
+  /**
+   * Registra uma falha de envio. Com tentativas sobrando, o job continua NEW e e reagendado com
+   * espera crescente (erro passageiro de SMTP nao deixa o usuario sem e-mail); na ultima tentativa
+   * vira FAILED. Devolve se o job foi atualizado.
+   */
   @Transactional(propagation = Propagation.REQUIRES_NEW)
   public boolean markFailed(UUID jobId, String providerStatus, String errorMessage, String fromEmail) {
-    return emailJobRepository.markFailed(jobId, providerStatus, errorMessage, fromEmail, Instant.now());
+    Instant agora = Instant.now();
+    EmailJob job = emailJobRepository.findById(jobId).orElse(null);
+    int tentativa = (job == null ? 0 : job.getAttempts()) + 1;
+    if (job != null && job.getStatus() == EmailJobStatus.NEW && tentativa < MAX_TENTATIVAS) {
+      return emailJobRepository.reagendar(
+          jobId, tentativa, agora.plus(esperaApos(tentativa)), providerStatus, errorMessage, fromEmail);
+    }
+    return emailJobRepository.markFailed(jobId, providerStatus, errorMessage, fromEmail, agora);
   }
 
   public record EmailJobSnapshot(
