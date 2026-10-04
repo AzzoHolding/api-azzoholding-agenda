@@ -141,6 +141,10 @@ public class ServicoAnonimizacaoTitular {
     int mensagensWhatsapp = whatsAppMessageLogRepository.anonimizarPorClienteRaw(tenantId, clientId);
     int reativacoes = reactivationCycleRepository.anonimizarPorClienteRaw(tenantId, clientId);
 
+    // A trilha de auditoria guarda o retrato do cliente (nome, telefone, endereco...) por 365 dias:
+    // tira o valor pessoal dos eventos dele. Sem try/catch — se falhar, a anonimizacao desfaz.
+    int eventosDeAuditoria = auditService.redigirDadosPessoaisDoCliente(tenantId, clientId);
+
     // Registra solicitação LGPD do tipo EXCLUSAO já encerrada (art. 18, VI)
     LgpdDataSubjectRequest lgpdRequest = new LgpdDataSubjectRequest();
     lgpdRequest.setTenantId(tenantId);
@@ -170,7 +174,8 @@ public class ServicoAnonimizacaoTitular {
             + mensagens + " mensagem(ns) de chat, "
             + notificacoes + " notificacao(oes), "
             + mensagensWhatsapp + " mensagem(ns) de WhatsApp e "
-            + reativacoes + " ciclo(s) de reativacao anonimizados.");
+            + reativacoes + " ciclo(s) de reativacao anonimizados e "
+            + eventosDeAuditoria + " evento(s) de auditoria redigidos.");
     event.setActorUserId(obterActorId());
     eventRepository.save(event);
 

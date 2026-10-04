@@ -22,6 +22,8 @@ import lombok.Setter;
  * estao no formato final e nao precisam mudar.
  */
 @Entity
+// So as colunas alteradas vao no UPDATE: o gatilho da redacao exige o resto identico.
+@org.hibernate.annotations.DynamicUpdate
 @Table(name = "audit_events")
 @Getter
 @Setter
@@ -99,6 +101,15 @@ public class AuditEvent {
 
   @Column(name = "created_at", nullable = false)
   private Instant createdAt;
+
+  /**
+   * Quando os dados pessoais deste evento foram redigidos (anonimizacao do cliente, LGPD). O
+   * {@code event_hash} NAO muda: continua sendo o hash do conteudo ORIGINAL, para a cadeia
+   * ({@code prev_event_hash}) seguir ligada. Quem verificar a cadeia deve tratar o evento com
+   * {@code redacted_at} como "conteudo removido por LGPD" e nao recalcular o hash dele.
+   */
+  @Column(name = "redacted_at")
+  private Instant redactedAt;
 
   @PrePersist
   void prePersist() {
