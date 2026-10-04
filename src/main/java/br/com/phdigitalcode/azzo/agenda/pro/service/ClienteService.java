@@ -189,6 +189,9 @@ public class ClienteService {
     clienteRepository.delete(before);
 
     auditar(tenantId, "CLIENT_DELETE", snapshot, null, id);
+    // Sem historico (checado acima), nao ha venda a preservar: a linha do cliente saiu, entao o
+    // retrato na auditoria seria o unico resto do dado pessoal. Sem try/catch: se falhar, desfaz.
+    auditService.redigirDadosPessoaisDoCliente(tenantId, id);
     LOG.info("customers.delete.completed {}", CorrelatedLogging.context("tenantId", tenantId, "clientId", id));
   }
 

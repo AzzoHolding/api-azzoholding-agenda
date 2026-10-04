@@ -32,6 +32,7 @@ class ClienteServiceExclusaoTest {
   private ClienteRepository clienteRepository;
   private VinculosDeExclusao vinculosDeExclusao;
   private ClienteService service;
+  private AuditService auditService;
 
   private final UUID tenantId = UUID.randomUUID();
   private Cliente cliente;
@@ -45,13 +46,14 @@ class ClienteServiceExclusaoTest {
     ContextoTenant contextoTenant = mock(ContextoTenant.class);
     when(contextoTenant.obterTenantIdOuFalhar()).thenReturn(tenantId);
     vinculosDeExclusao = mock(VinculosDeExclusao.class);
+    auditService = mock(AuditService.class);
 
     service =
         new ClienteService(
             clienteRepository,
             clienteStatsRepository,
             contextoTenant,
-            mock(AuditService.class),
+            auditService,
             mock(MinioStorageService.class));
     ReflectionTestUtils.setField(service, "vinculosDeExclusao", vinculosDeExclusao);
 
@@ -73,6 +75,7 @@ class ClienteServiceExclusaoTest {
         .hasMessageContaining("pacotes comprados")
         .hasMessageContaining("anonimizacao");
     verify(clienteRepository, never()).delete(any(Cliente.class));
+    verify(auditService, never()).redigirDadosPessoaisDoCliente(any(), any());
   }
 
   @Test
@@ -82,5 +85,7 @@ class ClienteServiceExclusaoTest {
     service.deletar(cliente.getId());
 
     verify(clienteRepository).delete(cliente);
+    // O evento CLIENT_DELETE guarda o retrato do cliente: sai o dado pessoal dele.
+    verify(auditService).redigirDadosPessoaisDoCliente(tenantId, cliente.getId());
   }
 }
