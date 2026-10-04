@@ -28,12 +28,14 @@ class EmailJobStateServiceNovaTentativaTest {
 
   private EmailJobRepository repo;
   private EmailJobStateService service;
+  private io.micrometer.core.instrument.simple.SimpleMeterRegistry registry;
   private final UUID jobId = UUID.randomUUID();
 
   @BeforeEach
   void setUp() {
+    registry = new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
     repo = mock(EmailJobRepository.class);
-    service = new EmailJobStateService(repo);
+    service = new EmailJobStateService(repo, registry);
   }
 
   private EmailJob job(int tentativas, EmailJobStatus status) {
@@ -95,5 +97,36 @@ class EmailJobStateServiceNovaTentativaTest {
     service.markFailed(jobId, "ERROR", "x", null);
 
     verify(repo).markFailed(eq(jobId), eq("ERROR"), eq("x"), any(), any());
+  }
+
+  @Test
+  void falhaDefinitivaContaNoMedidorEReagendamentoNao() {
+    // O medidor nasce em 0 (o Prometheus precisa ver a serie ANTES da primeira falha).
+    assertThat(registry.get("email.jobs.failed").counter().count()).isZero();
+
+    EmailJob job = new EmailJob();
+    job.setStatus(EmailJobStatus.NEW);
+    job.setAttempts(0);
+    when(repo.findById(jobId)).thenReturn(Optional.of(job));
+    when(repo.reagendar(eq(jobId), anyInt(), any(), anyString(), anyString(), any())).thenReturn(true);
+    service.markFailed(jobId, "ERROR", "smtp fora", null);
+    assertThat(registry.get("email.jobs.failed").counter().count()).isZero();
+
+    job.setAttempts(EmailJobStateService.MAX_TENTATIVAS - 1);
+    when(repo.markFailed(eq(jobId), anyString(), anyString(), any(), any())).thenReturn(true);
+    service.markFailed(jobId, "ERROR", "smtp fora", null);
+    assertThat(registry.get("email.jobs.failed").counter().count()).isEqualTo(1.0);
+  }
+
+  @Test
+  void falhaDefinitivaQueNaoAtualizouNadaNaoConta() {
+    EmailJob job = new EmailJob();
+    job.setStatus(EmailJobStatus.FAILED);
+    when(repo.findById(jobId)).thenReturn(Optional.of(job));
+    when(repo.markFailed(eq(jobId), anyString(), anyString(), any(), any())).thenReturn(false);
+
+    service.markFailed(jobId, "ERROR", "x", null);
+
+    assertThat(registry.get("email.jobs.failed").counter().count()).isZero();
   }
 }

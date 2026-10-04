@@ -26,10 +26,12 @@ class EmailJobStateServiceTest {
   @Mock private EmailJobRepository emailJobRepository;
 
   private EmailJobStateService service;
+  private io.micrometer.core.instrument.simple.SimpleMeterRegistry registry;
 
   @org.junit.jupiter.api.BeforeEach
   void setUp() {
-    service = new EmailJobStateService(emailJobRepository);
+    registry = new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
+    service = new EmailJobStateService(emailJobRepository, registry);
   }
 
   @Test
