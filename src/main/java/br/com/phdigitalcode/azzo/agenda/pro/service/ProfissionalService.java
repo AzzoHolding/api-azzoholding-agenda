@@ -347,6 +347,7 @@ public class ProfissionalService {
     Usuario user = usuarioRepository.findById(p.getUserId())
         .filter(item -> tenantId.equals(item.getTenantId()))
         .orElseThrow(() -> new IllegalArgumentException("Usuario vinculado ao profissional nao encontrado"));
+    exigirQuePodeTrocarSenhaDe(user);
     if (user.getEmail() == null || user.getEmail().isBlank()) {
       throw new IllegalArgumentException("Usuario do profissional nao possui email configurado");
     }
@@ -563,8 +564,22 @@ public class ProfissionalService {
       validarCriacaoUsuarioPorRole(user.getRole());
     }
     if (newPassword != null && !newPassword.isBlank()) {
+      exigirQuePodeTrocarSenhaDe(user);
       passwordPolicyValidator.validateOrThrow(newPassword);
       user.setPasswordHash(BCrypt.withDefaults().hashToString(12, newPassword.toCharArray()));
+    }
+  }
+
+  /**
+   * A senha de OWNER/ADMIN so e trocada por ele mesmo por este cadastro (achado SEG-005, auditoria
+   * de 2026-10-06). Antes, quem tinha {@code professional:write} (liberavel a STAFF por perfil) ligava
+   * o login do dono a um profissional e definia a senha dele, ou a redefinia pelo reset, e assumia a
+   * conta. {@code preservePrimaryRole} so protegia papel, nome e e-mail.
+   */
+  private void exigirQuePodeTrocarSenhaDe(Usuario user) {
+    if (isPrivilegedUser(user) && !isCurrentAuthenticatedUser(user.getId())) {
+      throw new ApiClientErrorException(
+          "A senha do dono da conta so pode ser trocada por ele mesmo.", 403);
     }
   }
 
