@@ -380,9 +380,20 @@ public class ServicoComanda {
           servicePackageRepository
               .findByIdAndTenantId(referenciaId, tenantId)
               .orElseThrow(() -> new ApiClientErrorException("Pacote nao encontrado.", 404));
+      // Pacote vende por inteiro: 0,5 ou 0,001 pacote nao existe, e o saldo de sessoes sobe com
+      // CEILING (criarSaldoDePacoteVendido) — 0,001 pacote por centavos entregava o pacote todo.
+      if (item.getQuantidade().compareTo(BigDecimal.ONE) < 0
+          || item.getQuantidade().stripTrailingZeros().scale() > 0) {
+        throw new IllegalArgumentException(
+            "A quantidade de um pacote precisa ser um numero inteiro, de 1 em diante.");
+      }
       item.setDescricao(pacote.getNome());
-      item.setPrecoUnitario(
-          request.precoUnitario != null ? request.precoUnitario : pacote.getPreco());
+      // ⚠️ O preco do PACOTE e o do CATALOGO, sempre (achado FIN-002, auditoria de 2026-10-06).
+      // Aceitar `precoUnitario` de quem chama permitia vender um pacote de 10 sessoes por R$ 0,01 e
+      // ainda assim receber o saldo inteiro — o mesmo furo que o SERVICO tinha (16/09). Diferente do
+      // SERVICO, nao ha "valor acordado do agendamento" para pacote, entao nem o fluxo interno aceita
+      // preco de fora. Desconto em pacote entra pelo desconto da comanda, que respeita o teto.
+      item.setPrecoUnitario(pacote.getPreco());
     }
 
     item.setTotal(
