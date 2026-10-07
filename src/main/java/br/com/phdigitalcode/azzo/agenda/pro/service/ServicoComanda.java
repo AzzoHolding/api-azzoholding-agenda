@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 
 import org.springframework.dao.DataIntegrityViolationException;
@@ -447,12 +448,65 @@ public class ServicoComanda {
             .orElseThrow(
                 () -> new ApiClientErrorException("Item nao encontrado na comanda.", 404));
     Map<String, Object> antes = dadosDoItem(item);
+    exigirQueRemoverNaoEstoureOTetoDeDesconto(tenantId, comanda, item);
     comandaItemRepository.delete(item);
     comandaItemRepository.flush();
 
     recalcular(comanda);
     auditar(tenantId, "POS_ITEM_REMOVE", comanda, antes, null);
     return obter(id);
+  }
+
+  /**
+   * Tirar um item NAO pode furar o teto de desconto da equipe (achado FIN-001, auditoria de
+   * 2026-10-06).
+   *
+   * <p>O desconto e guardado em VALOR (o percentual so e conferido ao aplicar). Com teto de 10%, a
+   * equipe lancava um produto caro, aplicava 10% (um valor alto), tirava o produto, e o mesmo valor
+   * ficava contra uma conta bem menor: ate 100% de desconto, sem o dono.
+   *
+   * <p>Aqui se confere, ANTES de apagar, o percentual que o desconto ja dado passaria a ter: se
+   * fica acima do teto E acima do que era, recusa e registra a tentativa. O dono nao tem teto. O
+   * caminho de volta existe: zerar o desconto (0%), tirar o item e aplicar de novo — dentro do
+   * teto.
+   */
+  private void exigirQueRemoverNaoEstoureOTetoDeDesconto(
+      UUID tenantId, Comanda comanda, ComandaItem removido) {
+    BigDecimal desconto = comanda.getDesconto();
+    if (desconto == null || desconto.signum() <= 0) return;
+    if (authenticatedUser.temRole("OWNER")) return;
+
+    int teto = tenantOperationalSettingsRepository.findByTenantIdOrCreate(tenantId)
+        .getPosMaxDiscountPercent();
+    if (teto >= 100) return;
+
+    List<ComandaItem> itens = comandaItemRepository.findByComandaIdOrderByCreatedAt(comanda.getId());
+    BigDecimal subtotalAntes = somarItens(itens);
+    BigDecimal subtotalDepois =
+        somarItens(itens.stream().filter(i -> !Objects.equals(i.getId(), removido.getId())).toList());
+    // Sem itens, nao ha desconto que sobre: recalcular() o zera.
+    if (subtotalDepois.signum() <= 0 || subtotalAntes.signum() <= 0) return;
+
+    BigDecimal percentualAntes = percentualDoDesconto(desconto, subtotalAntes);
+    // recalcular() nunca deixa o desconto passar do subtotal.
+    BigDecimal percentualDepois = percentualDoDesconto(desconto.min(subtotalDepois), subtotalDepois);
+    if (percentualDepois.compareTo(new BigDecimal(teto)) <= 0
+        || percentualDepois.compareTo(percentualAntes) <= 0) {
+      return;
+    }
+
+    String mensagem =
+        "Tirar este item deixaria o desconto em " + percentualDepois.stripTrailingZeros().toPlainString()
+            + "% da conta, acima do maximo de " + teto + "% sem o dono. Zere o desconto, tire o item e"
+            + " aplique de novo (ate " + teto + "%), ou chame o dono.";
+    travaFinanceira.registrarTentativaBloqueada(
+        tenantId, "POS_ITEM_REMOVE", "COMANDA", comanda.getId().toString(),
+        Map.of("percentualDepois", percentualDepois, "teto", teto), mensagem);
+    throw new IllegalArgumentException(mensagem);
+  }
+
+  private static BigDecimal percentualDoDesconto(BigDecimal desconto, BigDecimal base) {
+    return desconto.multiply(new BigDecimal("100")).divide(base, 2, RoundingMode.HALF_UP);
   }
 
   // ─── Cobertura por pacote ou assinatura (V134) ────────────────────────────

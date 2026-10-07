@@ -1280,6 +1280,118 @@ class ServicoComandaTest {
     assertThat(aberta.getDesconto()).isEqualByComparingTo("500.00");
   }
 
+  // ─── FIN-001: tirar um item nao fura o teto de desconto ────────────────────────────────────
+
+  private ComandaItem produtoCaro;
+  private ComandaItem servicoDaConta;
+
+  /** O cenario do achado: servico de R$ 120 + produto de R$ 1000, 10% de desconto = R$ 112. */
+  private Comanda comandaComDescontoDeDezPorCento(int teto) {
+    Comanda aberta = comanda(Comanda.STATUS_ABERTA);
+    configuracoes.setPosMaxDiscountPercent(teto);
+    servicoDaConta = item(ComandaItem.TIPO_SERVICO, "120.00", professionalId);
+    produtoCaro = item(ComandaItem.TIPO_PRODUTO, "1000.00", professionalId);
+    aberta.setSubtotal(new BigDecimal("1120.00"));
+    aberta.setDesconto(new BigDecimal("112.00"));
+    when(comandaItemRepository.findByComandaIdOrderByCreatedAt(eq(comandaId)))
+        .thenReturn(List.of(servicoDaConta, produtoCaro));
+    when(comandaItemRepository.findByIdAndComandaId(produtoCaro.getId(), comandaId))
+        .thenReturn(Optional.of(produtoCaro));
+    when(comandaItemRepository.findByIdAndComandaId(servicoDaConta.getId(), comandaId))
+        .thenReturn(Optional.of(servicoDaConta));
+    return aberta;
+  }
+
+  @Test
+  void tirarOItemCaroDeixandoODescontoAcimaDoTetoERecusado() {
+    comandaComDescontoDeDezPorCento(10);
+
+    assertThatThrownBy(() -> service.removerItem(comandaId, produtoCaro.getId()))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("acima do maximo de 10% sem o dono")
+        .hasMessageContaining("93.33%");
+
+    verify(comandaItemRepository, never()).delete(any(ComandaItem.class));
+    verify(travaFinanceira)
+        .registrarTentativaBloqueada(
+            eq(tenantId), eq("POS_ITEM_REMOVE"), eq("COMANDA"), eq(comandaId.toString()), any(), anyString());
+  }
+
+  @Test
+  void oDonoPodeTirarQualquerItem() {
+    Comanda aberta = comandaComDescontoDeDezPorCento(10);
+    when(authenticatedUser.temRole("OWNER")).thenReturn(true);
+
+    service.removerItem(comandaId, produtoCaro.getId());
+
+    verify(comandaItemRepository).delete(produtoCaro);
+    assertThat(aberta.getDesconto()).isNotNull();
+  }
+
+  /** Tirar um item pequeno que mantem o desconto efetivo dentro do teto continua valendo. */
+  @Test
+  void tirarItemQueMantemODescontoDentroDoTetoPassa() {
+    Comanda aberta = comanda(Comanda.STATUS_ABERTA);
+    configuracoes.setPosMaxDiscountPercent(20);
+    ComandaItem a = item(ComandaItem.TIPO_SERVICO, "800.00", professionalId);
+    ComandaItem b = item(ComandaItem.TIPO_SERVICO, "200.00", professionalId);
+    aberta.setSubtotal(new BigDecimal("1000.00"));
+    aberta.setDesconto(new BigDecimal("100.00")); // 10% antes; 12,5% depois de tirar o de 200
+    when(comandaItemRepository.findByComandaIdOrderByCreatedAt(eq(comandaId))).thenReturn(List.of(a, b));
+    when(comandaItemRepository.findByIdAndComandaId(b.getId(), comandaId)).thenReturn(Optional.of(b));
+
+    service.removerItem(comandaId, b.getId());
+
+    verify(comandaItemRepository).delete(b);
+    verify(travaFinanceira, never())
+        .registrarTentativaBloqueada(any(), anyString(), anyString(), any(), any(), anyString());
+  }
+
+  @Test
+  void semDescontoTirarItemNaoTemRestricao() {
+    Comanda aberta = comandaComDescontoDeDezPorCento(10);
+    aberta.setDesconto(BigDecimal.ZERO);
+
+    service.removerItem(comandaId, produtoCaro.getId());
+
+    verify(comandaItemRepository).delete(produtoCaro);
+  }
+
+  /** O caminho de volta que a mensagem ensina: zerar o desconto, tirar o item e reaplicar. */
+  @Test
+  void depoisDeZerarODescontoTirarOItemPassa() {
+    Comanda aberta = comandaComDescontoDeDezPorCento(10);
+    aberta.setDesconto(BigDecimal.ZERO);
+
+    service.removerItem(comandaId, produtoCaro.getId());
+
+    verify(comandaItemRepository).delete(produtoCaro);
+  }
+
+  @Test
+  void semTetoConfiguradoNadaMudaParaQuemTiraItem() {
+    comandaComDescontoDeDezPorCento(100);
+
+    service.removerItem(comandaId, produtoCaro.getId());
+
+    verify(comandaItemRepository).delete(produtoCaro);
+  }
+
+  @Test
+  void tirarOUltimoItemNaoEBloqueado() {
+    Comanda aberta = comanda(Comanda.STATUS_ABERTA);
+    configuracoes.setPosMaxDiscountPercent(10);
+    ComandaItem unico = item(ComandaItem.TIPO_SERVICO, "120.00", professionalId);
+    aberta.setSubtotal(new BigDecimal("120.00"));
+    aberta.setDesconto(new BigDecimal("12.00"));
+    when(comandaItemRepository.findByComandaIdOrderByCreatedAt(eq(comandaId))).thenReturn(List.of(unico));
+    when(comandaItemRepository.findByIdAndComandaId(unico.getId(), comandaId)).thenReturn(Optional.of(unico));
+
+    service.removerItem(comandaId, unico.getId());
+
+    verify(comandaItemRepository).delete(unico);
+  }
+
   // ─── Origem do item e duplicidade (V132) ───────────────────────────────────
 
   @Test
