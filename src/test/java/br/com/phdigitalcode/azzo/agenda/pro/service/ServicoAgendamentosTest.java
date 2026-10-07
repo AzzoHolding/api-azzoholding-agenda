@@ -1269,6 +1269,107 @@ class ServicoAgendamentosTest {
           .hasMessage("Profissional indisponivel neste horario");
     }
 
+    // ─── AGD-002 / BNC-003: edicao e realocacao tomam o mesmo lock da criacao ───────────────
+
+    private void stubEdicaoDeHorario(Agendamento a) {
+      when(agendamentoRepository.findByIdAndTenantId(a.getId(), tenantId)).thenReturn(Optional.of(a));
+      lenient()
+          .when(tenantOperationalSettingsService.isBusinessOpenAt(any(), any(), any(), any()))
+          .thenReturn(true);
+      lenient().when(clienteRepository.findByIdAndTenantId(clientId, tenantId)).thenReturn(Optional.empty());
+      lenient().when(servicoRepository.findByIdAndTenantId(serviceId, tenantId)).thenReturn(Optional.empty());
+    }
+
+    @Test
+    @DisplayName("editar o horario trava profissional/data ANTES de ler os conflitos")
+    void editarHorarioTravaAntesDeLerConflitos() {
+      Agendamento a = agendamentoExistente(StatusAgendamento.CONFIRMED, LocalDate.of(2030, 6, 10), "10:00", "10:30");
+      stubEdicaoDeHorario(a);
+      AppointmentUpdateRequest req = new AppointmentUpdateRequest();
+      req.startTime = "11:00";
+
+      service.atualizar(a.getId(), req);
+
+      InOrder ordem = inOrder(agendamentoQueryRepository, agendamentoRepository);
+      ordem
+          .verify(agendamentoQueryRepository)
+          .lockProfessionalDateForWrite(tenantId, professionalId, LocalDate.of(2030, 6, 10));
+      ordem
+          .verify(agendamentoRepository)
+          .listActiveByProfessionalAndDateExcluding(
+              eq(tenantId), eq(professionalId), eq(LocalDate.of(2030, 6, 10)), eq(a.getId()), anyList());
+    }
+
+    /** O lock e da chave de DESTINO: mudar a data trava a data nova, nao a antiga. */
+    @Test
+    @DisplayName("editar a data trava a data nova")
+    void editarDataTravaADataNova() {
+      Agendamento a = agendamentoExistente(StatusAgendamento.CONFIRMED, LocalDate.of(2030, 6, 10), "10:00", "10:30");
+      stubEdicaoDeHorario(a);
+      AppointmentUpdateRequest req = new AppointmentUpdateRequest();
+      req.date = "2030-06-12";
+
+      service.atualizar(a.getId(), req);
+
+      verify(agendamentoQueryRepository)
+          .lockProfessionalDateForWrite(tenantId, professionalId, LocalDate.of(2030, 6, 12));
+      verify(agendamentoQueryRepository, never())
+          .lockProfessionalDateForWrite(tenantId, professionalId, LocalDate.of(2030, 6, 10));
+    }
+
+    @Test
+    @DisplayName("editar so as notas nao toma lock nenhum")
+    void editarNotasNaoTrava() {
+      Agendamento a = agendamentoExistente(StatusAgendamento.CONFIRMED, LocalDate.of(2030, 6, 10), "10:00", "10:30");
+      stubEdicaoDeHorario(a);
+      AppointmentUpdateRequest req = new AppointmentUpdateRequest();
+      req.notes = "chegar cedo";
+
+      service.atualizar(a.getId(), req);
+
+      verify(agendamentoQueryRepository, never()).lockProfessionalDateForWrite(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("realocar trava o novo profissional na data ANTES de ler os conflitos")
+    void realocarTravaOProfissionalDeDestinoAntesDeLerConflitos() {
+      Agendamento a = agendamentoExistente(StatusAgendamento.CONFIRMED, LocalDate.of(2030, 6, 10), "10:00", "10:30");
+      UUID novoProfId = UUID.randomUUID();
+      when(agendamentoRepository.findByIdAndTenantId(a.getId(), tenantId)).thenReturn(Optional.of(a));
+      Profissional novo = new Profissional();
+      novo.setId(novoProfId);
+      novo.setTenantId(tenantId);
+      novo.setAcceptsAppointments(true);
+      when(profissionalRepository.findByIdAndTenantIdAndIsActiveTrue(novoProfId, tenantId))
+          .thenReturn(Optional.of(novo));
+      when(servicoRepository.findByIdAndTenantId(serviceId, tenantId))
+          .thenReturn(Optional.of(servico(30, "100.00")));
+      lenient().when(clienteRepository.findByIdAndTenantId(clientId, tenantId)).thenReturn(Optional.empty());
+
+      service.realocarProfissional(a.getId(), novoProfId);
+
+      InOrder ordem = inOrder(agendamentoQueryRepository, agendamentoRepository);
+      ordem
+          .verify(agendamentoQueryRepository)
+          .lockProfessionalDateForWrite(tenantId, novoProfId, LocalDate.of(2030, 6, 10));
+      ordem
+          .verify(agendamentoRepository)
+          .listActiveByProfessionalAndDateExcluding(
+              eq(tenantId), eq(novoProfId), eq(LocalDate.of(2030, 6, 10)), eq(a.getId()), anyList());
+    }
+
+    @Test
+    @DisplayName("realocar para o mesmo profissional nao toma lock")
+    void realocarParaOMesmoNaoTrava() {
+      Agendamento a = agendamentoExistente(StatusAgendamento.CONFIRMED, LocalDate.of(2030, 6, 10), "10:00", "10:30");
+      when(agendamentoRepository.findByIdAndTenantId(a.getId(), tenantId)).thenReturn(Optional.of(a));
+      lenient().when(clienteRepository.findByIdAndTenantId(clientId, tenantId)).thenReturn(Optional.empty());
+
+      service.realocarProfissional(a.getId(), professionalId);
+
+      verify(agendamentoQueryRepository, never()).lockProfessionalDateForWrite(any(), any(), any());
+    }
+
     @Test
     @DisplayName("agendamento concluido nao pode ser realocado")
     void naoRealocaConcluido() {

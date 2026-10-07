@@ -516,6 +516,10 @@ public class ServicoAgendamentos {
           "Profissional nao atende um ou mais servicos do agendamento");
     }
 
+    // Lock da chave de destino (novo profissional + data), o mesmo da criacao: ver o comentario em
+    // atualizar (achado AGD-002/BNC-003).
+    agendamentoQueryRepository.lockProfessionalDateForWrite(
+        tenantId, novoProfessionalId, agendamento.getDate());
     validarConflitoHorarioComNovoProfissional(tenantId, agendamento, novoProfessionalId);
     agendamento.setProfessionalId(novoProfessionalId);
 
@@ -676,6 +680,12 @@ public class ServicoAgendamentos {
           && !isProfessionalAvailableAt(profParaValidar, a.getDate(), editStart, editEnd)) {
         throw new IllegalArgumentException("O profissional nao atende neste horario");
       }
+      // Mesmo lock da criacao (achado AGD-002/BNC-003): sem ele, a edicao lia "sem conflito" enquanto
+      // uma reserva (link publico ou criar) tomava o mesmo horario do mesmo profissional, e as duas
+      // gravavam. So a chave de DESTINO importa — sair de um horario nao cria conflito — e um lock por
+      // transacao nao tem como dar deadlock com os demais. Liberado no commit.
+      agendamentoQueryRepository.lockProfessionalDateForWrite(
+          tenantId, a.getProfessionalId(), a.getDate());
       validarConflitoEdicao(tenantId, a, req);
     }
 
