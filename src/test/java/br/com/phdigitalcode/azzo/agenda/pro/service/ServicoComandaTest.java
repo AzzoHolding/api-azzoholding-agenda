@@ -20,6 +20,8 @@ import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 
 import br.com.phdigitalcode.azzo.agenda.pro.dto.ComandaDtos;
@@ -382,6 +384,89 @@ class ServicoComandaTest {
         .hasMessage("Preco de venda e obrigatorio para item do tipo PRODUTO.");
 
     verify(comandaItemRepository, never()).save(any());
+  }
+
+  // ---- FIN-002: pacote vende pelo preco do catalogo e em quantidade inteira --------------------
+
+  private void pacoteNoCatalogo(String preco) {
+    comanda(Comanda.STATUS_ABERTA).setClientId(clientId);
+    br.com.phdigitalcode.azzo.agenda.pro.entity.ServicePackage pacote =
+        new br.com.phdigitalcode.azzo.agenda.pro.entity.ServicePackage();
+    pacote.setId(serviceId);
+    pacote.setTenantId(tenantId);
+    pacote.setNome("Pacote 10 escovas");
+    pacote.setPreco(new BigDecimal(preco));
+    when(servicePackageRepository.findByIdAndTenantId(eq(serviceId), eq(tenantId)))
+        .thenReturn(Optional.of(pacote));
+  }
+
+  private ComandaDtos.AdicionarItemRequest pedidoDePacote(String preco, String quantidade) {
+    ComandaDtos.AdicionarItemRequest req = new ComandaDtos.AdicionarItemRequest();
+    req.tipo = ComandaItem.TIPO_PACOTE;
+    req.referenciaId = serviceId.toString();
+    if (preco != null) req.precoUnitario = new BigDecimal(preco);
+    if (quantidade != null) req.quantidade = new BigDecimal(quantidade);
+    return req;
+  }
+
+  @Test
+  void pacoteIgnoraOPrecoDoPedidoEUsaOPrecoDoCatalogo() {
+    pacoteNoCatalogo("500.00");
+
+    service.adicionarItem(comandaId, pedidoDePacote("0.01", "1"));
+
+    ArgumentCaptor<ComandaItem> captor = ArgumentCaptor.forClass(ComandaItem.class);
+    verify(comandaItemRepository).save(captor.capture());
+    assertThat(captor.getValue().getPrecoUnitario()).isEqualByComparingTo("500.00");
+    assertThat(captor.getValue().getTotal()).isEqualByComparingTo("500.00");
+  }
+
+  @Test
+  void pacoteSemPrecoNoPedidoTambemUsaOPrecoDoCatalogo() {
+    pacoteNoCatalogo("500.00");
+
+    service.adicionarItem(comandaId, pedidoDePacote(null, null));
+
+    ArgumentCaptor<ComandaItem> captor = ArgumentCaptor.forClass(ComandaItem.class);
+    verify(comandaItemRepository).save(captor.capture());
+    assertThat(captor.getValue().getTotal()).isEqualByComparingTo("500.00");
+  }
+
+  /** O fluxo interno do agendamento aceita o valor acordado do SERVICO, mas nao o de um PACOTE. */
+  @Test
+  void pacoteNaoAceitaPrecoDeForaNemNoFluxoDoAgendamento() {
+    pacoteNoCatalogo("500.00");
+
+    service.adicionarItemDoAgendamento(comandaId, pedidoDePacote("1.00", "1"));
+
+    ArgumentCaptor<ComandaItem> captor = ArgumentCaptor.forClass(ComandaItem.class);
+    verify(comandaItemRepository).save(captor.capture());
+    assertThat(captor.getValue().getPrecoUnitario()).isEqualByComparingTo("500.00");
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"0.001", "0.5", "1.5", "2.01", "0"})
+  void pacoteComQuantidadeFracionariaOuMenorQueUmFalha(String quantidade) {
+    pacoteNoCatalogo("500.00");
+
+    assertThatThrownBy(() -> service.adicionarItem(comandaId, pedidoDePacote("500.00", quantidade)))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("A quantidade de um pacote precisa ser um numero inteiro, de 1 em diante.");
+
+    verify(comandaItemRepository, never()).save(any());
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"1", "2", "3.00", "10"})
+  void pacoteComQuantidadeInteiraMultiplicaOPrecoDoCatalogo(String quantidade) {
+    pacoteNoCatalogo("500.00");
+
+    service.adicionarItem(comandaId, pedidoDePacote(null, quantidade));
+
+    ArgumentCaptor<ComandaItem> captor = ArgumentCaptor.forClass(ComandaItem.class);
+    verify(comandaItemRepository).save(captor.capture());
+    assertThat(captor.getValue().getTotal())
+        .isEqualByComparingTo(new BigDecimal("500.00").multiply(new BigDecimal(quantidade)));
   }
 
   @Test
