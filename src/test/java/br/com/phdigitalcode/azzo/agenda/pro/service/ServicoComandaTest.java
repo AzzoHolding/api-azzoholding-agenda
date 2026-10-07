@@ -801,7 +801,7 @@ class ServicoComandaTest {
     deposit.setAppointmentId(appointmentId);
     deposit.setStatus(AppointmentDeposit.STATUS_PAID);
     deposit.setAmountCents(5000L);
-    when(appointmentDepositRepository.findPaidUnusedByAppointmentId(eq(appointmentId)))
+    when(appointmentDepositRepository.findPaidUnusedByAppointmentIdParaConsumo(eq(appointmentId)))
         .thenReturn(Optional.of(deposit));
 
     ComandaDtos.RegistrarPagamentoRequest req = new ComandaDtos.RegistrarPagamentoRequest();
@@ -829,7 +829,7 @@ class ServicoComandaTest {
     deposit.setTenantId(tenantId);
     deposit.setStatus(AppointmentDeposit.STATUS_PAID);
     deposit.setAmountCents(3000L);
-    when(appointmentDepositRepository.findPaidUnusedByAppointmentId(eq(appointmentId)))
+    when(appointmentDepositRepository.findPaidUnusedByAppointmentIdParaConsumo(eq(appointmentId)))
         .thenReturn(Optional.of(deposit));
 
     ComandaDtos.RegistrarPagamentoRequest req = new ComandaDtos.RegistrarPagamentoRequest();
@@ -1803,6 +1803,100 @@ class ServicoComandaTest {
     assertThat(response.appointmentId).isEqualTo(agendamentoId.toString());
   }
 
+  // ─── BNC-001 / BNC-002: o banco decide a corrida (V144) e o service traduz a recusa ──────
+
+  private ComandaDtos.AbrirComandaRequest pedidoParaAbrirComAgendamento() {
+    UUID agendamentoId = UUID.randomUUID();
+    UUID clienteId = UUID.randomUUID();
+    Agendamento agendamento = new Agendamento();
+    agendamento.setId(agendamentoId);
+    agendamento.setClientId(clienteId);
+    when(agendamentoRepository.findByIdAndTenantId(eq(agendamentoId), eq(tenantId)))
+        .thenReturn(Optional.of(agendamento));
+    when(clienteRepository.findByIdAndTenantId(eq(clienteId), eq(tenantId)))
+        .thenReturn(Optional.of(new Cliente()));
+    ComandaDtos.AbrirComandaRequest req = new ComandaDtos.AbrirComandaRequest();
+    req.appointmentId = agendamentoId.toString();
+    return req;
+  }
+
+  private static org.springframework.dao.DataIntegrityViolationException violacaoDoPostgres(String indice) {
+    return new org.springframework.dao.DataIntegrityViolationException(
+        "could not execute statement",
+        new RuntimeException(
+            "ERROR: duplicate key value violates unique constraint \"" + indice + "\""));
+  }
+
+  /** Duas requisicoes passam a checagem em Java ao mesmo tempo; a 2a bate no indice unico. */
+  @Test
+  void abrirTraduzAViolacaoDoIndiceDeComandaAtivaUnica() {
+    ComandaDtos.AbrirComandaRequest req = pedidoParaAbrirComAgendamento();
+    org.mockito.Mockito.doThrow(violacaoDoPostgres("uq_comandas_agendamento_ativa"))
+        .when(comandaRepository)
+        .flush();
+
+    assertThatThrownBy(() -> service.abrir(req))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("Este agendamento ja tem uma comanda aberta ou cobrada: continue nela.");
+  }
+
+  /** Outra violacao de integridade nao pode ser disfarcada de "ja tem comanda". */
+  @Test
+  void abrirNaoMascaraOutraViolacaoDeIntegridade() {
+    ComandaDtos.AbrirComandaRequest req = pedidoParaAbrirComAgendamento();
+    org.mockito.Mockito.doThrow(violacaoDoPostgres("fk_comandas_cliente"))
+        .when(comandaRepository)
+        .flush();
+
+    assertThatThrownBy(() -> service.abrir(req))
+        .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+  }
+
+  @Test
+  void pagamentoComSinalTraduzAViolacaoDoIndiceDoSinal() {
+    Comanda comanda = comanda(Comanda.STATUS_ABERTA);
+    UUID appointmentId = UUID.randomUUID();
+    comanda.setAppointmentId(appointmentId);
+    AppointmentDeposit deposit = new AppointmentDeposit();
+    deposit.setId(UUID.randomUUID());
+    deposit.setTenantId(tenantId);
+    deposit.setAppointmentId(appointmentId);
+    deposit.setStatus(AppointmentDeposit.STATUS_PAID);
+    deposit.setAmountCents(5000L);
+    when(appointmentDepositRepository.findPaidUnusedByAppointmentIdParaConsumo(eq(appointmentId)))
+        .thenReturn(Optional.of(deposit));
+    org.mockito.Mockito.doThrow(violacaoDoPostgres("uq_comanda_pagamentos_sinal"))
+        .when(comandaPagamentoRepository)
+        .flush();
+    ComandaDtos.RegistrarPagamentoRequest req = new ComandaDtos.RegistrarPagamentoRequest();
+    req.meio = ComandaPagamento.MEIO_CREDITO_SINAL;
+    req.valor = new BigDecimal("50.00");
+
+    assertThatThrownBy(() -> service.registrarPagamento(comandaId, req))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("Este sinal ja foi usado em outro pagamento.");
+  }
+
+  /** O sinal so e lido SEM trava onde nao vai ser consumido; o pagamento usa a consulta travada. */
+  @Test
+  void pagamentoComSinalUsaAConsultaTravada() {
+    Comanda comanda = comanda(Comanda.STATUS_ABERTA);
+    UUID appointmentId = UUID.randomUUID();
+    comanda.setAppointmentId(appointmentId);
+    when(appointmentDepositRepository.findPaidUnusedByAppointmentIdParaConsumo(eq(appointmentId)))
+        .thenReturn(Optional.empty());
+    ComandaDtos.RegistrarPagamentoRequest req = new ComandaDtos.RegistrarPagamentoRequest();
+    req.meio = ComandaPagamento.MEIO_CREDITO_SINAL;
+    req.valor = new BigDecimal("50.00");
+
+    assertThatThrownBy(() -> service.registrarPagamento(comandaId, req))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("Nao ha sinal pago disponivel para este agendamento.");
+
+    verify(appointmentDepositRepository).findPaidUnusedByAppointmentIdParaConsumo(eq(appointmentId));
+    verify(appointmentDepositRepository, never()).findPaidUnusedByAppointmentId(any());
+  }
+
   /** O sinal pago por cliente de outro salao nao paga comanda daqui. */
   @Test
   void creditoDeSinalDeOutroSalaoNaoEhAceito() {
@@ -1815,7 +1909,7 @@ class ServicoComandaTest {
     deposit.setTenantId(UUID.randomUUID());
     deposit.setStatus(AppointmentDeposit.STATUS_PAID);
     deposit.setAmountCents(3000L);
-    when(appointmentDepositRepository.findPaidUnusedByAppointmentId(eq(appointmentId)))
+    when(appointmentDepositRepository.findPaidUnusedByAppointmentIdParaConsumo(eq(appointmentId)))
         .thenReturn(Optional.of(deposit));
     ComandaDtos.RegistrarPagamentoRequest req = new ComandaDtos.RegistrarPagamentoRequest();
     req.meio = ComandaPagamento.MEIO_CREDITO_SINAL;
