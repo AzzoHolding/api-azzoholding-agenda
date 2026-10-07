@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -223,9 +224,34 @@ public class ServicoComanda {
     comanda.setAppointmentId(appointmentId);
     comanda.setClientId(clientId);
     comanda.setAbertaPor(obterUsuarioId());
-    comandaRepository.save(comanda);
+    try {
+      comandaRepository.save(comanda);
+      comandaRepository.flush();
+    } catch (DataIntegrityViolationException erro) {
+      // A checagem acima e feita em Java e duas requisicoes simultaneas passavam as duas (BNC-001).
+      // O indice unico da V144 e quem decide; aqui so se traduz a recusa dele.
+      if (violouIndice(erro, INDICE_COMANDA_ATIVA_UNICA)) {
+        throw new IllegalArgumentException(
+            "Este agendamento ja tem uma comanda aberta ou cobrada: continue nela.");
+      }
+      throw erro;
+    }
 
     return toResponse(comanda, List.of(), List.of());
+  }
+
+  /** V144: no maximo uma comanda ABERTA ou FECHADA por agendamento. */
+  static final String INDICE_COMANDA_ATIVA_UNICA = "uq_comandas_agendamento_ativa";
+  /** V144: o mesmo sinal nao entra em dois pagamentos nao estornados. */
+  static final String INDICE_SINAL_UNICO = "uq_comanda_pagamentos_sinal";
+
+  /** A violacao e DESTE indice (e nao de outra constraint qualquer)? */
+  static boolean violouIndice(DataIntegrityViolationException erro, String indice) {
+    for (Throwable causa = erro; causa != null; causa = causa.getCause()) {
+      if (causa.getMessage() != null && causa.getMessage().contains(indice)) return true;
+      if (causa.getCause() == causa) break;
+    }
+    return false;
   }
 
   @Transactional(readOnly = true)
@@ -880,8 +906,16 @@ public class ServicoComanda {
       pagamento.setPaidAt(Instant.now());
     }
 
-    comandaPagamentoRepository.save(pagamento);
-    comandaPagamentoRepository.flush();
+    try {
+      comandaPagamentoRepository.save(pagamento);
+      comandaPagamentoRepository.flush();
+    } catch (DataIntegrityViolationException erro) {
+      // Rede de seguranca do banco (V144): com a trava do sinal isto nao deveria acontecer.
+      if (violouIndice(erro, INDICE_SINAL_UNICO)) {
+        throw new IllegalArgumentException("Este sinal ja foi usado em outro pagamento.");
+      }
+      throw erro;
+    }
 
     Map<String, Object> dados = new HashMap<>();
     dados.put("meio", pagamento.getMeio());
@@ -909,7 +943,8 @@ public class ServicoComanda {
     }
     AppointmentDeposit deposit =
         appointmentDepositRepository
-            .findPaidUnusedByAppointmentId(comanda.getAppointmentId())
+            // TRAVADO: dois pagamentos simultaneos nao podem ler o mesmo sinal livre (BNC-002).
+            .findPaidUnusedByAppointmentIdParaConsumo(comanda.getAppointmentId())
             // O sinal e do cliente DESTE salao: a busca e so por agendamento.
             .filter(d -> tenantId.equals(d.getTenantId()))
             .orElseThrow(
