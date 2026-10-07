@@ -34,6 +34,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditService;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.CredentialsEmailService;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.PerfilAcessoRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.RbacAuthorizationRepository;
+import br.com.phdigitalcode.azzo.agenda.pro.repository.RefreshTokenRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.UsuarioRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.security.AcessoPorPerfil;
 import br.com.phdigitalcode.azzo.agenda.pro.security.AuthenticatedUser;
@@ -69,6 +70,7 @@ class ServicoPerfisDeAcessoTest {
   @Mock private AuditService auditService;
   @Mock private ContextoTenant contextoTenant;
   @Mock private AuthenticatedUser authenticatedUser;
+  @Mock private RefreshTokenRepository refreshTokenRepository;
 
   private ServicoPerfisDeAcesso servico;
 
@@ -87,7 +89,8 @@ class ServicoPerfisDeAcessoTest {
             permissionService,
             auditService,
             contextoTenant,
-            authenticatedUser);
+            authenticatedUser,
+            refreshTokenRepository);
     when(contextoTenant.obterTenantIdOuFalhar()).thenReturn(TENANT);
     when(authenticatedUser.idOuNulo()).thenReturn(DONO);
     when(passwordPolicyValidator.isValid(anyString())).thenReturn(true);
@@ -311,6 +314,29 @@ class ServicoPerfisDeAcessoTest {
     verify(repositorio).bloquearCredenciais(eq(TENANT), eq(PESSOA), anyString());
     verify(repositorio).registrarDesligamento(TENANT, PESSOA, DONO);
     verify(tokenRevocationService).invalidateCache(PESSOA);
+  }
+
+  /** SEG-004: os refresh tokens (30 dias) caem junto; antes o desligado renovava a sessao. */
+  @Test
+  void desligarRevogaTodosOsRefreshTokensDaPessoa() {
+    when(repositorio.papelDoUsuario(TENANT, PESSOA)).thenReturn(Optional.of("STAFF"));
+
+    servico.desligar(PESSOA);
+
+    verify(refreshTokenRepository).revokeAllByUser(eq(PESSOA), any());
+  }
+
+  /**
+   * A revogacao e por consulta em lote: gravar a entidade Usuario poderia desfazer a senha aleatoria
+   * que bloquearCredenciais acabou de gravar por SQL nativo.
+   */
+  @Test
+  void desligarNaoGravaAEntidadeUsuario() {
+    when(repositorio.papelDoUsuario(TENANT, PESSOA)).thenReturn(Optional.of("STAFF"));
+
+    servico.desligar(PESSOA);
+
+    verify(usuarioRepository, never()).save(any());
   }
 
   @Test

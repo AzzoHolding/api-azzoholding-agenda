@@ -381,6 +381,13 @@ public class AuthServiceImpl implements AuthService {
       LOG.info(CorrelatedLogging.context("Solicitacao de reset ignorada", "email", normalizedEmail, "reason", "user_not_found"));
       return new GenericMessageResponse(RESET_PASSWORD_MESSAGE);
     }
+    // Quem saiu da equipe nao recupera a conta (achado SEG-004): sem token e sem e-mail. A resposta e a
+    // mesma de "e-mail desconhecido", para nao revelar que aquela conta existe e foi desligada.
+    if (acessoDeProfissional.desativado(usuario)) {
+      LOG.info(CorrelatedLogging.context(
+          "Solicitacao de reset ignorada", "userId", usuario.getId(), "reason", "professional_inactive"));
+      return new GenericMessageResponse(RESET_PASSWORD_MESSAGE);
+    }
 
     Instant now = Instant.now();
     passwordResetTokenRepository.markAllActiveAsUsedByUser(usuario.getId(), now);
@@ -428,6 +435,15 @@ public class AuthServiceImpl implements AuthService {
           LOG.warn(CorrelatedLogging.context("Reset de senha recusado", "userId", token.getUserId(), "reason", "token_user_not_found"));
           return new ApiClientErrorException("Usuario do token nao encontrado", 400);
         });
+
+    // Um link emitido ANTES de a pessoa ser desligada nao pode devolver o acesso depois (SEG-004). A
+    // resposta e a de token invalido, sem dizer por que. (Nao adianta "queimar" o token aqui: a excecao
+    // desfaz a transacao. Nao precisa: a checagem recusa a cada tentativa, e o token expira sozinho.)
+    if (acessoDeProfissional.desativado(usuario)) {
+      LOG.warn(CorrelatedLogging.context(
+          "Reset de senha recusado", "userId", usuario.getId(), "reason", "professional_inactive"));
+      throw new ApiClientErrorException("Token de redefinicao invalido ou expirado", 400);
+    }
 
     usuario.setPasswordHash(BCrypt.withDefaults().hashToString(12, request.password.toCharArray()));
     // O link da redefinicao chegou a esta caixa de entrada: prova a mesma posse que a confirmacao.

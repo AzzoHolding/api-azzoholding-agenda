@@ -7,6 +7,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -21,6 +22,9 @@ import org.mockito.quality.Strictness;
 
 import at.favre.lib.crypto.bcrypt.BCrypt;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.request.LoginRequest;
+import br.com.phdigitalcode.azzo.agenda.pro.dto.request.ResetPasswordRequest;
+import br.com.phdigitalcode.azzo.agenda.pro.dto.response.GenericMessageResponse;
+import br.com.phdigitalcode.azzo.agenda.pro.entity.PasswordResetToken;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.Usuario;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.PapelUsuario;
 import br.com.phdigitalcode.azzo.agenda.pro.exception.ApiClientErrorException;
@@ -183,5 +187,78 @@ class AuthServiceImplLoginDeDesligadoTest {
     assertThat(evento.before).isNull();
     assertThat(evento.after).isNull();
     assertThat(evento.metadata).isNotNull();
+  }
+
+  // ---- SEG-004: quem foi desligado nao recupera a conta por "esqueci minha senha" ------------------
+
+  /** Desligado: sem token, sem e-mail, e a MESMA resposta de e-mail desconhecido. */
+  @Test
+  void desligadoNaoRecebeLinkDeRedefinicaoEARespostaNaoRevelaNada() {
+    when(acessoDeProfissional.desativado(usuario)).thenReturn(true);
+
+    GenericMessageResponse resposta = service.requestPasswordReset("bruna@salao.test");
+    GenericMessageResponse deQuemNaoExiste = service.requestPasswordReset("ninguem@salao.test");
+
+    assertThat(resposta.message).isEqualTo(deQuemNaoExiste.message);
+    verify(passwordResetTokenRepository, never()).save(any());
+    verify(emailJobService, never()).enqueuePasswordReset(any(), any(), any());
+  }
+
+  @Test
+  void quemContinuaNaEquipeAindaRecebeOLink() {
+    org.springframework.test.util.ReflectionTestUtils.setField(
+        service, "publicFrontendBaseUrl", "https://app.exemplo.test");
+    when(acessoDeProfissional.desativado(usuario)).thenReturn(false);
+
+    service.requestPasswordReset("bruna@salao.test");
+
+    verify(passwordResetTokenRepository).save(any(PasswordResetToken.class));
+    verify(emailJobService).enqueuePasswordReset(any(), any(), any());
+  }
+
+  private PasswordResetToken linkEmitido() {
+    PasswordResetToken token = new PasswordResetToken();
+    token.setUserId(usuario.getId());
+    token.setTenantId(usuario.getTenantId());
+    token.setExpiresAt(Instant.now().plusSeconds(600));
+    when(passwordResetTokenRepository.findActiveByHash(any(), any())).thenReturn(Optional.of(token));
+    when(usuarioRepository.findById(usuario.getId())).thenReturn(Optional.of(usuario));
+    return token;
+  }
+
+  private ResetPasswordRequest redefinir() {
+    ResetPasswordRequest request = new ResetPasswordRequest();
+    request.token = "link-emitido-antes-do-desligamento";
+    request.password = "NovaSenha@123";
+    return request;
+  }
+
+  /** Um link emitido ANTES do desligamento tambem nao devolve o acesso. */
+  @Test
+  void linkEmitidoAntesDoDesligamentoNaoRedefineASenha() {
+    linkEmitido();
+    String hashAntes = usuario.getPasswordHash();
+    when(acessoDeProfissional.desativado(usuario)).thenReturn(true);
+
+    assertThatThrownBy(() -> service.resetPassword(redefinir()))
+        .isInstanceOf(ApiClientErrorException.class)
+        .hasMessage("Token de redefinicao invalido ou expirado");
+
+    assertThat(usuario.getPasswordHash()).isEqualTo(hashAntes);
+    verify(usuarioRepository, never()).save(any());
+    verify(refreshTokenService, never()).revokeAllForUser(any());
+  }
+
+  @Test
+  void quemContinuaNaEquipeRedefineASenhaNormalmente() {
+    linkEmitido();
+    String hashAntes = usuario.getPasswordHash();
+    when(acessoDeProfissional.desativado(usuario)).thenReturn(false);
+
+    GenericMessageResponse resposta = service.resetPassword(redefinir());
+
+    assertThat(resposta.message).isEqualTo("Senha redefinida com sucesso.");
+    assertThat(usuario.getPasswordHash()).isNotEqualTo(hashAntes);
+    verify(refreshTokenService).revokeAllForUser(usuario.getId());
   }
 }

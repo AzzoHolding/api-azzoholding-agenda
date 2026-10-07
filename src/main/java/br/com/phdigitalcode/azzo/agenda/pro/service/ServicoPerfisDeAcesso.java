@@ -46,6 +46,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditService;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.CredentialsEmailService;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.PerfilAcessoRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.RbacAuthorizationRepository;
+import br.com.phdigitalcode.azzo.agenda.pro.repository.RefreshTokenRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.UsuarioRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.security.AcessoPorPerfil;
 import br.com.phdigitalcode.azzo.agenda.pro.security.AuthenticatedUser;
@@ -101,6 +102,7 @@ public class ServicoPerfisDeAcesso {
   private final AuditService auditService;
   private final ContextoTenant contextoTenant;
   private final AuthenticatedUser authenticatedUser;
+  private final RefreshTokenRepository refreshTokenRepository;
 
   public ServicoPerfisDeAcesso(
       PerfilAcessoRepository repositorio,
@@ -114,7 +116,8 @@ public class ServicoPerfisDeAcesso {
       PermissionService permissionService,
       AuditService auditService,
       ContextoTenant contextoTenant,
-      AuthenticatedUser authenticatedUser) {
+      AuthenticatedUser authenticatedUser,
+      RefreshTokenRepository refreshTokenRepository) {
     this.repositorio = repositorio;
     this.acessoPorPerfil = acessoPorPerfil;
     this.menuRouteCache = menuRouteCache;
@@ -127,6 +130,7 @@ public class ServicoPerfisDeAcesso {
     this.auditService = auditService;
     this.contextoTenant = contextoTenant;
     this.authenticatedUser = authenticatedUser;
+    this.refreshTokenRepository = refreshTokenRepository;
   }
 
   // ─── Funcionalidades ─────────────────────────────────────────────────────
@@ -367,6 +371,11 @@ public class ServicoPerfisDeAcesso {
     repositorio.bloquearCredenciais(
         tenantId, userId, BCrypt.withDefaults().hashToString(12, gerarSenha().toCharArray()));
     repositorio.registrarDesligamento(tenantId, userId, autor());
+    // Os refresh tokens (30 dias) tambem caem (achado SEG-004): tokens_revoked_before so derrubava os
+    // tokens de acesso, e o refresh emitia um novo logo em seguida. Consulta em lote, de proposito:
+    // RefreshTokenService.revokeAllForUser grava a entidade Usuario e poderia desfazer a senha
+    // aleatoria que bloquearCredenciais acabou de gravar por SQL nativo.
+    refreshTokenRepository.revokeAllByUser(userId, Instant.now());
     tokenRevocationService.invalidateCache(userId);
     auditar(
         tenantId,
