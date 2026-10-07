@@ -84,6 +84,37 @@ public class ServicoConfirmacaoDeAgendamento {
    */
   @Transactional(readOnly = true)
   public void enviar(UUID tenantId, Agendamento agendamento) {
+    enviarAviso(
+        tenantId, agendamento, WhatsAppTemplateEntity.CONFIRMACAO, "confirmacao",
+        this::textoEquivalente);
+  }
+
+  /**
+   * Avisa o cliente de que o horario dele foi cancelado pelo salao (cancelamento direto ou por
+   * fechamento especial). <b>Nunca lanca</b>, pelos mesmos motivos da confirmacao.
+   *
+   * <p>Sai pelo template {@code azzo_cancelamento} e passa pelos mesmos portoes da confirmacao:
+   * WhatsApp ligado, envio proativo permitido e opt-out de LGPD. LGPD: as variaveis sao as mesmas
+   * da confirmacao e NENHUMA carrega o motivo do cancelamento ou do fechamento — o cliente recebe
+   * so o que o texto do salao pedir entre cliente, data, hora, salao, profissional e servico.
+   *
+   * <p>Quem chama deve agendar isto para DEPOIS do commit
+   * ({@code WhatsAppAppointmentNotificationService} faz): avisar de um cancelamento que depois
+   * sofre rollback deixaria o cliente sem o horario que ainda existe.
+   */
+  @Transactional(readOnly = true)
+  public void enviarCancelamento(UUID tenantId, Agendamento agendamento) {
+    enviarAviso(
+        tenantId, agendamento, WhatsAppTemplateEntity.CANCELAMENTO, "cancelamento",
+        this::textoEquivalenteDoCancelamento);
+  }
+
+  private void enviarAviso(
+      UUID tenantId,
+      Agendamento agendamento,
+      String finalidade,
+      String rotulo,
+      java.util.function.Function<Map<String, String>, String> textoEquivalente) {
     if (tenantId == null || agendamento == null || agendamento.getClientId() == null) return;
 
     try {
@@ -95,7 +126,7 @@ public class ServicoConfirmacaoDeAgendamento {
 
       // Gate LGPD, igual ao do lembrete: opt-out vale so para WhatsApp.
       if (Boolean.TRUE.equals(cliente.getWhatsappOptOut())) {
-        LOG.debug("Confirmacao ignorada: cliente={} optou por nao receber", cliente.getId());
+        LOG.debug("Aviso de {} ignorado: cliente={} optou por nao receber", rotulo, cliente.getId());
         return;
       }
 
@@ -103,7 +134,7 @@ public class ServicoConfirmacaoDeAgendamento {
           canalDoCliente.resolve(tenantId, cliente, cliente.getPhone());
       String destino = canal.externalContactId();
       if (destino == null || destino.replaceAll("\\D", "").length() < 10) {
-        LOG.debug("Confirmacao ignorada: cliente={} sem telefone valido", cliente.getId());
+        LOG.debug("Aviso de {} ignorado: cliente={} sem telefone valido", rotulo, cliente.getId());
         return;
       }
 
@@ -111,26 +142,26 @@ public class ServicoConfirmacaoDeAgendamento {
       ChannelSendResult resultado =
           servicoTemplates.enviar(
               tenantId,
-              WhatsAppTemplateEntity.CONFIRMACAO,
+              finalidade,
               canal.channel() == ChatChannel.TELEGRAM ? ChatChannel.TELEGRAM : ChatChannel.WHATSAPP,
               destino,
               valores,
-              textoEquivalente(valores));
+              textoEquivalente.apply(valores));
 
       if (resultado != null && !resultado.success()) {
-        // O motivo da Meta no log: sem ele, uma confirmacao que nao chega vira mistério.
+        // O motivo da Meta no log: sem ele, uma mensagem que nao chega vira mistério.
         LOG.warn(
-            "whatsapp.confirmacao.recusada tenantId={} appointmentId={} motivo={}",
-            tenantId, agendamento.getId(), resultado.providerErrorMessage());
+            "whatsapp.{}.recusada tenantId={} appointmentId={} motivo={}",
+            rotulo, tenantId, agendamento.getId(), resultado.providerErrorMessage());
       } else {
         LOG.info(
-            "whatsapp.confirmacao.enviada tenantId={} appointmentId={}",
-            tenantId, agendamento.getId());
+            "whatsapp.{}.enviada tenantId={} appointmentId={}",
+            rotulo, tenantId, agendamento.getId());
       }
     } catch (RuntimeException erro) {
       LOG.warn(
-          "whatsapp.confirmacao.falhou tenantId={} appointmentId={} motivo={}",
-          tenantId, agendamento.getId(), erro.getMessage());
+          "whatsapp.{}.falhou tenantId={} appointmentId={} motivo={}",
+          rotulo, tenantId, agendamento.getId(), erro.getMessage());
     }
   }
 
@@ -192,5 +223,15 @@ public class ServicoConfirmacaoDeAgendamento {
     texto.append(" foi confirmado para ").append(valores.getOrDefault("data", ""));
     if (valores.containsKey("hora")) texto.append(" às ").append(valores.get("hora"));
     return texto.append(".").toString();
+  }
+
+  /** Sem o motivo do cancelamento, de proposito (LGPD): so o que mudou e como remarcar. */
+  private String textoEquivalenteDoCancelamento(Map<String, String> valores) {
+    StringBuilder texto = new StringBuilder("Olá ");
+    texto.append(valores.getOrDefault("cliente", "cliente")).append("! Seu agendamento");
+    if (valores.containsKey("servico")) texto.append(" de ").append(valores.get("servico"));
+    texto.append(" de ").append(valores.getOrDefault("data", ""));
+    if (valores.containsKey("hora")) texto.append(" às ").append(valores.get("hora"));
+    return texto.append(" foi cancelado. Entre em contato para remarcar.").toString();
   }
 }

@@ -7,28 +7,26 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import br.com.phdigitalcode.azzo.agenda.pro.entity.Agendamento;
+import br.com.phdigitalcode.azzo.agenda.pro.service.AfterCommitExecutor;
 import br.com.phdigitalcode.azzo.agenda.pro.service.ServicoConfirmacaoDeAgendamento;
 
 /**
- * PARCIALMENTE PLACEHOLDER. {@code sendConfirmation} passou a enviar de verdade em 2026-09-24;
- * {@code sendCancellation} e {@code sendNoShow} continuam so logando.
+ * Avisos de WhatsApp ao cliente sobre o agendamento dele.
  *
- * <p>Cobre o ponto em que {@code settings} depende de
- * {@code modules/tenant/application/WhatsAppAppointmentNotificationService.java}:
- * {@code sendCancellation(tenantId, agendamento)}, chamado por
- * {@link br.com.phdigitalcode.azzo.agenda.pro.service.SpecialClosureService} quando um fechamento e
- * confirmado com {@code notifyClients = true}.
+ * <p>{@code sendConfirmation} envia de verdade desde 2026-09-24. {@code sendCancellation} envia de
+ * verdade desde 2026-10-06 (achado AGD-008 da auditoria). {@code sendNoShow} <b>continua so
+ * logando</b>, de proposito: nao existe template de no-show (as finalidades sao confirmacao,
+ * cancelamento e lembrete) e avisar o cliente de que ele faltou e decisao de produto.
  *
- * <p><b>Perde apenas efeito colateral</b>, na categoria de {@code AuditService}/
- * {@code EmailJobService} — nao suprime regra de negocio. E, na pratica, hoje nem chega a ser
- * chamado: o unico caminho HTTP ({@code POST /api/v1/salon/closures/confirm}) usa a sobrecarga de
- * dois argumentos, que delega com {@code notifyClients = false}. Quem passa {@code true} e o
- * {@code publicbooking}/automacao, ainda nao migrado.
+ * <p>{@code sendCancellation(tenantId, agendamento)} e chamado quando o salao cancela um horario
+ * ({@code ServicoAgendamentos}) e por {@link
+ * br.com.phdigitalcode.azzo.agenda.pro.service.SpecialClosureService} quando um fechamento e
+ * confirmado com {@code notifyClients = true} (hoje alcancavel por
+ * {@code POST /api/v1/salon/closures/confirm?notifyClients=true}). Antes, nos dois casos o cliente
+ * era cancelado e nao recebia nada.
  *
- * <p>No original o envio usa o template {@code DEFAULT_CANCELLATION} configurado pelo tenant, que
- * por decisao de LGPD <b>nao</b> menciona o motivo do fechamento nem dados do profissional — o
- * cliente recebe apenas data, horario e telefone de contato. Preservar isso ao trocar pelo service
- * real junto com o modulo {@code tenant}/{@code chat}.
+ * <p>LGPD: o aviso de cancelamento nunca carrega o motivo do cancelamento ou do fechamento (nao ha
+ * variavel de motivo no vocabulario do template).
  */
 @Service
 public class WhatsAppAppointmentNotificationService {
@@ -37,14 +35,28 @@ public class WhatsAppAppointmentNotificationService {
       LoggerFactory.getLogger(WhatsAppAppointmentNotificationService.class);
 
   private final ServicoConfirmacaoDeAgendamento servicoConfirmacao;
+  private final AfterCommitExecutor afterCommitExecutor;
 
-  public WhatsAppAppointmentNotificationService(ServicoConfirmacaoDeAgendamento servicoConfirmacao) {
+  public WhatsAppAppointmentNotificationService(
+      ServicoConfirmacaoDeAgendamento servicoConfirmacao, AfterCommitExecutor afterCommitExecutor) {
     this.servicoConfirmacao = servicoConfirmacao;
+    this.afterCommitExecutor = afterCommitExecutor;
   }
 
-  /** LGPD: nao loga nome nem telefone do cliente — apenas identificadores. */
+  /**
+   * Avisa o cliente de que o horario dele foi cancelado.
+   *
+   * <p><b>Sai DEPOIS do commit</b>, em thread de fundo ({@link AfterCommitExecutor}): os dois
+   * chamadores (mudanca de status e fechamento especial) rodam dentro da transacao do cancelamento,
+   * e mandar na hora avisaria de um cancelamento que depois sofre rollback — o cliente perderia um
+   * horario que ainda existe. Sem transacao ativa, roda de imediato (tambem em fundo). Nunca lanca
+   * para quem chama: o cancelamento ja aconteceu, e falha de envio so entra no log.
+   *
+   * <p>LGPD: nao loga nome nem telefone do cliente — apenas identificadores.
+   */
   public void sendCancellation(UUID tenantId, Agendamento agendamento) {
-    logNaoEnviado("cancelamento", tenantId, agendamento);
+    if (tenantId == null || agendamento == null) return;
+    afterCommitExecutor.run(() -> servicoConfirmacao.enviarCancelamento(tenantId, agendamento));
   }
 
   /**
@@ -64,17 +76,15 @@ public class WhatsAppAppointmentNotificationService {
   /**
    * Aviso de nao comparecimento. Assinatura de um argumento so, como no original — o tenant e
    * lido do proprio agendamento.
+   *
+   * <p><b>Continua sem enviar</b>: nao ha template de no-show e a decisao de avisar o cliente de
+   * que faltou e de produto (AGD-008). So registra no log, com identificadores.
    */
   public void sendNoShow(Agendamento agendamento) {
-    logNaoEnviado("no-show", agendamento != null ? agendamento.getTenantId() : null, agendamento);
-  }
-
-  private void logNaoEnviado(String tipo, UUID tenantId, Agendamento agendamento) {
-    LOG.warn(
-        "Notificacao de {} por WhatsApp NAO enviada (modulo tenant/chat pendente de migracao)"
+    LOG.info(
+        "Aviso de no-show por WhatsApp nao enviado (sem template de no-show; decisao de produto)"
             + " tenantId={} appointmentId={}",
-        tipo,
-        tenantId,
+        agendamento != null ? agendamento.getTenantId() : null,
         agendamento != null ? agendamento.getId() : null);
   }
 }
