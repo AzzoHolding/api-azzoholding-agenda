@@ -571,6 +571,145 @@ class ServicoComandaTest {
         .hasMessage("Comanda nao esta quitada: pago 0, total com gorjeta 100.00.");
   }
 
+  // ─── FIN-003: troco e pagamento que nao cabe no saldo ───────────────────────────────────────
+
+  private Comanda comandaDeOitenta() {
+    Comanda comanda = comanda(Comanda.STATUS_ABERTA);
+    comanda.setSubtotal(new BigDecimal("80.00"));
+    comanda.setTotal(new BigDecimal("80.00"));
+    itensDaComanda(item(ComandaItem.TIPO_SERVICO, "80.00", null));
+    return comanda;
+  }
+
+  private ComandaDtos.RegistrarPagamentoRequest pedidoDePagamento(String meio, String valor) {
+    ComandaDtos.RegistrarPagamentoRequest req = new ComandaDtos.RegistrarPagamentoRequest();
+    req.meio = meio;
+    req.valor = new BigDecimal(valor);
+    return req;
+  }
+
+  /** O cenario do achado: o cliente entrega R$ 100 numa conta de R$ 80 e a comanda travava. */
+  @Test
+  void dinheiroAMaiorEAceitoETemTrocoNoFechamento() {
+    Comanda comanda = comandaDeOitenta();
+    pagamentosDaComanda();
+    service.registrarPagamento(comandaId, pedidoDePagamento(ComandaPagamento.MEIO_DINHEIRO, "100.00"));
+    pagamentosDaComanda(
+        pagamento(ComandaPagamento.MEIO_DINHEIRO, "100.00", ComandaPagamento.STATUS_CONFIRMADO));
+
+    service.fechar(comandaId);
+
+    assertThat(comanda.getStatus()).isEqualTo(Comanda.STATUS_FECHADA);
+    // A receita e a do que foi VENDIDO (80), e nao a do que foi entregue (100).
+    assertThat(transacoesSalvas())
+        .extracting(Transacao::getAmount)
+        .allSatisfy(valor -> assertThat(valor).isLessThanOrEqualTo(new BigDecimal("80.00")));
+    assertThat(
+            transacoesSalvas().stream()
+                .map(Transacao::getAmount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add))
+        .isEqualByComparingTo("80.00");
+  }
+
+  @Test
+  void naoSeDaTrocoDeCartao() {
+    comandaDeOitenta();
+    pagamentosDaComanda();
+
+    assertThatThrownBy(
+            () ->
+                service.registrarPagamento(
+                    comandaId, pedidoDePagamento(ComandaPagamento.MEIO_CARTAO_CREDITO_EXTERNO, "100.00")))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("O valor passa do que falta pagar (80.00). So o pagamento em dinheiro tem troco.");
+
+    verify(comandaPagamentoRepository, never()).save(any());
+  }
+
+  @Test
+  void cartaoNoValorExatoPassa() {
+    comandaDeOitenta();
+    pagamentosDaComanda();
+
+    service.registrarPagamento(
+        comandaId, pedidoDePagamento(ComandaPagamento.MEIO_CARTAO_CREDITO_EXTERNO, "80.00"));
+
+    verify(comandaPagamentoRepository).save(any(ComandaPagamento.class));
+  }
+
+  /** O duplo clique: o segundo pagamento igual nao cria outro, e nao trava a comanda. */
+  @Test
+  void comandaJaPagaPorInteiroNaoRecebeOutroPagamento() {
+    comandaDeOitenta();
+    pagamentosDaComanda(
+        pagamento(ComandaPagamento.MEIO_DINHEIRO, "80.00", ComandaPagamento.STATUS_CONFIRMADO));
+
+    assertThatThrownBy(
+            () ->
+                service.registrarPagamento(
+                    comandaId, pedidoDePagamento(ComandaPagamento.MEIO_DINHEIRO, "80.00")))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("Esta comanda ja esta paga por inteiro: feche a comanda.");
+
+    verify(comandaPagamentoRepository, never()).save(any());
+  }
+
+  @Test
+  void aGorjetaEntraNaConta() {
+    Comanda comanda = comandaDeOitenta();
+    comanda.setGorjeta(new BigDecimal("10.00"));
+    pagamentosDaComanda();
+
+    service.registrarPagamento(
+        comandaId, pedidoDePagamento(ComandaPagamento.MEIO_CARTAO_DEBITO_EXTERNO, "90.00"));
+    verify(comandaPagamentoRepository).save(any(ComandaPagamento.class));
+
+    assertThatThrownBy(
+            () ->
+                service.registrarPagamento(
+                    comandaId, pedidoDePagamento(ComandaPagamento.MEIO_CARTAO_DEBITO_EXTERNO, "95.00")))
+        .hasMessageContaining("O valor passa do que falta pagar (90.00)");
+  }
+
+  /** Pix ainda pendente nao paga a conta: o caixa pode receber a diferenca de outro modo. */
+  @Test
+  void pagamentoPendenteNaoContaComoPago() {
+    comandaDeOitenta();
+    pagamentosDaComanda(
+        pagamento(ComandaPagamento.MEIO_PIX_ASAAS, "80.00", ComandaPagamento.STATUS_PENDENTE));
+
+    service.registrarPagamento(comandaId, pedidoDePagamento(ComandaPagamento.MEIO_DINHEIRO, "80.00"));
+
+    verify(comandaPagamentoRepository).save(any(ComandaPagamento.class));
+  }
+
+  /** Sem total (conta ainda nao montada) nada muda: o comportamento de antes. */
+  @Test
+  void semTotalAsRegrasNovasNaoSeAplicam() {
+    comanda(Comanda.STATUS_ABERTA);
+    pagamentosDaComanda();
+
+    service.registrarPagamento(
+        comandaId, pedidoDePagamento(ComandaPagamento.MEIO_CARTAO_CREDITO_EXTERNO, "50.00"));
+
+    verify(comandaPagamentoRepository).save(any(ComandaPagamento.class));
+  }
+
+  /** O excedente so pode sair do dinheiro: cartao a maior (ex.: Pix confirmado depois) nao tem troco. */
+  @Test
+  void excedenteQueNaoVemDeDinheiroNaoFecha() {
+    comandaDeOitenta();
+    pagamentosDaComanda(
+        pagamento(ComandaPagamento.MEIO_CARTAO_CREDITO_EXTERNO, "100.00", ComandaPagamento.STATUS_CONFIRMADO));
+
+    assertThatThrownBy(() -> service.fechar(comandaId))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("so o dinheiro (recebido: 0) tem troco")
+        .hasMessageContaining("passam do total em 20.00");
+
+    verify(transacaoRepository, never()).save(any());
+  }
+
   @Test
   void fecharRateiaAReceitaDoItemEntreOsMeiosDePagamentoReais() {
     Comanda comanda = comanda(Comanda.STATUS_ABERTA);

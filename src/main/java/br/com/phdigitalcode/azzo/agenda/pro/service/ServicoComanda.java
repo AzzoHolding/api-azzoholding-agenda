@@ -941,6 +941,7 @@ public class ServicoComanda {
     Comanda comanda = buscarOuFalhar(id, tenantId);
     exigirComandaDoProfissional(tenantId, comanda);
     exigirAberta(comanda);
+    exigirQueOPagamentoCabeNoSaldo(comanda, request);
 
     ComandaPagamento pagamento = new ComandaPagamento();
     pagamento.setTenantId(tenantId);
@@ -977,6 +978,40 @@ public class ServicoComanda {
     dados.put("status", pagamento.getStatus());
     auditar(tenantId, "POS_PAYMENT_ADD", comanda, null, dados);
     return obter(id);
+  }
+
+  /**
+   * Pagamento que nao cabe no que falta (achado FIN-003, auditoria de 2026-10-06).
+   *
+   * <p>Antes o backend aceitava qualquer valor e so {@code fechar} exigia igualdade exata: o cliente
+   * entregava R$ 100 numa conta de R$ 80, o caixa registrava, e a comanda travava (sem como remover o
+   * pagamento; so o dono cancelando e refazendo). Um duplo clique gerava dois pagamentos iguais e o
+   * mesmo bloqueio — e, no Pix, duas cobrancas.
+   *
+   * <p>Agora: comanda ja paga por inteiro nao recebe outro pagamento (a mesma regra que a tela ja
+   * aplicava), e so DINHEIRO pode passar do que falta — o resto e troco. Cartao e credito de sinal
+   * nao tem troco. So vale com total maior que zero.
+   */
+  private void exigirQueOPagamentoCabeNoSaldo(
+      Comanda comanda, ComandaDtos.RegistrarPagamentoRequest request) {
+    BigDecimal totalComGorjeta = NumericUtil.add(comanda.getTotal(), comanda.getGorjeta());
+    if (totalComGorjeta.signum() <= 0) return;
+
+    BigDecimal confirmado =
+        comandaPagamentoRepository.findByComandaIdOrderByCreatedAt(comanda.getId()).stream()
+            .filter(p -> ComandaPagamento.STATUS_CONFIRMADO.equals(p.getStatus()))
+            .map(ComandaPagamento::getValor)
+            .reduce(BigDecimal.ZERO, NumericUtil::add);
+    BigDecimal restante = NumericUtil.maxZero(NumericUtil.subtract(totalComGorjeta, confirmado));
+
+    if (restante.signum() == 0) {
+      throw new IllegalArgumentException("Esta comanda ja esta paga por inteiro: feche a comanda.");
+    }
+    if (!ComandaPagamento.MEIO_DINHEIRO.equals(request.meio)
+        && request.valor.compareTo(restante) > 0) {
+      throw new IllegalArgumentException(
+          "O valor passa do que falta pagar (" + restante + "). So o pagamento em dinheiro tem troco.");
+    }
   }
 
   private void registrarPagamentoPix(UUID tenantId, Comanda comanda, ComandaPagamento pagamento) {
@@ -1073,13 +1108,32 @@ public class ServicoComanda {
     // O cliente paga servico + gorjeta juntos no caixa — a quitacao tem que cobrir os dois, mesmo
     // que a gorjeta nao componha o total (que segue sendo so a receita do salao).
     BigDecimal totalComGorjeta = NumericUtil.add(comanda.getTotal(), comanda.getGorjeta());
-    if (totalConfirmado.compareTo(totalComGorjeta) != 0) {
+    if (totalConfirmado.compareTo(totalComGorjeta) < 0) {
       throw new IllegalArgumentException(
           "Comanda nao esta quitada: pago "
               + totalConfirmado
               + ", total com gorjeta "
               + totalComGorjeta
               + ".");
+    }
+    // Pago a MAIOR e troco (achado FIN-003) — mas so o que veio em dinheiro pode ser devolvido: nao se
+    // da troco de cartao. A receita nao muda: as transacoes sao criadas pelo valor LIQUIDO de cada
+    // item, consumindo os pagamentos so ate cobrir a venda.
+    BigDecimal excedente = totalConfirmado.subtract(totalComGorjeta);
+    if (excedente.signum() > 0) {
+      BigDecimal recebidoEmDinheiro =
+          pagamentos.stream()
+              .filter(
+                  p ->
+                      ComandaPagamento.STATUS_CONFIRMADO.equals(p.getStatus())
+                          && ComandaPagamento.MEIO_DINHEIRO.equals(p.getMeio()))
+              .map(ComandaPagamento::getValor)
+              .reduce(BigDecimal.ZERO, NumericUtil::add);
+      if (excedente.compareTo(recebidoEmDinheiro) > 0) {
+        throw new IllegalArgumentException(
+            "Os pagamentos passam do total em " + excedente + ", e so o dinheiro (recebido: "
+                + recebidoEmDinheiro + ") tem troco. Peca ao dono para cancelar a comanda e refazer.");
+      }
     }
 
     UUID categoriaVendasId = resolveTransactionCategoryId(tenantId, "VENDAS");
