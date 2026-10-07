@@ -4,6 +4,7 @@ import org.springframework.stereotype.Component;
 
 import br.com.phdigitalcode.azzo.agenda.pro.entity.Usuario;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.PapelUsuario;
+import br.com.phdigitalcode.azzo.agenda.pro.repository.PerfilAcessoRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.ProfissionalRepository;
 
 /**
@@ -24,17 +25,28 @@ public class AcessoDeProfissional {
       "Seu acesso foi desativado pelo salao. Fale com o responsavel.";
 
   private final ProfissionalRepository profissionalRepository;
+  private final PerfilAcessoRepository perfilAcessoRepository;
 
-  public AcessoDeProfissional(ProfissionalRepository profissionalRepository) {
+  public AcessoDeProfissional(
+      ProfissionalRepository profissionalRepository, PerfilAcessoRepository perfilAcessoRepository) {
     this.profissionalRepository = profissionalRepository;
+    this.perfilAcessoRepository = perfilAcessoRepository;
   }
 
-  /** O usuario esta ligado a um cadastro de profissional DESATIVADO? */
+  /**
+   * O usuario saiu da equipe? Duas formas de sair: ser DESLIGADO em /acessos ({@code
+   * equipe_desligamento}) ou ter o cadastro de profissional DESATIVADO.
+   *
+   * <p>O desligamento nunca era consultado fora de {@code ServicoPerfisDeAcesso} (achado SEG-004,
+   * auditoria de 2026-10-06): o desligado so tinha a senha trocada, e continuava renovando a sessao
+   * por 30 dias e recuperando a conta por "esqueci minha senha".
+   */
   public boolean desativado(Usuario usuario) {
     if (usuario == null || usuario.getId() == null || usuario.getTenantId() == null) return false;
     if (usuario.getRole() == PapelUsuario.OWNER || usuario.getRole() == PapelUsuario.ADMIN) {
       return false;
     }
+    if (perfilAcessoRepository.estaDesligado(usuario.getId())) return true;
     return profissionalRepository
         .findByTenantIdAndUserId(usuario.getTenantId(), usuario.getId())
         .map(profissional -> !profissional.isActive())

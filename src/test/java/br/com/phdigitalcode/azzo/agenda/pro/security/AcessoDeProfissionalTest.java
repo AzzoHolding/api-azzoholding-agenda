@@ -3,6 +3,8 @@ package br.com.phdigitalcode.azzo.agenda.pro.security;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.Optional;
@@ -14,12 +16,14 @@ import org.junit.jupiter.api.Test;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.Profissional;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.Usuario;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.PapelUsuario;
+import br.com.phdigitalcode.azzo.agenda.pro.repository.PerfilAcessoRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.ProfissionalRepository;
 
 /** Quem saiu da equipe nao entra mais — e o dono nunca fica trancado fora do proprio salao. */
 class AcessoDeProfissionalTest {
 
   private ProfissionalRepository profissionalRepository;
+  private PerfilAcessoRepository perfilAcessoRepository;
   private AcessoDeProfissional acesso;
   private Usuario usuario;
   private Profissional cadastro;
@@ -27,7 +31,8 @@ class AcessoDeProfissionalTest {
   @BeforeEach
   void setUp() {
     profissionalRepository = mock(ProfissionalRepository.class);
-    acesso = new AcessoDeProfissional(profissionalRepository);
+    perfilAcessoRepository = mock(PerfilAcessoRepository.class);
+    acesso = new AcessoDeProfissional(profissionalRepository, perfilAcessoRepository);
     usuario = new Usuario();
     usuario.setId(UUID.randomUUID());
     usuario.setTenantId(UUID.randomUUID());
@@ -64,5 +69,46 @@ class AcessoDeProfissionalTest {
     usuario.setRole(PapelUsuario.STAFF);
     when(profissionalRepository.findByTenantIdAndUserId(any(), any())).thenReturn(Optional.empty());
     assertThat(acesso.desativado(usuario)).isFalse();
+  }
+
+  // ---- SEG-004: desligar em /acessos tambem barra o login, o refresh e o reset -------------------
+
+  /** Desligado em /acessos: o cadastro de profissional continua ativo, mas a pessoa saiu da equipe. */
+  @Test
+  void membroDesligadoEmAcessosEBarradoMesmoComCadastroAtivo() {
+    cadastro.setActive(true);
+    when(perfilAcessoRepository.estaDesligado(usuario.getId())).thenReturn(true);
+
+    assertThat(acesso.desativado(usuario)).isTrue();
+  }
+
+  /** Recepcao (STAFF) nao tem cadastro de profissional: o desligamento e o que a barra. */
+  @Test
+  void recepcaoDesligadaSemCadastroDeProfissionalEBarrada() {
+    usuario.setRole(PapelUsuario.STAFF);
+    when(profissionalRepository.findByTenantIdAndUserId(any(), any())).thenReturn(Optional.empty());
+    when(perfilAcessoRepository.estaDesligado(usuario.getId())).thenReturn(true);
+
+    assertThat(acesso.desativado(usuario)).isTrue();
+  }
+
+  @Test
+  void membroQueNaoFoiDesligadoPassa() {
+    cadastro.setActive(true);
+    when(perfilAcessoRepository.estaDesligado(usuario.getId())).thenReturn(false);
+
+    assertThat(acesso.desativado(usuario)).isFalse();
+  }
+
+  /** O dono e o ADMIN nunca sao barrados por aqui, e nem chega a consultar o desligamento. */
+  @Test
+  void donoEAdminNaoSaoBarradosNemConsultados() {
+    usuario.setRole(PapelUsuario.OWNER);
+    when(perfilAcessoRepository.estaDesligado(any())).thenReturn(true);
+    assertThat(acesso.desativado(usuario)).isFalse();
+
+    usuario.setRole(PapelUsuario.ADMIN);
+    assertThat(acesso.desativado(usuario)).isFalse();
+    verify(perfilAcessoRepository, never()).estaDesligado(any());
   }
 }
