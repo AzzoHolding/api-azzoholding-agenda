@@ -96,13 +96,51 @@ class WhatsAppAppointmentNotificationServiceTest {
     verify(servicoConfirmacao, timeout(3000)).enviarCancelamento(TENANT, agendamento);
   }
 
+  /** INT-007: a confirmacao tambem so sai depois do commit (antes segurava o lock do profissional). */
   @Test
-  void confirmacaoContinuaDelegando() {
-    var service = new WhatsAppAppointmentNotificationService(servicoConfirmacao, mock(AfterCommitExecutor.class));
+  void confirmacaoSoEnviaQuandoATarefaPosCommitRoda() {
+    AfterCommitExecutor executor = mock(AfterCommitExecutor.class);
+    var service = new WhatsAppAppointmentNotificationService(servicoConfirmacao, executor);
 
     service.sendConfirmation(TENANT, agendamento);
 
+    ArgumentCaptor<Runnable> tarefa = ArgumentCaptor.forClass(Runnable.class);
+    verify(executor).run(tarefa.capture());
+    verifyNoInteractions(servicoConfirmacao);
+
+    tarefa.getValue().run();
+
     verify(servicoConfirmacao).enviar(TENANT, agendamento);
+  }
+
+  @Test
+  void rollbackDaCriacaoNaoEnviaAConfirmacao() {
+    var service = new WhatsAppAppointmentNotificationService(servicoConfirmacao, new AfterCommitExecutor());
+
+    TransactionSynchronizationManager.initSynchronization();
+    service.sendConfirmation(TENANT, agendamento);
+    var sincronizacoes = new ArrayList<>(TransactionSynchronizationManager.getSynchronizations());
+    sincronizacoes.forEach(s -> s.afterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK));
+    TransactionSynchronizationManager.clearSynchronization();
+    verify(servicoConfirmacao, after(400).never()).enviar(any(), any());
+
+    TransactionSynchronizationManager.initSynchronization();
+    service.sendConfirmation(TENANT, agendamento);
+    var commit = new ArrayList<>(TransactionSynchronizationManager.getSynchronizations());
+    commit.forEach(TransactionSynchronization::afterCommit);
+    TransactionSynchronizationManager.clearSynchronization();
+    verify(servicoConfirmacao, timeout(3000)).enviar(TENANT, agendamento);
+  }
+
+  @Test
+  void confirmacaoSemTenantOuAgendamentoNaoAgendaNada() {
+    AfterCommitExecutor executor = mock(AfterCommitExecutor.class);
+    var service = new WhatsAppAppointmentNotificationService(servicoConfirmacao, executor);
+
+    service.sendConfirmation(null, agendamento);
+    service.sendConfirmation(TENANT, null);
+
+    verifyNoInteractions(executor, servicoConfirmacao);
   }
 
   /** No-show continua sem enviar: nao ha template, e avisar que o cliente faltou e decisao de produto. */
