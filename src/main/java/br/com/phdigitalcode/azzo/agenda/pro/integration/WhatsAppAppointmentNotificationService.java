@@ -66,11 +66,18 @@ public class WhatsAppAppointmentNotificationService {
    * horario e nao recebia nada. Sai por template aprovado, porque confirmacao de cliente novo e
    * sempre primeiro contato — e fora da janela de 24h o texto livre e aceito e descartado.
    *
-   * <p>A chamada ja vem envolvida em {@code try/catch} no {@code ServicoAgendamentos.criar}, e o
-   * proprio servico nao lanca: falha de envio nunca aborta a criacao.
+   * <p><b>Sai DEPOIS do commit</b> ({@link AfterCommitExecutor}), como o cancelamento. A chamada ja
+   * vem envolvida em {@code try/catch} no {@code ServicoAgendamentos.criar}, e o proprio servico nao
+   * lanca: falha de envio nunca aborta a criacao.
    */
   public void sendConfirmation(UUID tenantId, Agendamento agendamento) {
-    servicoConfirmacao.enviar(tenantId, agendamento);
+    if (tenantId == null || agendamento == null) return;
+    // DEPOIS do commit, em thread de fundo (achado INT-007, auditoria de 2026-10-06). Antes o envio
+    // rodava dentro de ServicoAgendamentos.criar, com o advisory lock do profissional/dia e uma
+    // conexao do pool presos durante a chamada a Meta (ate 10s + 20s de timeout): uma Meta lenta
+    // travava todas as reservas daquele profissional naquele dia. E, se o commit falhasse depois, o
+    // cliente ja tinha recebido a confirmacao de um agendamento que nao existe.
+    afterCommitExecutor.run(() -> servicoConfirmacao.enviar(tenantId, agendamento));
   }
 
   /**
