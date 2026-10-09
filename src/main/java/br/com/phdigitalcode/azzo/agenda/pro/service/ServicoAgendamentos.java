@@ -272,6 +272,7 @@ public class ServicoAgendamentos {
         agendamentoRepository
             .findByIdAndTenantId(id, tenantId)
             .orElseThrow(() -> new IllegalArgumentException("Agendamento nao encontrado"));
+    exigirQueOProfissionalSoAcessaOProprio(tenantId, appointment);
 
     AppointmentDetailResponse response = new AppointmentDetailResponse();
     response.appointment = toResponse(appointment);
@@ -383,6 +384,7 @@ public class ServicoAgendamentos {
         agendamentoRepository
             .findByIdAndTenantId(id, tenantId)
             .orElseThrow(() -> new IllegalArgumentException("Agendamento nao encontrado"));
+    exigirQueOProfissionalSoAcessaOProprio(tenantId, a);
     Map<String, Object> before = snapshotAgendamento(a);
 
     StatusAgendamento statusAnterior = a.getStatus();
@@ -563,6 +565,7 @@ public class ServicoAgendamentos {
         agendamentoRepository
             .findByIdAndTenantId(id, tenantId)
             .orElseThrow(() -> new IllegalArgumentException("Agendamento nao encontrado"));
+    exigirQueOProfissionalSoAcessaOProprio(tenantId, a);
     if (a.getStatus() == StatusAgendamento.COMPLETED
         || a.getStatus() == StatusAgendamento.CANCELLED) {
       throw new IllegalArgumentException(
@@ -709,6 +712,7 @@ public class ServicoAgendamentos {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Agendamento before = agendamentoRepository.findByIdAndTenantId(id, tenantId).orElse(null);
     if (before == null) throw new IllegalArgumentException("Agendamento nao encontrado");
+    exigirQueOProfissionalSoAcessaOProprio(tenantId, before);
 
     // Excluir e apagar de vez — o banco levava junto o SINAL pago e o registro do atendimento. So
     // sai o agendamento que ainda nao aconteceu e nunca envolveu dinheiro; o resto se CANCELA,
@@ -792,15 +796,7 @@ public class ServicoAgendamentos {
             .findByIdAndTenantId(id, tenantId)
             .orElseThrow(() -> new IllegalArgumentException("Agendamento nao encontrado"));
 
-    if (isProfessional()) {
-      UUID userId = obterUserIdOuFalhar();
-      Profissional prof =
-          profissionalRepository.findByTenantIdAndUserId(tenantId, userId).orElse(null);
-      if (prof == null || !prof.getId().equals(a.getProfessionalId())) {
-        throw new IllegalArgumentException(
-            "Acesso negado: agendamento nao pertence ao profissional");
-      }
-    }
+    exigirQueOProfissionalSoAcessaOProprio(tenantId, a);
 
     Map<String, Object> before = snapshotAgendamento(a);
 
@@ -887,6 +883,7 @@ public class ServicoAgendamentos {
         agendamentoRepository
             .findByIdAndTenantId(appointmentId, tenantId)
             .orElseThrow(() -> new IllegalArgumentException("Agendamento nao encontrado"));
+    exigirQueOProfissionalSoAcessaOProprio(tenantId, appointment);
     AppointmentCustomerNote note =
         appointmentCustomerNoteRepository
             .findByIdAndTenantIdAndAppointmentId(noteId, tenantId, appointmentId)
@@ -905,6 +902,7 @@ public class ServicoAgendamentos {
         agendamentoRepository
             .findByIdAndTenantId(appointmentId, tenantId)
             .orElseThrow(() -> new IllegalArgumentException("Agendamento nao encontrado"));
+    exigirQueOProfissionalSoAcessaOProprio(tenantId, appointment);
     validarConteudoNota(request);
 
     AppointmentCustomerNote note = new AppointmentCustomerNote();
@@ -935,6 +933,7 @@ public class ServicoAgendamentos {
         agendamentoRepository
             .findByIdAndTenantId(appointmentId, tenantId)
             .orElseThrow(() -> new IllegalArgumentException("Agendamento nao encontrado"));
+    exigirQueOProfissionalSoAcessaOProprio(tenantId, appointment);
     AppointmentCustomerNote note =
         appointmentCustomerNoteRepository
             .findByIdAndTenantIdAndAppointmentId(noteId, tenantId, appointmentId)
@@ -2684,6 +2683,24 @@ public class ServicoAgendamentos {
 
   private boolean isProfessional() {
     return authenticatedUser.isProfessional();
+  }
+
+  /**
+   * PROFESSIONAL so mexe no PROPRIO agendamento (achado AGD-007, auditoria de 2026-10-06).
+   *
+   * <p>A listagem e o registro de presenca ja filtravam por profissional, mas detalhe, edicao,
+   * mudanca de status, exclusao e notas do atendimento aceitavam o id de um colega: bastava conhecer
+   * o UUID para cancelar o horario dele, concluir (gerando receita e comissao do colega) ou ler a
+   * linha do tempo e as notas do cliente. Dono e recepcao (STAFF) nao sao afetados.
+   */
+  private void exigirQueOProfissionalSoAcessaOProprio(UUID tenantId, Agendamento agendamento) {
+    if (!isProfessional()) return;
+    UUID userId = obterUserIdOuFalhar();
+    Profissional prof =
+        profissionalRepository.findByTenantIdAndUserId(tenantId, userId).orElse(null);
+    if (prof == null || !prof.getId().equals(agendamento.getProfessionalId())) {
+      throw new IllegalArgumentException("Acesso negado: agendamento nao pertence ao profissional");
+    }
   }
 
   private UUID obterUserIdOuFalhar() {
