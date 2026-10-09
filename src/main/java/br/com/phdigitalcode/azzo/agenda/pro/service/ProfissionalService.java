@@ -244,6 +244,7 @@ public class ProfissionalService {
     req.phone = p.getPhone();
     boolean estavaAtivo = p.isActive();
     exigirSemAgendamentosFuturosAoDesativar(estavaAtivo, req.isActive, p.getId());
+    if (!estavaAtivo && req.isActive) validarLimiteProfissionaisPlano(tenantId);
     syncLinkedUserOnUpdate(tenantId, p, req);
     aplicar(req, p, tenantId);
     p = profissionalRepository.save(p);
@@ -264,6 +265,7 @@ public class ProfissionalService {
     ProfissionalResponse before = toResponse(p);
     boolean estavaAtivo = p.isActive();
     exigirSemAgendamentosFuturosAoDesativar(estavaAtivo, isActive, p.getId());
+    if (!estavaAtivo && isActive) validarLimiteProfissionaisPlano(tenantId);
     p.setActive(isActive);
     p = profissionalRepository.save(p);
     encerrarSessoesSeFoiDesativado(estavaAtivo, p);
@@ -671,7 +673,15 @@ public class ProfissionalService {
     return "Azzo@12345";
   }
 
+  /**
+   * O limite vale para profissionais ATIVOS, em qualquer caminho que aumente esse numero: cadastrar
+   * ({@code criar}) e reativar ({@code toggleStatus} e {@code atualizar} com {@code isActive} de
+   * false para true). Antes so o cadastro conferia, e num plano de 3 dava para ter 4 ativos: criar
+   * 3, desativar um, criar outro, reativar o primeiro (achado AGD-015, auditoria de 2026-10-06).
+   * A conferencia e serializada por salao (ver {@code travarLimiteDeProfissionais}).
+   */
   private void validarLimiteProfissionaisPlano(UUID tenantId) {
+    planLimitsRepository.travarLimiteDeProfissionais(tenantId);
     int maxProfessionals = obterLimiteProfissionaisDoPlanoObrigatorio(tenantId);
     long current = profissionalRepository.countByTenantIdAndIsActiveTrue(tenantId);
     if (current >= maxProfessionals) {
