@@ -447,8 +447,11 @@ public class AuthServiceImpl implements AuthService {
 
     usuario.setPasswordHash(BCrypt.withDefaults().hashToString(12, request.password.toCharArray()));
     // O link da redefinicao chegou a esta caixa de entrada: prova a mesma posse que a confirmacao.
+    boolean estavaPendente = usuario.isEmailConfirmationPending();
     usuario.setEmailConfirmationPending(false);
     usuarioRepository.save(usuario);
+    // Redefinir pelo link tambem prova a posse do e-mail: o documento liberado volta a quem o confirmou (SEG-009).
+    if (estavaPendente) confirmacaoDeEmail.reivindicarDocumentoDeTrial(usuario.getTenantId());
     token.setUsedAt(now);
     passwordResetTokenRepository.save(token);
     passwordResetTokenRepository.markAllActiveAsUsedByUser(usuario.getId(), now);
