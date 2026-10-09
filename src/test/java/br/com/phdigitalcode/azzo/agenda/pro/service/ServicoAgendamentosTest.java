@@ -1371,6 +1371,137 @@ class ServicoAgendamentosTest {
       verify(agendamentoQueryRepository, never()).lockProfessionalDateForWrite(any(), any(), any());
     }
 
+    // ─── AGD-001: trocar SO o profissional tambem revalida a agenda dele ───────────────────
+
+    private UUID colegaAtivoQueAceitaAgendamento() {
+      UUID colegaId = UUID.randomUUID();
+      Profissional colega = new Profissional();
+      colega.setId(colegaId);
+      colega.setTenantId(tenantId);
+      colega.setAcceptsAppointments(true);
+      when(profissionalRepository.findByIdAndTenantIdAndIsActiveTrue(colegaId, tenantId))
+          .thenReturn(Optional.of(colega));
+      // O servico do agendamento, sem lista de profissionais: qualquer um atende.
+      lenient()
+          .when(servicoRepository.findByIdAndTenantId(serviceId, tenantId))
+          .thenReturn(Optional.of(servico(30, "100.00")));
+      return colegaId;
+    }
+
+    private AppointmentUpdateRequest trocarSoOProfissional(UUID novoProfId) {
+      AppointmentUpdateRequest req = new AppointmentUpdateRequest();
+      req.professionalId = novoProfId.toString();
+      return req;
+    }
+
+    @Test
+    @DisplayName("trocar so o profissional trava o novo profissional e le os conflitos dele")
+    void trocarSoOProfissionalTravaELeConflitosDoNovo() {
+      Agendamento a = agendamentoExistente(StatusAgendamento.CONFIRMED, LocalDate.of(2030, 6, 10), "10:00", "10:30");
+      stubEdicaoDeHorario(a);
+      UUID colegaId = colegaAtivoQueAceitaAgendamento();
+
+      service.atualizar(a.getId(), trocarSoOProfissional(colegaId));
+
+      assertThat(a.getProfessionalId()).isEqualTo(colegaId);
+      InOrder ordem = inOrder(agendamentoQueryRepository, agendamentoRepository);
+      ordem
+          .verify(agendamentoQueryRepository)
+          .lockProfessionalDateForWrite(tenantId, colegaId, LocalDate.of(2030, 6, 10));
+      ordem
+          .verify(agendamentoRepository)
+          .listActiveByProfessionalAndDateExcluding(
+              eq(tenantId), eq(colegaId), eq(LocalDate.of(2030, 6, 10)), eq(a.getId()), anyList());
+    }
+
+    /** O cenario do achado: o colega ja tem aquele horario e a troca voltava 200 com overbooking. */
+    @Test
+    @DisplayName("trocar para um profissional ocupado no mesmo horario e recusado")
+    void trocarParaProfissionalOcupadoERecusado() {
+      Agendamento a = agendamentoExistente(StatusAgendamento.CONFIRMED, LocalDate.of(2030, 6, 10), "10:00", "10:30");
+      stubEdicaoDeHorario(a);
+      UUID colegaId = colegaAtivoQueAceitaAgendamento();
+      Agendamento doColega = agendamentoExistente(StatusAgendamento.CONFIRMED, a.getDate(), "10:00", "10:30");
+      when(agendamentoRepository.listActiveByProfessionalAndDateExcluding(
+              eq(tenantId), eq(colegaId), eq(a.getDate()), eq(a.getId()), anyList()))
+          .thenReturn(List.of(doColega));
+
+      assertThatThrownBy(() -> service.atualizar(a.getId(), trocarSoOProfissional(colegaId)))
+          .isInstanceOf(RuntimeException.class)
+          .hasMessageContaining("Profissional indisponivel");
+
+      verify(agendamentoRepository, never()).save(any(Agendamento.class));
+    }
+
+    @Test
+    @DisplayName("trocar para profissional de folga especial e recusado")
+    void trocarParaProfissionalDeFolgaEspecialERecusado() {
+      Agendamento a = agendamentoExistente(StatusAgendamento.CONFIRMED, LocalDate.of(2030, 6, 10), "10:00", "10:30");
+      stubEdicaoDeHorario(a);
+      UUID colegaId = colegaAtivoQueAceitaAgendamento();
+      when(specialClosureService.isClosedAt(eq(tenantId), eq(colegaId), any(), any(), any())).thenReturn(true);
+
+      assertThatThrownBy(() -> service.atualizar(a.getId(), trocarSoOProfissional(colegaId)))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessage("Salao ou profissional com fechamento especial no horario informado");
+
+      verify(agendamentoRepository, never()).save(any(Agendamento.class));
+    }
+
+    @Test
+    @DisplayName("trocar para profissional que nao trabalha naquele dia e recusado")
+    void trocarParaProfissionalForaDaJornadaERecusado() {
+      Agendamento a = agendamentoExistente(StatusAgendamento.CONFIRMED, LocalDate.of(2030, 6, 10), "10:00", "10:30");
+      stubEdicaoDeHorario(a);
+      UUID colegaId = colegaAtivoQueAceitaAgendamento();
+      // 10/06/2030 e uma segunda-feira (dia ISO 1): o colega esta de folga nesse dia.
+      br.com.phdigitalcode.azzo.agenda.pro.entity.ProfissionalWorkingHour folga =
+          new br.com.phdigitalcode.azzo.agenda.pro.entity.ProfissionalWorkingHour();
+      folga.setDayOfWeek(1);
+      folga.setWorking(false);
+      when(profissionalWorkingHourRepository.listByProfessional(tenantId, colegaId)).thenReturn(List.of(folga));
+
+      assertThatThrownBy(() -> service.atualizar(a.getId(), trocarSoOProfissional(colegaId)))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessage("O profissional nao atende neste horario");
+
+      verify(agendamentoRepository, never()).save(any(Agendamento.class));
+    }
+
+    @Test
+    @DisplayName("trocar para profissional que nao atende o servico e recusado")
+    void trocarParaProfissionalQueNaoAtendeOServicoERecusado() {
+      Agendamento a = agendamentoExistente(StatusAgendamento.CONFIRMED, LocalDate.of(2030, 6, 10), "10:00", "10:30");
+      stubEdicaoDeHorario(a);
+      UUID colegaId = colegaAtivoQueAceitaAgendamento();
+      Servico s = servico(30, "100.00");
+      Profissional somenteOriginal = new Profissional();
+      somenteOriginal.setId(professionalId);
+      s.getProfissionais().add(somenteOriginal);
+      when(servicoRepository.findByIdAndTenantId(serviceId, tenantId)).thenReturn(Optional.of(s));
+
+      assertThatThrownBy(() -> service.atualizar(a.getId(), trocarSoOProfissional(colegaId)))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessage("Profissional nao atende um ou mais servicos do agendamento");
+
+      verify(agendamentoRepository, never()).save(any(Agendamento.class));
+    }
+
+    @Test
+    @DisplayName("editar sem trocar o profissional (so notas) nao dispara essas validacoes")
+    void semTrocarOProfissionalNaoRevalida() {
+      Agendamento a = agendamentoExistente(StatusAgendamento.CONFIRMED, LocalDate.of(2030, 6, 10), "10:00", "10:30");
+      stubEdicaoDeHorario(a);
+      AppointmentUpdateRequest req = new AppointmentUpdateRequest();
+      req.professionalId = professionalId.toString(); // o mesmo de agora
+      req.notes = "so a nota";
+
+      service.atualizar(a.getId(), req);
+
+      verify(agendamentoQueryRepository, never()).lockProfessionalDateForWrite(any(), any(), any());
+      verify(specialClosureService, never()).isClosedAt(any(), any(), any(), any(), any());
+    }
+
     @Test
     @DisplayName("agendamento concluido nao pode ser realocado")
     void naoRealocaConcluido() {

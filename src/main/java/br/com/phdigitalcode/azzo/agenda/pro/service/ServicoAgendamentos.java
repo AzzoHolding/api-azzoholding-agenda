@@ -493,30 +493,7 @@ public class ServicoAgendamentos {
       throw new IllegalArgumentException(NAO_RECEBE_AGENDAMENTO);
     }
 
-    List<Servico> services =
-        agendamento.getItems().stream()
-            .map(
-                item ->
-                    item.getService() != null
-                        ? item.getService()
-                        : servicoRepository
-                            .findByIdAndTenantId(item.getServiceId(), tenantId)
-                            .orElse(null))
-            .filter(Objects::nonNull)
-            .toList();
-    if (services.isEmpty()) throw new IllegalArgumentException("Servico nao encontrado");
-    boolean profissionalApto =
-        services.stream()
-            .allMatch(
-                servico ->
-                    servico.getProfissionais() == null
-                        || servico.getProfissionais().isEmpty()
-                        || servico.getProfissionais().stream()
-                            .anyMatch(p -> p.getId().equals(novoProfessionalId)));
-    if (!profissionalApto) {
-      throw new IllegalArgumentException(
-          "Profissional nao atende um ou mais servicos do agendamento");
-    }
+    exigirQueOProfissionalAtendeOsServicos(tenantId, agendamento, novoProfessionalId);
 
     // Lock da chave de destino (novo profissional + data), o mesmo da criacao: ver o comentario em
     // atualizar (achado AGD-002/BNC-003).
@@ -558,6 +535,38 @@ public class ServicoAgendamentos {
     return toResponse(agendamento);
   }
 
+  /**
+   * O profissional atende TODOS os servicos do agendamento? Servico sem lista de profissionais e de
+   * qualquer um. Usado na realocacao e na edicao que troca o profissional (achado AGD-001).
+   */
+  private void exigirQueOProfissionalAtendeOsServicos(
+      UUID tenantId, Agendamento agendamento, UUID profissionalId) {
+    List<Servico> services =
+        agendamento.getItems().stream()
+            .map(
+                item ->
+                    item.getService() != null
+                        ? item.getService()
+                        : servicoRepository
+                            .findByIdAndTenantId(item.getServiceId(), tenantId)
+                            .orElse(null))
+            .filter(Objects::nonNull)
+            .toList();
+    if (services.isEmpty()) throw new IllegalArgumentException("Servico nao encontrado");
+    boolean profissionalApto =
+        services.stream()
+            .allMatch(
+                servico ->
+                    servico.getProfissionais() == null
+                        || servico.getProfissionais().isEmpty()
+                        || servico.getProfissionais().stream()
+                            .anyMatch(p -> p.getId().equals(profissionalId)));
+    if (!profissionalApto) {
+      throw new IllegalArgumentException(
+          "Profissional nao atende um ou mais servicos do agendamento");
+    }
+  }
+
   @Transactional
   public AgendamentoResponse atualizar(UUID id, AppointmentUpdateRequest req) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
@@ -595,6 +604,7 @@ public class ServicoAgendamentos {
 
     if (req.notes != null) a.setNotes(req.notes.isBlank() ? null : req.notes.trim());
 
+    boolean profissionalMudou = false;
     if (req.professionalId != null && !req.professionalId.isBlank()) {
       UUID novoProfId = UUID.fromString(req.professionalId);
       if (!novoProfId.equals(a.getProfessionalId())) {
@@ -603,6 +613,7 @@ public class ServicoAgendamentos {
         if (prof == null) throw new IllegalArgumentException("Profissional nao encontrado ou inativo");
         if (!prof.isAcceptsAppointments()) throw new IllegalArgumentException(NAO_RECEBE_AGENDAMENTO);
         a.setProfessionalId(novoProfId);
+        profissionalMudou = true;
       }
     }
 
@@ -662,7 +673,11 @@ public class ServicoAgendamentos {
       }
     }
 
-    if (dateOrTimeChanged) {
+    // Trocar SO o profissional tambem revalida a agenda dele (achado AGD-001, auditoria de
+    // 2026-10-06): antes essas validacoes (funcionamento, fechamento especial, jornada, conflito)
+    // so rodavam se data/hora mudassem, e o agendamento passava para um profissional ocupado, de
+    // folga ou que nao atende o servico, sem nenhum aviso.
+    if (dateOrTimeChanged || profissionalMudou) {
       LocalTime editStart = parseTimeOrThrow(a.getStartTime());
       LocalTime editEnd = parseTimeOrThrow(a.getEndTime());
       if (!tenantOperationalSettingsService.isBusinessOpenAt(
@@ -682,6 +697,11 @@ public class ServicoAgendamentos {
       if (profParaValidar != null
           && !isProfessionalAvailableAt(profParaValidar, a.getDate(), editStart, editEnd)) {
         throw new IllegalArgumentException("O profissional nao atende neste horario");
+      }
+      // Com itens novos no pedido, quem valida o vinculo servico-profissional e o resolveRequestedItems;
+      // sem eles, sao os itens atuais que o novo profissional precisa atender.
+      if (profissionalMudou && (req.items == null || req.items.isEmpty())) {
+        exigirQueOProfissionalAtendeOsServicos(tenantId, a, a.getProfessionalId());
       }
       // Mesmo lock da criacao (achado AGD-002/BNC-003): sem ele, a edicao lia "sem conflito" enquanto
       // uma reserva (link publico ou criar) tomava o mesmo horario do mesmo profissional, e as duas
