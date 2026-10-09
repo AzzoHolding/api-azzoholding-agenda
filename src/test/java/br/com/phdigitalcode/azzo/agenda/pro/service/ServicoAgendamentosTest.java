@@ -41,6 +41,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.dto.SettingsDtos;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.SchedulingDtos.AgendamentoRequest;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.SchedulingDtos.AgendamentoResponse;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.SchedulingDtos.AppointmentCustomerNoteRequest;
+import br.com.phdigitalcode.azzo.agenda.pro.dto.SchedulingDtos.AppointmentCustomerNoteUpdateRequest;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.SchedulingDtos.AppointmentCustomerNoteResponse;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.SchedulingDtos.AppointmentDetailResponse;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.SchedulingDtos.AppointmentManagementReportResponse;
@@ -1379,6 +1380,140 @@ class ServicoAgendamentosTest {
       assertThatThrownBy(() -> service.realocarProfissional(a.getId(), UUID.randomUUID()))
           .isInstanceOf(IllegalArgumentException.class)
           .hasMessage("Nao e permitido realocar agendamento concluido ou cancelado");
+    }
+  }
+
+  // ─── AGD-007: profissional so mexe no PROPRIO agendamento ────────────────────────────────
+
+  @Nested
+  @DisplayName("profissional so acessa o proprio agendamento")
+  class ProfissionalSoMexeNoProprio {
+
+    private static final String NEGADO = "Acesso negado: agendamento nao pertence ao profissional";
+
+    private Agendamento doColega;
+
+    /** Quem esta logado e PROFISSIONAL, e o agendamento e de outro profissional (o colega). */
+    @BeforeEach
+    void profissionalLogadoEAgendamentoDeUmColega() {
+      doColega = agendamentoExistente(StatusAgendamento.CONFIRMED, LocalDate.of(2030, 6, 10), "10:00", "10:30");
+      when(agendamentoRepository.findByIdAndTenantId(doColega.getId(), tenantId))
+          .thenReturn(Optional.of(doColega));
+      lenient().when(authenticatedUser.isProfessional()).thenReturn(true);
+      lenient().when(authenticatedUser.idOuFalhar()).thenReturn(userId);
+      Profissional euMesmo = new Profissional();
+      euMesmo.setId(UUID.randomUUID()); // outro id: nao e o profissional do agendamento
+      lenient()
+          .when(profissionalRepository.findByTenantIdAndUserId(tenantId, userId))
+          .thenReturn(Optional.of(euMesmo));
+    }
+
+    @Test
+    @DisplayName("nao le o detalhe (linha do tempo e notas do cliente) do colega")
+    void naoLeODetalheDoColega() {
+      assertThatThrownBy(() -> service.obterDetalhe(doColega.getId()))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessage(NEGADO);
+    }
+
+    @Test
+    @DisplayName("nao cancela nem conclui o agendamento do colega (concluir gera receita e comissao dele)")
+    void naoMudaOStatusDoColega() {
+      assertThatThrownBy(() -> service.atualizarStatus(doColega.getId(), "CANCELLED"))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessage(NEGADO);
+      assertThatThrownBy(() -> service.atualizarStatus(doColega.getId(), "COMPLETED", "CASH", null))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessage(NEGADO);
+
+      assertThat(doColega.getStatus()).isEqualTo(StatusAgendamento.CONFIRMED);
+      verify(agendamentoRepository, never()).save(any(Agendamento.class));
+    }
+
+    @Test
+    @DisplayName("nao edita o agendamento do colega")
+    void naoEditaOAgendamentoDoColega() {
+      AppointmentUpdateRequest req = new AppointmentUpdateRequest();
+      req.notes = "mudei a nota do colega";
+
+      assertThatThrownBy(() -> service.atualizar(doColega.getId(), req))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessage(NEGADO);
+
+      assertThat(doColega.getNotes()).isNotEqualTo("mudei a nota do colega");
+    }
+
+    @Test
+    @DisplayName("nao exclui o agendamento do colega")
+    void naoExcluiOAgendamentoDoColega() {
+      assertThatThrownBy(() -> service.deletar(doColega.getId()))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessage(NEGADO);
+
+      verify(agendamentoRepository, never()).delete(any(Agendamento.class));
+    }
+
+    @Test
+    @DisplayName("nao cria, edita nem apaga nota de atendimento do colega")
+    void naoMexeNasNotasDoColega() {
+      UUID notaId = UUID.randomUUID();
+
+      assertThatThrownBy(
+              () -> service.adicionarNotaCliente(doColega.getId(), new AppointmentCustomerNoteRequest()))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessage(NEGADO);
+      assertThatThrownBy(
+              () ->
+                  service.atualizarNotaCliente(
+                      doColega.getId(), notaId, new AppointmentCustomerNoteUpdateRequest()))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessage(NEGADO);
+      assertThatThrownBy(() -> service.deletarNotaCliente(doColega.getId(), notaId))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessage(NEGADO);
+
+      verify(appointmentCustomerNoteRepository, never()).save(any());
+      verify(appointmentCustomerNoteRepository, never()).delete(any());
+    }
+
+    @Test
+    @DisplayName("profissional sem cadastro de profissional tambem e barrado")
+    void semCadastroDeProfissionalEBarrado() {
+      when(profissionalRepository.findByTenantIdAndUserId(tenantId, userId)).thenReturn(Optional.empty());
+
+      assertThatThrownBy(() -> service.obterDetalhe(doColega.getId()))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessage(NEGADO);
+    }
+
+    @Test
+    @DisplayName("no PROPRIO agendamento o profissional segue editando")
+    void noProprioAgendamentoPassa() {
+      Profissional euMesmo = new Profissional();
+      euMesmo.setId(doColega.getProfessionalId()); // agora o agendamento e dele
+      when(profissionalRepository.findByTenantIdAndUserId(tenantId, userId)).thenReturn(Optional.of(euMesmo));
+      lenient().when(clienteRepository.findByIdAndTenantId(clientId, tenantId)).thenReturn(Optional.empty());
+      lenient().when(servicoRepository.findByIdAndTenantId(serviceId, tenantId)).thenReturn(Optional.empty());
+      AppointmentUpdateRequest req = new AppointmentUpdateRequest();
+      req.notes = "cliente prefere agua sem gas";
+
+      service.atualizar(doColega.getId(), req);
+
+      assertThat(doColega.getNotes()).isEqualTo("cliente prefere agua sem gas");
+    }
+
+    @Test
+    @DisplayName("dono e recepcao (nao-profissional) nao sao afetados")
+    void quemNaoEProfissionalNaoEAfetado() {
+      when(authenticatedUser.isProfessional()).thenReturn(false);
+      lenient().when(clienteRepository.findByIdAndTenantId(clientId, tenantId)).thenReturn(Optional.empty());
+      lenient().when(servicoRepository.findByIdAndTenantId(serviceId, tenantId)).thenReturn(Optional.empty());
+      AppointmentUpdateRequest req = new AppointmentUpdateRequest();
+      req.notes = "ajuste da recepcao";
+
+      service.atualizar(doColega.getId(), req);
+
+      assertThat(doColega.getNotes()).isEqualTo("ajuste da recepcao");
     }
   }
 
