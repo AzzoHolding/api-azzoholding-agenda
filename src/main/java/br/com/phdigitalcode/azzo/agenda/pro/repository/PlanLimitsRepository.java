@@ -36,6 +36,22 @@ public class PlanLimitsRepository {
   @PersistenceContext
   private EntityManager entityManager;
 
+  /**
+   * Serializa, por salao, quem confere o limite de profissionais e grava (achado AGD-015).
+   *
+   * <p>A checagem e "conta os ativos e, se couber, grava": duas requisicoes simultaneas (dois
+   * cadastros, ou um cadastro e uma reativacao) contavam o mesmo numero e passavam as duas. O
+   * {@code pg_advisory_xact_lock} e liberado no fim da transacao, entao <b>exige transacao ativa</b>
+   * (quem chama e {@code @Transactional} e grava na mesma transacao).
+   */
+  public void travarLimiteDeProfissionais(UUID tenantId) {
+    if (tenantId == null) return;
+    entityManager
+        .createNativeQuery("SELECT pg_advisory_xact_lock(hashtext(:chave))")
+        .setParameter("chave", "limite-profissionais:" + tenantId)
+        .getSingleResult();
+  }
+
   /** @return {@code Optional.empty()} se nao existe plano ativo para o tenant. */
   public Optional<UUID> findActivePlanProductId(UUID tenantId, Instant now) {
     if (tenantId == null) return Optional.empty();
