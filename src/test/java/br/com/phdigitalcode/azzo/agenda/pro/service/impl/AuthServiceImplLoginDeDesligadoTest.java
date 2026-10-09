@@ -261,4 +261,29 @@ class AuthServiceImplLoginDeDesligadoTest {
     assertThat(usuario.getPasswordHash()).isNotEqualTo(hashAntes);
     verify(refreshTokenService).revokeAllForUser(usuario.getId());
   }
+
+  // ---- SEG-009: redefinir a senha pelo link tambem prova a posse e reivindica o documento -------
+
+  @Test
+  void redefinirASenhaDeUmCadastroPendenteReivindicaODocumento() {
+    linkEmitido();
+    usuario.setEmailConfirmationPending(true);
+    when(acessoDeProfissional.desativado(usuario)).thenReturn(false);
+
+    service.resetPassword(redefinir());
+
+    assertThat(usuario.isEmailConfirmationPending()).isFalse();
+    verify(confirmacaoDeEmail).reivindicarDocumentoDeTrial(usuario.getTenantId());
+  }
+
+  @Test
+  void redefinirASenhaDeQuemJaConfirmouNaoMexeNoDocumento() {
+    linkEmitido();
+    usuario.setEmailConfirmationPending(false);
+    when(acessoDeProfissional.desativado(usuario)).thenReturn(false);
+
+    service.resetPassword(redefinir());
+
+    verify(confirmacaoDeEmail, never()).reivindicarDocumentoDeTrial(any());
+  }
 }

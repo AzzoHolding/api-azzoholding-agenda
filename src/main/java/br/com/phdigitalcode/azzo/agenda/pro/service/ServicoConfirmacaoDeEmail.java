@@ -9,6 +9,7 @@ import java.time.Instant;
 import java.util.Base64;
 import java.util.Locale;
 import java.util.Map;
+import java.util.UUID;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,6 +26,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditEventCommand;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditService;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.EmailJobService;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.EmailVerificationTokenRepository;
+import br.com.phdigitalcode.azzo.agenda.pro.repository.TenantRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.UsuarioRepository;
 
 /**
@@ -51,6 +53,7 @@ public class ServicoConfirmacaoDeEmail {
 
   private final EmailVerificationTokenRepository tokenRepository;
   private final UsuarioRepository usuarioRepository;
+  private final TenantRepository tenantRepository;
   private final EmailJobService emailJobService;
   private final AuditService auditService;
   private final String publicFrontendBaseUrl;
@@ -58,11 +61,13 @@ public class ServicoConfirmacaoDeEmail {
   public ServicoConfirmacaoDeEmail(
       EmailVerificationTokenRepository tokenRepository,
       UsuarioRepository usuarioRepository,
+      TenantRepository tenantRepository,
       EmailJobService emailJobService,
       AuditService auditService,
       @Value("${app.public.booking.base-url:http://localhost:5173}") String publicFrontendBaseUrl) {
     this.tokenRepository = tokenRepository;
     this.usuarioRepository = usuarioRepository;
+    this.tenantRepository = tenantRepository;
     this.emailJobService = emailJobService;
     this.auditService = auditService;
     this.publicFrontendBaseUrl = publicFrontendBaseUrl;
@@ -99,9 +104,34 @@ public class ServicoConfirmacaoDeEmail {
     tokenRepository.save(token);
     tokenRepository.markAllActiveAsUsedByUser(usuario.getId(), agora);
 
+    reivindicarDocumentoDeTrial(usuario.getTenantId());
     auditar(usuario, "AUTH_EMAIL_CONFIRMED");
     LOG.info("E-mail confirmado tenantId={} userId={}", usuario.getTenantId(), usuario.getId());
     return new GenericMessageResponse("E-mail confirmado. Voce ja pode entrar.");
+  }
+
+  /**
+   * Recoloca o documento do periodo gratuito em quem acabou de provar a posse do e-mail (achado
+   * SEG-009). Se o cadastro ficou tempo demais sem confirmar, o documento foi liberado
+   * ({@link ServicoLiberacaoDeDocumentoDeTrial}); confirmar depois o reivindica de novo, SE ninguem o
+   * tiver pego nesse meio tempo. Sem isto, bastava esperar o prazo, confirmar e se cadastrar outra vez
+   * com o mesmo documento para ter um segundo periodo gratuito. Nunca falha a confirmacao.
+   */
+  @Transactional
+  public void reivindicarDocumentoDeTrial(UUID tenantId) {
+    if (tenantId == null) return;
+    tenantRepository
+        .findById(tenantId)
+        .ifPresent(
+            tenant -> {
+              if (tenant.getTrialDocumentHash() != null) return;
+              String documento = tenant.getDocument();
+              if (documento == null || documento.isBlank()) return;
+              String hash = sha256Hex(documento.replaceAll("\\D", ""));
+              if (tenantRepository.existsByTrialDocumentHash(hash)) return; // outro salao ja pegou
+              tenant.setTrialDocumentHash(hash);
+              tenantRepository.save(tenant);
+            });
   }
 
   /** Resposta IGUAL exista ou nao a conta (nao vira verificador de e-mails cadastrados). */

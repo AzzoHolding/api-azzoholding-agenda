@@ -9,6 +9,8 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
@@ -18,17 +20,20 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import br.com.phdigitalcode.azzo.agenda.pro.entity.EmailVerificationToken;
+import br.com.phdigitalcode.azzo.agenda.pro.entity.Tenant;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.Usuario;
 import br.com.phdigitalcode.azzo.agenda.pro.exception.ApiClientErrorException;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditService;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.EmailJobService;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.EmailVerificationTokenRepository;
+import br.com.phdigitalcode.azzo.agenda.pro.repository.TenantRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.UsuarioRepository;
 
 class ServicoConfirmacaoDeEmailTest {
 
   private EmailVerificationTokenRepository tokens;
   private UsuarioRepository usuarios;
+  private TenantRepository tenants;
   private EmailJobService emailJobs;
   private ServicoConfirmacaoDeEmail servico;
   private Usuario usuario;
@@ -37,10 +42,11 @@ class ServicoConfirmacaoDeEmailTest {
   void setUp() {
     tokens = mock(EmailVerificationTokenRepository.class);
     usuarios = mock(UsuarioRepository.class);
+    tenants = mock(TenantRepository.class);
     emailJobs = mock(EmailJobService.class);
     servico =
         new ServicoConfirmacaoDeEmail(
-            tokens, usuarios, emailJobs, mock(AuditService.class), "https://app.azzo.test/");
+            tokens, usuarios, tenants, emailJobs, mock(AuditService.class), "https://app.azzo.test/");
 
     usuario = new Usuario();
     usuario.setId(UUID.randomUUID());
@@ -122,5 +128,91 @@ class ServicoConfirmacaoDeEmailTest {
     servico.reenviar("ana@salao.test");
 
     verify(emailJobs, never()).enqueueEmailVerification(any(), any(), anyString());
+  }
+
+  // ---- SEG-009: o documento liberado volta a quem confirma o e-mail ----------------------------
+
+  private Tenant salaoSemHash(String documento) {
+    Tenant tenant = new Tenant();
+    tenant.setId(usuario.getTenantId());
+    tenant.setDocument(documento);
+    tenant.setTrialDocumentHash(null); // foi liberado pelo prazo
+    when(tenants.findById(usuario.getTenantId())).thenReturn(Optional.of(tenant));
+    return tenant;
+  }
+
+  private static String sha256(String entrada) throws Exception {
+    byte[] bytes = MessageDigest.getInstance("SHA-256").digest(entrada.getBytes(StandardCharsets.UTF_8));
+    StringBuilder sb = new StringBuilder();
+    for (byte b : bytes) sb.append(String.format("%02x", b));
+    return sb.toString();
+  }
+
+  @Test
+  void aoReivindicarODocumentoLiberadoVoltaParaOSalaoSeNinguemOPegou() throws Exception {
+    Tenant tenant = salaoSemHash("12345678909");
+    when(tenants.existsByTrialDocumentHash(sha256("12345678909"))).thenReturn(false);
+
+    servico.reivindicarDocumentoDeTrial(usuario.getTenantId());
+
+    assertThat(tenant.getTrialDocumentHash()).isEqualTo(sha256("12345678909"));
+    verify(tenants).save(tenant);
+  }
+
+  /** Mesma normalizacao do cadastro: so os digitos. */
+  @Test
+  void oDocumentoComMascaraEHasheadoSoPelosDigitos() throws Exception {
+    Tenant tenant = salaoSemHash("123.456.789-09");
+
+    servico.reivindicarDocumentoDeTrial(usuario.getTenantId());
+
+    assertThat(tenant.getTrialDocumentHash()).isEqualTo(sha256("12345678909"));
+  }
+
+  @Test
+  void seOutroSalaoJaPegouODocumentoNaoReivindica() throws Exception {
+    Tenant tenant = salaoSemHash("12345678909");
+    when(tenants.existsByTrialDocumentHash(sha256("12345678909"))).thenReturn(true);
+
+    servico.reivindicarDocumentoDeTrial(usuario.getTenantId());
+
+    assertThat(tenant.getTrialDocumentHash()).isNull();
+    verify(tenants, never()).save(any());
+  }
+
+  @Test
+  void quemJaTemHashNaoEMexido() {
+    Tenant tenant = salaoSemHash("12345678909");
+    tenant.setTrialDocumentHash("hash-que-ja-existia");
+
+    servico.reivindicarDocumentoDeTrial(usuario.getTenantId());
+
+    assertThat(tenant.getTrialDocumentHash()).isEqualTo("hash-que-ja-existia");
+    verify(tenants, never()).save(any());
+  }
+
+  @Test
+  void semDocumentoOuSemSalaoNaoFazNada() {
+    salaoSemHash("  ");
+    servico.reivindicarDocumentoDeTrial(usuario.getTenantId());
+    servico.reivindicarDocumentoDeTrial(null);
+    servico.reivindicarDocumentoDeTrial(UUID.randomUUID()); // salao inexistente
+
+    verify(tenants, never()).save(any());
+  }
+
+  @Test
+  void confirmarOEmailTentaReivindicarODocumento() throws Exception {
+    usuario.setEmailConfirmationPending(true);
+    Tenant tenant = salaoSemHash("12345678909");
+    EmailVerificationToken token = new EmailVerificationToken();
+    token.setUserId(usuario.getId());
+    when(tokens.findActiveByHash(anyString(), any(Instant.class))).thenReturn(Optional.of(token));
+    when(usuarios.findById(usuario.getId())).thenReturn(Optional.of(usuario));
+
+    servico.confirmar("token-do-link");
+
+    assertThat(usuario.isEmailConfirmationPending()).isFalse();
+    assertThat(tenant.getTrialDocumentHash()).isEqualTo(sha256("12345678909"));
   }
 }
