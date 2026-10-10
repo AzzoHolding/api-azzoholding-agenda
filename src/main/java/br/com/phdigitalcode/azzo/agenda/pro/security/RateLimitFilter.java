@@ -54,7 +54,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
       chain.doFilter(request, response);
       return;
     }
-    RateLimitRule rule = rulesByPath.get(request.getRequestURI());
+    RateLimitRule rule = rulesByPath.get(CaminhoDaRequisicao.normalizado(request)); // SEG-002: "/auth/%6Cogin" tambem conta
     if (rule == null) {
       chain.doFilter(request, response);
       return;
