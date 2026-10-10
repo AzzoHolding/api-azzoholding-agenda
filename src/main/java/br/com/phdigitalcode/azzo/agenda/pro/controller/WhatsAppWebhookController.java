@@ -549,6 +549,9 @@ public class WhatsAppWebhookController {
         tenant.getId(), null, CHANNEL_WHATSAPP_DELIVERY_ERROR, fromPhone, message, StatusNotification.FAILED, error, null, 60L * 10L);
   }
 
+  private static final List<String> PALAVRAS_DE_OPT_OUT =
+      List.of("PARE", "STOP", "NAO QUERO", "SAIR", "REMOVER");
+
   private boolean isOptOutMessage(String text) {
     if (text == null) return false;
     String normalized = text.strip().toUpperCase()
@@ -558,7 +561,10 @@ public class WhatsAppWebhookController {
         .replace("Ó", "O").replace("Ô", "O").replace("ó", "O").replace("ô", "O")
         .replace("Ú", "U").replace("ú", "U")
         .replace("Ç", "C").replace("ç", "C");
-    return List.of("PARE", "STOP", "CANCELAR", "NAO QUERO", "SAIR", "REMOVER").contains(normalized);
+    // "CANCELAR" NAO entra aqui (achado INT-006): e a opcao que o proprio lembrete oferece
+    // ("Responda CONFIRMAR ou CANCELAR") e quer dizer "cancelar o horario", nao "nao me mande mais
+    // mensagens". Ela segue para o assistente, que trata o cancelamento do agendamento.
+    return PALAVRAS_DE_OPT_OUT.contains(normalized);
   }
 
   private ProcessingResult processOptOut(Tenant tenant, TenantWhatsAppConfig config, String fromPhone, String providerInboundMessageId) {

@@ -698,4 +698,46 @@ class WhatsAppWebhookControllerTest {
     assertThat(response.status).isEqualTo("ERROR");
     assertThat(response.failed).isEqualTo(1);
   }
+
+  // ---- INT-006: "CANCELAR" e a resposta ao lembrete, nao um pedido de opt-out -------------------
+
+  @Test
+  void cancelarEmRespostaAoLembreteNaoEhOptOutESegueParaOAssistente() {
+    for (String texto : new String[] {"CANCELAR", "cancelar", "Cancelar", "  Cancelar  "}) {
+      WhatsAppWebhookController controller = controllerWithoutSecret();
+      String payload = textMessagePayload("wamid-" + texto.trim(), "5511988887777", texto);
+      Cliente cli = cliente();
+      ChatService.InboundProcessingResult inbound = new ChatService.InboundProcessingResult();
+      inbound.conversation = conversation();
+      inbound.client = cli;
+      when(chatService.processInboundWhatsAppMessage(any(), any(), any(), any(), any())).thenReturn(inbound);
+      when(assistantApiClient.processarMensagem(any(), any(), any(), any(AssistantMessageRequest.class)))
+          .thenReturn(new AssistantMessageResponse("Quer cancelar o horario?"));
+
+      WhatsAppWebhookController.WebhookResponse response = controller.receive(null, payload);
+
+      assertThat(response.status).as(texto).isEqualTo("OK");
+      assertThat(cli.getWhatsappOptOut()).as(texto).isNotEqualTo(Boolean.TRUE);
+    }
+    // Nenhum cadastro foi descadastrado e o texto chegou ao assistente nas quatro variacoes.
+    verify(consentHistoryRepository, never()).save(any());
+    verify(clienteRepository, never()).save(any());
+    verify(assistantApiClient, times(4)).processarMensagem(any(), any(), any(), any(AssistantMessageRequest.class));
+  }
+
+  /** As palavras inequivocas continuam descadastrando, com ou sem acento e caixa. */
+  @Test
+  void asPalavrasInequivocasDeOptOutContinuamFuncionando() {
+    for (String texto : new String[] {"PARE", "stop", "Sair", "remover", "NÃO QUERO"}) {
+      WhatsAppWebhookController controller = controllerWithoutSecret();
+      String payload = textMessagePayload("wamid-" + texto, "5511988887777", texto);
+      Cliente cli = cliente();
+      when(clienteRepository.findFirstByTenantIdAndPhone(tenantId, "5511988887777")).thenReturn(Optional.of(cli));
+
+      controller.receive(null, payload);
+
+      assertThat(cli.getWhatsappOptOut()).as(texto).isTrue();
+    }
+    verify(chatService, never()).processInboundWhatsAppMessage(any(), any(), any(), any(), any());
+  }
 }
