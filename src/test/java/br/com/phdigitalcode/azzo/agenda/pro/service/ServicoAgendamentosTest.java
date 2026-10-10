@@ -820,6 +820,78 @@ class ServicoAgendamentosTest {
           .consumirInsumosPorAgendamento(tenantId, a.getId(), List.of(serviceId));
     }
 
+    /**
+     * AGD-006: o lock vem ANTES da leitura. A segunda requisicao espera na trava e so entao le o
+     * agendamento, ja concluido pela primeira.
+     */
+    @Test
+    @DisplayName("travar o agendamento vem antes de le-lo (duplo clique em Concluir)")
+    void atualizarStatusTravaOAgendamentoAntesDeLer() {
+      Agendamento a = agendamentoExistente(StatusAgendamento.IN_PROGRESS, LocalDate.now(ZONE_BR), "10:00", "10:30");
+      when(agendamentoRepository.findByIdAndTenantId(a.getId(), tenantId)).thenReturn(Optional.of(a));
+      when(appointmentCustomerNoteRepository.countByTenantIdAndAppointmentId(tenantId, a.getId()))
+          .thenReturn(1L);
+      when(comandaRepository.existsByAppointmentIdAndTenantId(a.getId(), tenantId)).thenReturn(true);
+      lenient().when(clienteRepository.findByIdAndTenantId(clientId, tenantId)).thenReturn(Optional.empty());
+      lenient()
+          .when(profissionalRepository.findByIdAndTenantId(professionalId, tenantId))
+          .thenReturn(Optional.empty());
+      lenient().when(servicoRepository.findByIdAndTenantId(serviceId, tenantId)).thenReturn(Optional.empty());
+
+      service.atualizarStatus(a.getId(), "COMPLETED");
+
+      InOrder ordem = inOrder(agendamentoQueryRepository, agendamentoRepository);
+      ordem.verify(agendamentoQueryRepository).lockAppointmentStatusChange(tenantId, a.getId());
+      ordem.verify(agendamentoRepository).findByIdAndTenantId(a.getId(), tenantId);
+    }
+
+    /** A segunda chamada ve COMPLETED e nao refaz receita, comissao nem baixa de insumo. */
+    @Test
+    @DisplayName("concluir duas vezes registra receita, comissao e insumo uma vez so")
+    void concluirDuasVezesNaoDuplicaEfeitos() {
+      Agendamento a = agendamentoExistente(StatusAgendamento.IN_PROGRESS, LocalDate.now(ZONE_BR), "10:00", "10:30");
+      when(agendamentoRepository.findByIdAndTenantId(a.getId(), tenantId)).thenReturn(Optional.of(a));
+      when(appointmentCustomerNoteRepository.countByTenantIdAndAppointmentId(tenantId, a.getId()))
+          .thenReturn(1L);
+      when(comandaRepository.existsByAppointmentIdAndTenantId(a.getId(), tenantId)).thenReturn(false);
+      when(transacaoRepository.existsByTenantAndAppointmentAndType(
+              tenantId, a.getId(), TipoTransacao.INCOME))
+          .thenReturn(false);
+      when(servicoRepository.findByIdAndTenantId(serviceId, tenantId))
+          .thenReturn(Optional.of(servico(30, "100.00")));
+      when(transactionCategoryRepository.findByTenantAndName(tenantId, "APPOINTMENT"))
+          .thenReturn(Optional.empty());
+      when(transactionCategoryRepository.save(any()))
+          .thenAnswer(
+              invocation -> {
+                var c = (br.com.phdigitalcode.azzo.agenda.pro.entity.TransactionCategory)
+                    invocation.getArgument(0);
+                c.setId(UUID.randomUUID());
+                return c;
+              });
+      lenient().when(clienteRepository.findByIdAndTenantId(clientId, tenantId)).thenReturn(Optional.empty());
+      lenient()
+          .when(profissionalRepository.findByIdAndTenantId(professionalId, tenantId))
+          .thenReturn(Optional.empty());
+      lenient()
+          .when(comandaRepository.findFirstByAppointmentAndTenant(a.getId(), tenantId))
+          .thenReturn(Optional.empty());
+
+      service.atualizarStatus(a.getId(), "COMPLETED");
+      // Segunda requisicao, ja depois da trava: ve o agendamento concluido. Recusar a transicao ou
+      // aceitar sem efeito e igualmente correto; o que nao pode e refazer os efeitos.
+      try {
+        service.atualizarStatus(a.getId(), "COMPLETED");
+      } catch (IllegalArgumentException esperado) {
+        // transicao COMPLETED -> COMPLETED recusada
+      }
+
+      verify(transacaoRepository, times(1)).save(any(Transacao.class));
+      verify(commissionService, times(1))
+          .registerServiceCommissionsIfApplicable(any(), any(), any(), any(), any());
+      verify(estoqueMovimentacaoService, times(1)).consumirInsumosPorAgendamento(any(), any(), any());
+    }
+
     @Test
     @DisplayName("comanda vinculada assume a receita: concluir nao lanca transacao duplicada")
     void concluirComComandaVinculadaNaoDuplicaReceita() {

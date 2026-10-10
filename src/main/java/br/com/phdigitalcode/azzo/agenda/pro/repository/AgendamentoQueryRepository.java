@@ -69,6 +69,26 @@ public class AgendamentoQueryRepository {
         .getSingleResult();
   }
 
+  /**
+   * Serializa as mudancas de status de UM agendamento (achado AGD-006, auditoria de 2026-10-06).
+   *
+   * <p>{@code atualizarStatus} le o agendamento sem lock e depois registra receita, comissao e baixa
+   * de insumo. Duas chamadas simultaneas (duplo clique em "Concluir", rede lenta, dois operadores)
+   * liam as duas {@code IN_PROGRESS}, passavam as duas na validacao e registravam os efeitos duas
+   * vezes: receita inflada, comissao em dobro e estoque baixado duas vezes. Com este lock a segunda
+   * transacao espera a primeira commitar e so entao le o agendamento, ja {@code COMPLETED}.
+   *
+   * <p>Chamar ANTES de carregar o agendamento. <b>Exige transacao ativa</b>: o lock e liberado no fim
+   * da transacao ({@code pg_advisory_xact_lock}).
+   */
+  public void lockAppointmentStatusChange(UUID tenantId, UUID appointmentId) {
+    if (tenantId == null || appointmentId == null) return;
+    entityManager
+        .createNativeQuery("SELECT pg_advisory_xact_lock(hashtext(:lockKey))")
+        .setParameter("lockKey", "agendamento-status:" + tenantId + ":" + appointmentId)
+        .getSingleResult();
+  }
+
   @SuppressWarnings("unchecked")
   public List<Object[]> contarPorDiaNoMes(UUID tenantId, int mes, int ano) {
     return entityManager

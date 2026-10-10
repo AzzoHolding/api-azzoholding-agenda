@@ -380,6 +380,9 @@ public class ServicoAgendamentos {
   public AgendamentoResponse atualizarStatus(
       UUID id, String status, String paymentMethod, String conclusionAction) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    // AGD-006: serializa por agendamento ANTES de ler. Sem isto, dois "Concluir" simultaneos liam o
+    // mesmo status e registravam receita, comissao e baixa de insumo duas vezes.
+    agendamentoQueryRepository.lockAppointmentStatusChange(tenantId, id);
     Agendamento a =
         agendamentoRepository
             .findByIdAndTenantId(id, tenantId)
