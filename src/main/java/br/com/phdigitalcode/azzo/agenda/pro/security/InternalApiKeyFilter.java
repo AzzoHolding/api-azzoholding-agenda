@@ -28,10 +28,9 @@ import jakarta.servlet.http.HttpServletResponse;
  * chamadas, exatamente como no original, onde {@code quarkus.http.auth.permission.public.paths}
  * inclui {@code /api/v1/internal/*}) — quem autentica e este filtro.
  *
- * <p>O original le o path via {@code UriInfo.getPath()}, que no RESTEasy pode ou nao vir com a
- * barra inicial (o {@code LicenseFilter} do original normaliza justamente por isso). Aqui o path
- * vem de {@code HttpServletRequest.getRequestURI()}, que sempre inclui a barra inicial e o
- * context path — dai o context path ser descontado antes da comparacao de prefixo.
+ * <p>O path e comparado NORMALIZADO ({@link CaminhoDaRequisicao}): decodificado, sem context path e
+ * sem parametros de caminho. A URI bruta deixava passar {@code /api/v1/%69nternal/...} sem a chave,
+ * enquanto o roteador a entregava ao mesmo controller (achado SEG-001).
  */
 @Component
 public class InternalApiKeyFilter extends OncePerRequestFilter {
@@ -56,8 +55,9 @@ public class InternalApiKeyFilter extends OncePerRequestFilter {
   @Override
   protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
       throws ServletException, IOException {
-    String path = resolvePath(request);
-    if (!path.startsWith(INTERNAL_PATH_PREFIX)) {
+    // Caminho como o roteador o ve (SEG-001): "/api/v1/%69nternal/..." tambem exige a chave.
+    String path = CaminhoDaRequisicao.normalizado(request);
+    if (!(path + "/").startsWith(INTERNAL_PATH_PREFIX)) {
       filterChain.doFilter(request, response);
       return;
     }
@@ -77,15 +77,6 @@ public class InternalApiKeyFilter extends OncePerRequestFilter {
 
     request.setAttribute(ATRIBUTO_CHAMADA_INTERNA, Boolean.TRUE);
     filterChain.doFilter(request, response);
-  }
-
-  private static String resolvePath(HttpServletRequest request) {
-    String uri = request.getRequestURI();
-    String contextPath = request.getContextPath();
-    if (contextPath != null && !contextPath.isEmpty() && uri.startsWith(contextPath)) {
-      uri = uri.substring(contextPath.length());
-    }
-    return uri.startsWith("/") ? uri : "/" + uri;
   }
 
   private static void reject(HttpServletResponse response, String message) throws IOException {

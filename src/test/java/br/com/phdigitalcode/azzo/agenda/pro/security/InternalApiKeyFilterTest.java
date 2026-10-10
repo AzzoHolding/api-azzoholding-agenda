@@ -164,4 +164,40 @@ class InternalApiKeyFilterTest {
     filter.doFilter(errada, new MockHttpServletResponse(), chain);
     assertThat(errada.getAttribute(InternalApiKeyFilter.ATRIBUTO_CHAMADA_INTERNA)).isNull();
   }
+
+  // ---- SEG-001: o caminho codificado nao pode escapar da chave interna ---------------------------
+
+  @Test
+  @DisplayName("caminho com letra em percent-encoding (%69nternal) tambem exige a chave")
+  void caminhoCodificadoExigeAChave() throws Exception {
+    for (String uri : new String[] {
+        "/api/v1/%69nternal/assistant/clients/search",
+        "/api/v1/internal%2Fplans",
+        "/api/v1/%69%6e%74ernal/plans/todos",
+        "/api/v1/internal;x=1/plans/todos",
+        "/api/v1/internal/",
+        "/api/v1/./internal/plans/todos"}) {
+      MockHttpServletResponse resposta = new MockHttpServletResponse();
+      FilterChain cadeia = mock(FilterChain.class);
+
+      filter.doFilter(request(uri), resposta, cadeia);
+
+      // "%2F" nao e decodificado em "/" (o firewall do Spring rejeita antes); so nao pode virar bypass
+      if (uri.contains("%2F")) continue;
+      verify(cadeia, never()).doFilter(any(), any());
+      assertThat(resposta.getStatus()).as(uri).isEqualTo(401);
+    }
+  }
+
+  @Test
+  @DisplayName("caminho codificado com a chave certa passa e fica marcado como interno")
+  void caminhoCodificadoComChaveCertaPassa() throws Exception {
+    MockHttpServletRequest request = request("/api/v1/%69nternal/plans/todos");
+    request.addHeader("X-Internal-Api-Key", CHAVE);
+
+    filter.doFilter(request, response, chain);
+
+    verify(chain, times(1)).doFilter(any(), any());
+    assertThat(request.getAttribute(InternalApiKeyFilter.ATRIBUTO_CHAMADA_INTERNA)).isEqualTo(Boolean.TRUE);
+  }
 }
