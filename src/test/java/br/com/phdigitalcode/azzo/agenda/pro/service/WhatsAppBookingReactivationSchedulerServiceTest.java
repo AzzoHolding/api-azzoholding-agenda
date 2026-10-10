@@ -64,6 +64,7 @@ class WhatsAppBookingReactivationSchedulerServiceTest {
   private TenantReactivationConfigRepository tenantReactivationConfigRepository;
   private ReactivationSendLogRepository reactivationSendLogRepository;
   private AssistantApiClient assistantApiClient;
+  private br.com.phdigitalcode.azzo.agenda.pro.repository.ChatMessageRepository chatMessageRepository;
   private WhatsAppBookingReactivationSchedulerService service;
 
   @BeforeEach
@@ -81,14 +82,18 @@ class WhatsAppBookingReactivationSchedulerServiceTest {
     tenantReactivationConfigRepository = mock(TenantReactivationConfigRepository.class);
     reactivationSendLogRepository = mock(ReactivationSendLogRepository.class);
     assistantApiClient = mock(AssistantApiClient.class);
+    chatMessageRepository = mock(br.com.phdigitalcode.azzo.agenda.pro.repository.ChatMessageRepository.class);
 
     service = new WhatsAppBookingReactivationSchedulerService(
         whatsAppBookingReactivationService, cycleRepository, tenantWhatsAppConfigRepository,
         tenantTelegramConfigRepository, clienteRepository, chatConversationRepository,
         communicationChannelDispatcher, customerCommunicationChannelResolver, chatService,
         tenantOperationalSettingsService, tenantReactivationConfigRepository,
-        reactivationSendLogRepository, assistantApiClient);
+        reactivationSendLogRepository, assistantApiClient, chatMessageRepository);
 
+    // INT-002: por padrao o cliente escreveu ha 10 minutos, ou seja, a janela de 24 h esta aberta.
+    when(chatMessageRepository.ultimaMensagemRecebidaNoWhatsApp(any(), any()))
+        .thenReturn(Optional.of(Instant.now().minusSeconds(600)));
     when(tenantOperationalSettingsService.isReactivationEnabled(tenantId)).thenReturn(true);
     when(tenantOperationalSettingsService.allowsReactivationAttemptNumber(eq(tenantId), any())).thenReturn(true);
     when(tenantOperationalSettingsService.allowsReactivationAt(eq(tenantId), any())).thenReturn(true);
@@ -386,5 +391,99 @@ class WhatsAppBookingReactivationSchedulerServiceTest {
 
     assertThat(result).isEqualTo(1);
     verify(whatsAppBookingReactivationService).markAttemptFailed(eq(cycle), any(), eq("provider timeout"));
+  }
+
+  // ---- INT-002: texto livre so chega dentro da janela de 24 h do WhatsApp ----------------------------
+
+  private void naoHaMensagemDoClienteHa(java.time.Duration tempo) {
+    when(chatMessageRepository.ultimaMensagemRecebidaNoWhatsApp(any(), any()))
+        .thenReturn(Optional.of(Instant.now().minus(tempo)));
+  }
+
+  private void verificaQueNadaFoiEnviadoNemContabilizado(WhatsAppBookingReactivationCycleEntity cycle) {
+    verify(communicationChannelDispatcher, never()).sendText(any());
+    verify(whatsAppBookingReactivationService, never()).createAttempt(any(), any());
+    verify(whatsAppBookingReactivationService, never()).markAttemptSent(any(), any(), any());
+    // Nao entra no log de envios: gastaria o limite mensal do cliente por uma mensagem que nao chegou.
+    verify(reactivationSendLogRepository, never()).save(any(ReactivationSendLogEntity.class));
+    verify(whatsAppBookingReactivationService).cancelCycle(cycle, "OUT_OF_24H_WINDOW");
+  }
+
+  @Test
+  void clienteQueNaoEscreveHaMaisDeUmDiaNaoRecebeTextoLivreECicloEEncerradoComOMotivo() {
+    WhatsAppBookingReactivationCycleEntity cycle = cycle();
+    cycle.setNextAttemptNumber(2); // a de +4 dias, o caso do achado
+    Cliente cliente = cliente(cycle.getClientId());
+    stubHappyPathCollaborators(cliente);
+    naoHaMensagemDoClienteHa(java.time.Duration.ofDays(4));
+    when(cycleRepository.findById(cycle.getId())).thenReturn(Optional.of(cycle));
+
+    int result = service.processCycle(cycle.getId());
+
+    assertThat(result).isEqualTo(1);
+    verificaQueNadaFoiEnviadoNemContabilizado(cycle);
+  }
+
+  @Test
+  void clienteQueNuncaEscreveuNoWhatsAppTambemNaoRecebe() {
+    WhatsAppBookingReactivationCycleEntity cycle = cycle();
+    Cliente cliente = cliente(cycle.getClientId());
+    stubHappyPathCollaborators(cliente);
+    when(chatMessageRepository.ultimaMensagemRecebidaNoWhatsApp(any(), any())).thenReturn(Optional.empty());
+    when(cycleRepository.findById(cycle.getId())).thenReturn(Optional.of(cycle));
+
+    service.processCycle(cycle.getId());
+
+    verificaQueNadaFoiEnviadoNemContabilizado(cycle);
+  }
+
+  /** A margem: a Meta conta 24 h, usamos 23 h para nao apostar no limite. */
+  @Test
+  void a23hExatasDeMargemAJanelaJaEstaFechada() {
+    WhatsAppBookingReactivationCycleEntity cycle = cycle();
+    Cliente cliente = cliente(cycle.getClientId());
+    stubHappyPathCollaborators(cliente);
+    naoHaMensagemDoClienteHa(java.time.Duration.ofHours(23).plusMinutes(1));
+    when(cycleRepository.findById(cycle.getId())).thenReturn(Optional.of(cycle));
+
+    service.processCycle(cycle.getId());
+
+    verificaQueNadaFoiEnviadoNemContabilizado(cycle);
+  }
+
+  @Test
+  void clienteQueEscreveuHa22hAindaRecebe() {
+    WhatsAppBookingReactivationCycleEntity cycle = cycle();
+    Cliente cliente = cliente(cycle.getClientId());
+    stubHappyPathCollaborators(cliente);
+    naoHaMensagemDoClienteHa(java.time.Duration.ofHours(22));
+    when(cycleRepository.findById(cycle.getId())).thenReturn(Optional.of(cycle));
+
+    service.processCycle(cycle.getId());
+
+    verify(communicationChannelDispatcher).sendText(any());
+    verify(whatsAppBookingReactivationService).markAttemptSent(eq(cycle), any(), eq("provider-msg-1"));
+    verify(whatsAppBookingReactivationService, never()).cancelCycle(any(), eq("OUT_OF_24H_WINDOW"));
+  }
+
+  /** A regra das 24 h e do WhatsApp: o Telegram nao tem essa janela. */
+  @Test
+  void telegramNaoTemJanelaDe24h() {
+    WhatsAppBookingReactivationCycleEntity cycle = cycle();
+    Cliente cliente = cliente(cycle.getClientId());
+    stubHappyPathCollaborators(cliente);
+    when(customerCommunicationChannelResolver.resolve(eq(tenantId), eq(cliente), org.mockito.ArgumentMatchers.nullable(br.com.phdigitalcode.azzo.agenda.pro.entity.ChatConversationEntity.class), anyString(), anyString()))
+        .thenReturn(new CustomerCommunicationChannelResolver.ResolvedChannel(
+            br.com.phdigitalcode.azzo.agenda.pro.entity.enums.ChatChannel.TELEGRAM, "123456", null));
+    TenantTelegramConfig telegram = new TenantTelegramConfig();
+    telegram.setTelegramEnabled(true);
+    when(tenantTelegramConfigRepository.findByTenantId(tenantId)).thenReturn(telegram);
+    when(chatMessageRepository.ultimaMensagemRecebidaNoWhatsApp(any(), any())).thenReturn(Optional.empty());
+    when(cycleRepository.findById(cycle.getId())).thenReturn(Optional.of(cycle));
+
+    service.processCycle(cycle.getId());
+
+    verify(communicationChannelDispatcher).sendText(any());
+    verify(whatsAppBookingReactivationService, never()).cancelCycle(any(), eq("OUT_OF_24H_WINDOW"));
   }
 }
