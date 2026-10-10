@@ -17,6 +17,15 @@ public class AuthCookieService {
 
   public static final String ACCESS_TOKEN_COOKIE = "AZZO_ACCESS_TOKEN";
   public static final String REFRESH_TOKEN_COOKIE = "AZZO_REFRESH_TOKEN";
+  /**
+   * Sinal de que ESTE navegador tem uma sessao renovavel. NAO e credencial: valor fixo, sem dado de
+   * ninguem. Existe porque o cookie de acesso vive 15 min e o de refresh so viaja em
+   * {@code /api/v1/auth}: o servidor das paginas nao consegue distinguir "nunca entrou" de "entrou
+   * ha 20 minutos" e montava o painel para quem nao esta logado, que so depois ia ao login. Com este
+   * cookie (path {@code /}, mesma validade do refresh) o servidor da pagina sabe quando mandar
+   * direto ao login. Legivel pelo servidor da pagina; o JavaScript nao precisa dele.
+   */
+  public static final String SESSION_HINT_COOKIE = "AZZO_SESSAO";
 
   @Value("${app.auth.cookie.secure:true}")
   private boolean secureCookie;
@@ -41,6 +50,14 @@ public class AuthCookieService {
 
   public ResponseCookie buildRefreshTokenCookie(String token, long maxAgeSeconds) {
     return baseBuilder(REFRESH_TOKEN_COOKIE, token, "/api/v1/auth", maxAgeSeconds).build();
+  }
+
+  public ResponseCookie buildSessionHintCookie(long maxAgeSeconds) {
+    return baseBuilder(SESSION_HINT_COOKIE, "1", "/", maxAgeSeconds).httpOnly(false).build();
+  }
+
+  public ResponseCookie clearSessionHintCookie() {
+    return baseBuilder(SESSION_HINT_COOKIE, "", "/", 0).httpOnly(false).build();
   }
 
   public ResponseCookie clearAccessTokenCookie() {

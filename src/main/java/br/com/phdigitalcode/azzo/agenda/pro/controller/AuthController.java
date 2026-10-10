@@ -149,6 +149,7 @@ public class AuthController {
       return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
           .header(HttpHeaders.SET_COOKIE, authCookieService.clearAccessTokenCookie().toString())
           .header(HttpHeaders.SET_COOKIE, authCookieService.clearRefreshTokenCookie().toString())
+          .header(HttpHeaders.SET_COOKIE, authCookieService.clearSessionHintCookie().toString())
           .body(Map.of("message", "Sessao expirada. Faca login novamente."));
     }
   }
@@ -160,6 +161,7 @@ public class AuthController {
     return ResponseEntity.noContent()
         .header(HttpHeaders.SET_COOKIE, authCookieService.clearAccessTokenCookie().toString())
         .header(HttpHeaders.SET_COOKIE, authCookieService.clearRefreshTokenCookie().toString())
+        .header(HttpHeaders.SET_COOKIE, authCookieService.clearSessionHintCookie().toString())
         .build();
   }
 
@@ -211,6 +213,11 @@ public class AuthController {
     return ResponseEntity.ok()
         .header(HttpHeaders.SET_COOKIE, accessCookie.toString())
         .header(HttpHeaders.SET_COOKIE, refreshCookie.toString())
+        .header(
+            HttpHeaders.SET_COOKIE,
+            authCookieService
+                .buildSessionHintCookie(refreshTokenService.refreshTokenExpiresInSeconds())
+                .toString())
         .body(payload);
   }
 }
