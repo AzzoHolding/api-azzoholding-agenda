@@ -16,14 +16,18 @@ import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import br.com.phdigitalcode.azzo.agenda.pro.dto.SalonDtos;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.Tenant;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.TenantAddress;
 import br.com.phdigitalcode.azzo.agenda.pro.exception.ApiClientErrorException;
+import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditEventCommand;
+import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditService;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.MinioStorageService;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.TenantAddressRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.TenantRepository;
+import br.com.phdigitalcode.azzo.agenda.pro.security.AuthenticatedUser;
 import br.com.phdigitalcode.azzo.agenda.pro.security.ContextoTenant;
 
 /**
@@ -40,6 +44,7 @@ class ServicoSalonProfileTest {
   private TenantOperationalSettingsService tenantOperationalSettingsService;
   private PublicBookingUrlService publicBookingUrlService;
   private MinioStorageService minioStorageService;
+  private AuditService auditService;
   private ServicoSalonProfile service;
 
   @BeforeEach
@@ -50,6 +55,7 @@ class ServicoSalonProfileTest {
     tenantOperationalSettingsService = mock(TenantOperationalSettingsService.class);
     publicBookingUrlService = mock(PublicBookingUrlService.class);
     minioStorageService = mock(MinioStorageService.class);
+    auditService = mock(AuditService.class);
     service =
         new ServicoSalonProfile(
             contextoTenant,
@@ -57,7 +63,9 @@ class ServicoSalonProfileTest {
             tenantAddressRepository,
             tenantOperationalSettingsService,
             publicBookingUrlService,
-            minioStorageService);
+            minioStorageService,
+            auditService,
+            mock(AuthenticatedUser.class));
   }
 
   private Tenant tenant(UUID tenantId) {
@@ -350,5 +358,122 @@ class ServicoSalonProfileTest {
     SalonDtos.SalonProfile profile = service.obterPrivado();
 
     assertThat(profile.logoUrl).isNull();
+  }
+
+  // ---- SEG-006: endereco de agendamento (slug) validado ---------------------------------------------
+
+  private Tenant salaoComSlug(String slugAtual) {
+    Tenant tenant = tenantComDocumento(UUID.randomUUID(), "12345678909", 0);
+    tenant.setSlug(slugAtual);
+    return tenant;
+  }
+
+  private SalonDtos.SalonProfile pedidoComSlug(String slug) {
+    SalonDtos.SalonProfile request = pedidoComDocumento("12345678909");
+    request.salonSlug = slug;
+    return request;
+  }
+
+  @Test
+  void slugValidoENaoUsadoPorOutroSalaoEGravado() {
+    Tenant tenant = salaoComSlug("studio-bella-a1b2c3");
+    when(tenantRepository.findBySlug("studio-bella")).thenReturn(Optional.empty());
+
+    service.atualizarPrivado(pedidoComSlug("studio-bella"));
+
+    assertThat(tenant.getSlug()).isEqualTo("studio-bella");
+  }
+
+  @Test
+  void slugEmMaiusculaEComEspacosNasPontasEhNormalizado() {
+    Tenant tenant = salaoComSlug("antigo");
+    when(tenantRepository.findBySlug("studio-bella")).thenReturn(Optional.empty());
+
+    service.atualizarPrivado(pedidoComSlug("  Studio-Bella "));
+
+    assertThat(tenant.getSlug()).isEqualTo("studio-bella");
+  }
+
+  @Test
+  void slugForaDoFormatoEhRecusadoESalaoFicaComOAntigo() {
+    String[] ruins = {
+      "ab", "a".repeat(81), "com espaco", "acentuaçao", "-comeca", "termina-", "duplo--hifen",
+      "com_underline", "pon.to", "barra/x", "<script>", "../admin"
+    };
+    for (String ruim : ruins) {
+      Tenant tenant = salaoComSlug("antigo");
+
+      assertThatThrownBy(() -> service.atualizarPrivado(pedidoComSlug(ruim)))
+          .as(ruim)
+          .isInstanceOf(ApiClientErrorException.class)
+          .hasMessageContaining("Endereco de agendamento invalido");
+      assertThat(tenant.getSlug()).as(ruim).isEqualTo("antigo");
+    }
+    verify(tenantRepository, never()).save(any());
+  }
+
+  @Test
+  void slugJaUsadoPorOutroSalaoDa409ComMensagemClara() {
+    salaoComSlug("antigo");
+    Tenant outro = new Tenant();
+    outro.setId(UUID.randomUUID());
+    outro.setSlug("studio-bella");
+    when(tenantRepository.findBySlug("studio-bella")).thenReturn(Optional.of(outro));
+
+    assertThatThrownBy(() -> service.atualizarPrivado(pedidoComSlug("studio-bella")))
+        .isInstanceOf(ApiClientErrorException.class)
+        .hasMessageContaining("ja esta em uso por outro salao");
+  }
+
+  /** A tela reenvia o perfil inteiro a cada gravacao: o proprio slug nao e "outro salao". */
+  @Test
+  void reenviarOProprioSlugNaoEConflito() {
+    Tenant tenant = salaoComSlug("studio-bella");
+    when(tenantRepository.findBySlug("studio-bella")).thenReturn(Optional.of(tenant));
+
+    service.atualizarPrivado(pedidoComSlug("studio-bella"));
+
+    assertThat(tenant.getSlug()).isEqualTo("studio-bella");
+  }
+
+  /** Salao antigo com slug fora do formato novo continua podendo salvar o resto do perfil. */
+  @Test
+  void slugLegadoForaDoFormatoNaoTravaOSalvamento() {
+    Tenant tenant = salaoComSlug("Salao_Antigo.2020");
+
+    service.atualizarPrivado(pedidoComSlug("Salao_Antigo.2020"));
+
+    assertThat(tenant.getSlug()).isEqualTo("Salao_Antigo.2020");
+  }
+
+  @Test
+  void slugVazioNaoAlteraOEnderecoAtual() {
+    Tenant tenant = salaoComSlug("studio-bella");
+
+    service.atualizarPrivado(pedidoComSlug(null));
+    service.atualizarPrivado(pedidoComSlug("  "));
+
+    assertThat(tenant.getSlug()).isEqualTo("studio-bella");
+  }
+
+  // ---- SEG-006: a alteracao do perfil deixa trilha --------------------------------------------------
+
+  @Test
+  void alterarOPerfilRegistraAuditoriaSemOValorDoDocumento() {
+    Tenant tenant = salaoComSlug("antigo");
+    tenant.setDocument("98765432100");
+    when(tenantRepository.findBySlug("novo-endereco")).thenReturn(Optional.empty());
+
+    service.atualizarPrivado(pedidoComSlug("novo-endereco"));
+
+    ArgumentCaptor<AuditEventCommand> comando = ArgumentCaptor.forClass(AuditEventCommand.class);
+    verify(auditService).recordSuccess(comando.capture());
+    assertThat(comando.getValue().action).isEqualTo("SALON_PROFILE_UPDATED");
+    assertThat(comando.getValue().before.toString()).contains("antigo");
+    assertThat(comando.getValue().after.toString()).contains("novo-endereco");
+    assertThat(comando.getValue().metadata.toString()).contains("documentChanged=true");
+    // O documento (dado pessoal/fiscal) nunca vai para a trilha: so se ele mudou.
+    String tudo = comando.getValue().before + "|" + comando.getValue().after + "|" + comando.getValue().metadata;
+    assertThat(tudo).doesNotContain("98765432100").doesNotContain("12345678909");
   }
 }
