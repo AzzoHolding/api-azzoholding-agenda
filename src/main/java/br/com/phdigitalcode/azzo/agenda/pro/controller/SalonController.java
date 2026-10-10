@@ -54,7 +54,14 @@ public class SalonController {
     return servicoSalonProfile.obterPrivado();
   }
 
+  /**
+   * So o dono altera o perfil (achado SEG-006): nome, endereco de agendamento (slug), CPF/CNPJ,
+   * contatos, endereco e horarios. A classe libera OWNER, PROFESSIONAL e STAFF para LER o perfil;
+   * a escrita herdava isso e qualquer funcionario podia renomear o salao, trocar o link publico de
+   * agendamento ou alterar o documento fiscal. O logo (abaixo) ja era so do dono.
+   */
   @PutMapping("/profile")
+  @PreAuthorize("hasRole('OWNER')")
   public SalonDtos.SalonProfile atualizarPerfil(@Valid @RequestBody SalonDtos.SalonProfile request) {
     return servicoSalonProfile.atualizarPrivado(request);
   }

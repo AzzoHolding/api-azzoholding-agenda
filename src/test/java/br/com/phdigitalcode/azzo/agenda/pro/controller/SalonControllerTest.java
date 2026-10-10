@@ -15,6 +15,7 @@ import java.nio.charset.StandardCharsets;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -184,5 +185,19 @@ class SalonControllerTest {
     when(servicoSalonProfile.removerLogo()).thenReturn(esperado);
 
     assertThat(controller.removerLogo()).isSameAs(esperado);
+  }
+
+  // ---- SEG-006: so o dono altera o perfil -------------------------------------------------------------
+
+  @Test
+  void soODonoAlteraOPerfilDoSalao() throws Exception {
+    var metodo = SalonController.class.getMethod("atualizarPerfil", SalonDtos.SalonProfile.class);
+
+    assertThat(metodo.getAnnotation(PreAuthorize.class).value()).isEqualTo("hasRole('OWNER')");
+    // Ler o perfil continua liberado a equipe: o cabecalho e a agenda dependem do nome do salao.
+    var leitura = SalonController.class.getMethod("obterPerfil");
+    assertThat(leitura.getAnnotation(PreAuthorize.class)).isNull();
+    assertThat(SalonController.class.getAnnotation(PreAuthorize.class).value())
+        .isEqualTo("hasAnyRole('OWNER', 'PROFESSIONAL', 'STAFF')");
   }
 }
