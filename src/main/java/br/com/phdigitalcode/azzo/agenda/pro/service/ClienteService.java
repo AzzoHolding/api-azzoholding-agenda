@@ -19,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.request.ClienteRequest;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.response.ClienteAddressDto;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.response.ClienteDetailResponse;
+import br.com.phdigitalcode.azzo.agenda.pro.dto.response.ClienteIndicadoresResponse;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.response.ClienteListResponse;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.response.ClienteStatsDto;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.response.ClienteTopServiceDto;
@@ -35,6 +36,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.security.ContextoTenant;
 import br.com.phdigitalcode.azzo.agenda.pro.security.JwtPrincipal;
 import br.com.phdigitalcode.azzo.agenda.pro.util.CorrelatedLogging;
 import br.com.phdigitalcode.azzo.agenda.pro.util.DataUtil;
+import br.com.phdigitalcode.azzo.agenda.pro.util.IndicadoresDoCliente;
 
 /**
  * Espelha {@code modules/customers/application/ServicoClientes.java}.
@@ -119,6 +121,33 @@ public class ClienteService {
     });
     LOG.info("customers.getById.completed {}", CorrelatedLogging.context("tenantId", tenantId, "clientId", id));
     return toDetailResponse(cliente, clienteStatsRepository.findStatsByTenantAndClient(tenantId, cliente.getId()), List.of());
+  }
+
+  /** Indicadores da ficha: frequencia, retorno previsto, comparecimento e gasto em 12 meses. */
+  @Transactional(readOnly = true)
+  public ClienteIndicadoresResponse indicadores(UUID id) {
+    UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    Cliente cliente = clienteRepository.findByIdAndTenantId(id, tenantId).orElseThrow(() -> {
+      LOG.warn("customers.indicators.notFound {}", CorrelatedLogging.context("tenantId", tenantId, "clientId", id));
+      return new IllegalArgumentException("Cliente nao encontrado");
+    });
+    java.time.LocalDate hoje = java.time.LocalDate.now(java.time.ZoneId.of("America/Sao_Paulo"));
+    java.time.LocalDate desde = hoje.minusMonths(12);
+    var brutos = clienteStatsRepository.findIndicadoresBrutos(tenantId, cliente.getId(), desde, hoje);
+
+    ClienteIndicadoresResponse r = new ClienteIndicadoresResponse();
+    r.since = desde.toString();
+    r.averageIntervalDays = IndicadoresDoCliente.intervaloMedioEmDias(brutos.diasDeVisita());
+    if (r.averageIntervalDays != null) {
+      java.time.LocalDate ultima = brutos.diasDeVisita().stream().max(java.time.LocalDate::compareTo).orElseThrow();
+      r.expectedReturn = ultima.plusDays(r.averageIntervalDays).toString();
+    }
+    r.attended = brutos.concluidos();
+    r.noShows = brutos.faltas();
+    r.cancelled = brutos.cancelados();
+    r.attendanceRate = IndicadoresDoCliente.taxaDeComparecimento(brutos.concluidos(), brutos.faltas());
+    r.spentLast12Months = brutos.gastoDesde();
+    return r;
   }
 
   @Transactional

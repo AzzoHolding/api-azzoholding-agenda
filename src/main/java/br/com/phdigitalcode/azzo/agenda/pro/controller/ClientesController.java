@@ -18,6 +18,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import br.com.phdigitalcode.azzo.agenda.pro.dto.request.ClienteRequest;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.response.ClienteDetailResponse;
+import br.com.phdigitalcode.azzo.agenda.pro.dto.response.ClienteIndicadoresResponse;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.response.ClienteListResponse;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.response.PagedResponse;
 import br.com.phdigitalcode.azzo.agenda.pro.security.RequiresPermission;
@@ -68,6 +69,12 @@ public class ClientesController {
   @RequiresPermission("appointment:read")
   public ClienteDetailResponse obterPorId(@PathVariable UUID id) {
     return clienteService.obterPorId(id);
+  }
+
+  @GetMapping("/{id}/indicators")
+  @RequiresPermission("appointment:read")
+  public ClienteIndicadoresResponse indicadores(@PathVariable UUID id) {
+    return clienteService.indicadores(id);
   }
 
   @PostMapping
