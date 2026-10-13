@@ -119,6 +119,63 @@ public class ClienteStatsRepository {
     return stats;
   }
 
+  /** Materia-prima dos indicadores da ficha (ver {@code IndicadoresDoCliente}). */
+  public record IndicadoresBrutos(
+      List<LocalDate> diasDeVisita, int concluidos, int faltas, int cancelados, BigDecimal gastoDesde) {}
+
+  @SuppressWarnings("unchecked")
+  public IndicadoresBrutos findIndicadoresBrutos(UUID tenantId, UUID clientId, LocalDate desde, LocalDate ate) {
+    String cte = "WITH " + br.com.phdigitalcode.azzo.agenda.pro.util.ReceitaDeClientesSql.CTE;
+    List<Object> dias = entityManager
+        .createNativeQuery(cte + """
+            SELECT DISTINCT v.dia FROM visitas_clientes v
+            WHERE v.client_id = :clientId AND v.dia <= :ate
+            ORDER BY v.dia
+            """)
+        .setParameter("tenantId", tenantId)
+        .setParameter("clientId", clientId)
+        .setParameter("ate", ate)
+        .getResultList();
+    Object gasto = entityManager
+        .createNativeQuery(cte + """
+            SELECT COALESCE(SUM(v.valor), 0) FROM visitas_clientes v
+            WHERE v.client_id = :clientId AND v.dia BETWEEN :desde AND :ate
+            """)
+        .setParameter("tenantId", tenantId)
+        .setParameter("clientId", clientId)
+        .setParameter("desde", desde)
+        .setParameter("ate", ate)
+        .getSingleResult();
+    // A coluna `status` guarda a descricao em portugues (ver StatusAgendamentoConverter).
+    Object[] contagem = (Object[]) entityManager
+        .createNativeQuery("""
+            SELECT
+              COUNT(*) FILTER (WHERE a.status = 'Concluido')::int,
+              COUNT(*) FILTER (WHERE a.status = 'Nao compareceu')::int,
+              COUNT(*) FILTER (WHERE a.status = 'Cancelado')::int
+            FROM appointments a
+            WHERE a.tenant_id = :tenantId AND a.client_id = :clientId
+              AND a.date BETWEEN :desde AND :ate
+            """)
+        .setParameter("tenantId", tenantId)
+        .setParameter("clientId", clientId)
+        .setParameter("desde", desde)
+        .setParameter("ate", ate)
+        .getSingleResult();
+    return new IndicadoresBrutos(
+        dias.stream().map(ClienteStatsRepository::paraData).toList(),
+        contagem[0] != null ? ((Number) contagem[0]).intValue() : 0,
+        contagem[1] != null ? ((Number) contagem[1]).intValue() : 0,
+        contagem[2] != null ? ((Number) contagem[2]).intValue() : 0,
+        NumericUtil.normalize(gasto instanceof BigDecimal bd ? bd : new BigDecimal(String.valueOf(gasto))));
+  }
+
+  private static LocalDate paraData(Object valor) {
+    if (valor instanceof java.sql.Date sqlDate) return sqlDate.toLocalDate();
+    if (valor instanceof LocalDate localDate) return localDate;
+    return LocalDate.parse(String.valueOf(valor));
+  }
+
   private ClienteStats toStats(Object[] row) {
     if (row == null || row.length < 3) return ClienteStats.EMPTY;
     int totalVisits = row[0] != null ? ((Number) row[0]).intValue() : 0;
