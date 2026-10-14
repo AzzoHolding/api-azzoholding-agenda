@@ -466,8 +466,12 @@ class ReminderProcessingServiceTest {
     verifyNoInteractions(communicationChannelDispatcher, notificationPublisher);
   }
 
+  /**
+   * Opt-out vale em qualquer canal. Ate 2026-10-13 este teste fixava o contrario ("irrelevante para
+   * Telegram"): quem tinha pedido para parar continuava recebendo lembrete pelo Telegram.
+   */
   @Test
-  void telegramNaoConsultaOptOutDeWhatsApp() {
+  void optOutTambemValeNoTelegram() {
     Agendamento appointment = agendamentoAmanha();
     TenantOperationalSettings settings = settings(appointment.getTenantId());
     settings.setD1ReminderEnabled(true);
@@ -475,7 +479,7 @@ class ReminderProcessingServiceTest {
     stubGateD1(appointment, settings);
 
     Cliente client = clienteComTelefone(appointment.getClientId(), appointment.getTenantId());
-    client.setWhatsappOptOut(true); // irrelevante para Telegram
+    client.setWhatsappOptOut(true);
     when(clienteRepository.findByIdAndTenantId(appointment.getClientId(), appointment.getTenantId()))
         .thenReturn(Optional.of(client));
     when(customerCommunicationChannelResolver.resolve(eq(appointment.getTenantId()), eq(client), any(String[].class)))
@@ -483,20 +487,9 @@ class ReminderProcessingServiceTest {
     TenantTelegramConfig telegramConfig = new TenantTelegramConfig();
     telegramConfig.setTelegramEnabled(true);
     when(tenantTelegramConfigRepository.findByTenantId(appointment.getTenantId())).thenReturn(telegramConfig);
-    when(communicationChannelDispatcher.sendText(any())).thenReturn(ChannelSendResult.sent("tg-1"));
 
-    assertThat(service.processAppointment(appointment.getId())).isEqualTo(1);
-
-    verify(notificationPublisher)
-        .publish(
-            eq(appointment.getTenantId()),
-            eq(appointment.getId()),
-            eq("TELEGRAM_REMINDER"),
-            eq("999888777"),
-            any(),
-            eq(StatusNotification.SENT),
-            eq((String) null),
-            any());
+    assertThat(service.processAppointment(appointment.getId())).isZero();
+    verifyNoInteractions(communicationChannelDispatcher, notificationPublisher);
   }
 
   // ============================================================

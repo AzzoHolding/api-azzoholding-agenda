@@ -63,6 +63,10 @@ public class ClienteService {
   @org.springframework.beans.factory.annotation.Autowired
   private VinculosDeExclusao vinculosDeExclusao;
 
+  /** Chat, notificacoes, reativacao e foto: o que a linha do cliente nao leva junto ao sair. */
+  @org.springframework.beans.factory.annotation.Autowired
+  private RastrosDoTitular rastrosDoTitular;
+
   public ClienteService(
       ClienteRepository clienteRepository,
       ClienteStatsRepository clienteStatsRepository,
@@ -215,6 +219,9 @@ public class ClienteService {
 
     ClienteStats stats = clienteStatsRepository.findStatsByTenantAndClient(tenantId, before.getId());
     Map<String, Object> snapshot = resumoCliente(before, stats);
+    // Antes do delete: depois dele o ciclo de reativacao perde o client_id (SET NULL) e a conversa
+    // fica orfa, com o telefone, sem ninguem que a alcance.
+    rastrosDoTitular.limpar(before);
     clienteRepository.delete(before);
 
     auditar(tenantId, "CLIENT_DELETE", snapshot, null, id);

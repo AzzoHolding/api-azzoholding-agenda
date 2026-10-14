@@ -78,4 +78,18 @@ public interface WhatsAppMessageLogRepository extends JpaRepository<WhatsAppMess
               + "AND a.client_id = :clientId)",
       nativeQuery = true)
   int anonimizarPorClienteRaw(@Param("tenantId") UUID tenantId, @Param("clientId") UUID clientId);
+
+  /** Mesmo criterio de {@code NotificationRepository#anonimizarPorTelefoneRaw}. */
+  @Modifying
+  @Transactional
+  @Query(
+      value =
+          "UPDATE whatsapp_message_log SET destination_phone = '[ANONIMIZADO]', "
+              + "message_text = NULL, error_message = NULL "
+              + "WHERE tenant_id = :tenantId AND destination_phone <> '[ANONIMIZADO]' "
+              + "AND length(regexp_replace(destination_phone, '[^0-9]', '', 'g')) >= :tamanho "
+              + "AND right(regexp_replace(destination_phone, '[^0-9]', '', 'g'), :tamanho) = :telefone",
+      nativeQuery = true)
+  int anonimizarPorTelefoneRaw(
+      @Param("tenantId") UUID tenantId, @Param("telefone") String telefone, @Param("tamanho") int tamanho);
 }

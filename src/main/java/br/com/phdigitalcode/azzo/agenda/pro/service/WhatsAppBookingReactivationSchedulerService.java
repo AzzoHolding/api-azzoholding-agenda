@@ -165,8 +165,8 @@ public class WhatsAppBookingReactivationSchedulerService {
       return 1;
     }
 
-    // Gate LGPD 1: opt-out atual somente para WhatsApp
-    if (route.channel() == ChatChannel.WHATSAPP && Boolean.TRUE.equals(client.getWhatsappOptOut())) {
+    // Gate LGPD 1: opt-out vale em qualquer canal (ate 2026-10-13, so no WhatsApp)
+    if (Boolean.TRUE.equals(client.getWhatsappOptOut())) {
       whatsAppBookingReactivationService.cancelCycle(cycle, "OPT_OUT");
       return 1;
     }

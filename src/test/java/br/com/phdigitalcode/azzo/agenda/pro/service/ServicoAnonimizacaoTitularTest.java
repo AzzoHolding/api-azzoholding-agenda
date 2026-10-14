@@ -23,14 +23,9 @@ import br.com.phdigitalcode.azzo.agenda.pro.entity.LgpdDataSubjectRequestEvent;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditEventCommand;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditService;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.AppointmentCustomerNoteRepository;
-import br.com.phdigitalcode.azzo.agenda.pro.repository.ChatConversationRepository;
-import br.com.phdigitalcode.azzo.agenda.pro.repository.ChatMessageRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.ClienteRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.LgpdDataSubjectRequestEventRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.LgpdDataSubjectRequestRepository;
-import br.com.phdigitalcode.azzo.agenda.pro.repository.NotificationRepository;
-import br.com.phdigitalcode.azzo.agenda.pro.repository.WhatsAppBookingReactivationCycleRepository;
-import br.com.phdigitalcode.azzo.agenda.pro.repository.WhatsAppMessageLogRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.security.AuthenticatedUser;
 import br.com.phdigitalcode.azzo.agenda.pro.security.ContextoTenant;
 
@@ -47,11 +42,7 @@ class ServicoAnonimizacaoTitularTest {
   private AppointmentCustomerNoteRepository noteRepository;
   private LgpdDataSubjectRequestRepository requestRepository;
   private LgpdDataSubjectRequestEventRepository eventRepository;
-  private ChatConversationRepository conversationRepository;
-  private ChatMessageRepository chatMessageRepository;
-  private NotificationRepository notificationRepository;
-  private WhatsAppMessageLogRepository whatsAppMessageLogRepository;
-  private WhatsAppBookingReactivationCycleRepository reactivationCycleRepository;
+  private RastrosDoTitular rastrosDoTitular;
   private AuditService auditService;
   private ServicoAnonimizacaoTitular service;
 
@@ -63,16 +54,12 @@ class ServicoAnonimizacaoTitularTest {
     noteRepository = mock(AppointmentCustomerNoteRepository.class);
     requestRepository = mock(LgpdDataSubjectRequestRepository.class);
     eventRepository = mock(LgpdDataSubjectRequestEventRepository.class);
-    conversationRepository = mock(ChatConversationRepository.class);
-    chatMessageRepository = mock(ChatMessageRepository.class);
-    notificationRepository = mock(NotificationRepository.class);
-    whatsAppMessageLogRepository = mock(WhatsAppMessageLogRepository.class);
-    reactivationCycleRepository = mock(WhatsAppBookingReactivationCycleRepository.class);
+    rastrosDoTitular = mock(RastrosDoTitular.class);
+    when(rastrosDoTitular.limpar(any())).thenReturn(new RastrosDoTitular.Resultado(1, 2, 3, 4, 5));
     auditService = mock(AuditService.class);
     service = new ServicoAnonimizacaoTitular(
         contextoTenant, authenticatedUser, clienteRepository, noteRepository, requestRepository,
-        eventRepository, conversationRepository, chatMessageRepository, notificationRepository,
-        whatsAppMessageLogRepository, reactivationCycleRepository, auditService);
+        eventRepository, rastrosDoTitular, auditService);
 
     when(contextoTenant.obterTenantIdOuFalhar()).thenReturn(tenantId);
     when(authenticatedUser.idOuNulo()).thenReturn(userId);
@@ -218,12 +205,18 @@ class ServicoAnonimizacaoTitularTest {
     Cliente cliente = buildCliente();
     when(clienteRepository.findByIdAndTenantId(clientId, tenantId)).thenReturn(Optional.of(cliente));
 
+    // Os rastros sao limpos com o telefone ainda na ficha: e por ele que se acham.
+    when(rastrosDoTitular.limpar(cliente)).thenAnswer(invocacao -> {
+      assertThat(((Cliente) invocacao.getArgument(0)).getPhone()).isEqualTo("+5511999999999");
+      return new RastrosDoTitular.Resultado(1, 2, 3, 4, 5);
+    });
+
     service.anonimizar(clientId);
 
-    verify(conversationRepository).anonimizarPorClienteRaw(tenantId, clientId);
-    verify(chatMessageRepository).anonimizarPorClienteRaw(tenantId, clientId);
-    verify(notificationRepository).anonimizarPorClienteRaw(tenantId, clientId);
-    verify(whatsAppMessageLogRepository).anonimizarPorClienteRaw(tenantId, clientId);
-    verify(reactivationCycleRepository).anonimizarPorClienteRaw(tenantId, clientId);
+    verify(rastrosDoTitular).limpar(cliente);
+    ArgumentCaptor<LgpdDataSubjectRequestEvent> evento =
+        ArgumentCaptor.forClass(LgpdDataSubjectRequestEvent.class);
+    verify(eventRepository).save(evento.capture());
+    assertThat(evento.getValue().getEventNote()).contains("1 conversa(s)").contains("5 ciclo(s)");
   }
 }

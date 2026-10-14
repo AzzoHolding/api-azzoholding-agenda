@@ -22,14 +22,9 @@ import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditConstants;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditEventCommand;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditService;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.AppointmentCustomerNoteRepository;
-import br.com.phdigitalcode.azzo.agenda.pro.repository.ChatConversationRepository;
-import br.com.phdigitalcode.azzo.agenda.pro.repository.ChatMessageRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.ClienteRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.LgpdDataSubjectRequestEventRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.LgpdDataSubjectRequestRepository;
-import br.com.phdigitalcode.azzo.agenda.pro.repository.NotificationRepository;
-import br.com.phdigitalcode.azzo.agenda.pro.repository.WhatsAppBookingReactivationCycleRepository;
-import br.com.phdigitalcode.azzo.agenda.pro.repository.WhatsAppMessageLogRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.security.AuthenticatedUser;
 import br.com.phdigitalcode.azzo.agenda.pro.security.ContextoTenant;
 
@@ -52,11 +47,7 @@ public class ServicoAnonimizacaoTitular {
   private final AppointmentCustomerNoteRepository noteRepository;
   private final LgpdDataSubjectRequestRepository requestRepository;
   private final LgpdDataSubjectRequestEventRepository eventRepository;
-  private final ChatConversationRepository conversationRepository;
-  private final ChatMessageRepository chatMessageRepository;
-  private final NotificationRepository notificationRepository;
-  private final WhatsAppMessageLogRepository whatsAppMessageLogRepository;
-  private final WhatsAppBookingReactivationCycleRepository reactivationCycleRepository;
+  private final RastrosDoTitular rastrosDoTitular;
   private final AuditService auditService;
 
   public ServicoAnonimizacaoTitular(
@@ -66,11 +57,7 @@ public class ServicoAnonimizacaoTitular {
       AppointmentCustomerNoteRepository noteRepository,
       LgpdDataSubjectRequestRepository requestRepository,
       LgpdDataSubjectRequestEventRepository eventRepository,
-      ChatConversationRepository conversationRepository,
-      ChatMessageRepository chatMessageRepository,
-      NotificationRepository notificationRepository,
-      WhatsAppMessageLogRepository whatsAppMessageLogRepository,
-      WhatsAppBookingReactivationCycleRepository reactivationCycleRepository,
+      RastrosDoTitular rastrosDoTitular,
       AuditService auditService) {
     this.contextoTenant = contextoTenant;
     this.authenticatedUser = authenticatedUser;
@@ -78,11 +65,7 @@ public class ServicoAnonimizacaoTitular {
     this.noteRepository = noteRepository;
     this.requestRepository = requestRepository;
     this.eventRepository = eventRepository;
-    this.conversationRepository = conversationRepository;
-    this.chatMessageRepository = chatMessageRepository;
-    this.notificationRepository = notificationRepository;
-    this.whatsAppMessageLogRepository = whatsAppMessageLogRepository;
-    this.reactivationCycleRepository = reactivationCycleRepository;
+    this.rastrosDoTitular = rastrosDoTitular;
     this.auditService = auditService;
   }
 
@@ -98,6 +81,18 @@ public class ServicoAnonimizacaoTitular {
     }
 
     Instant now = Instant.now();
+
+    // O dado pessoal do titular NAO mora so na ficha dele. Ate 2026-09-20 a anonimizacao parava no
+    // cliente e nas notas de atendimento, e o telefone continuava no chat, nas notificacoes e na
+    // fila de reativacao — um pedido de exclusao atendido pela metade. O que fica de proposito e o
+    // que a lei manda guardar: a nota fiscal emitida (`nfse_invoices`) e a trilha de auditoria.
+    // Antes de zerar a ficha: e pelo telefone e pela foto que se acha o resto.
+    RastrosDoTitular.Resultado rastros = rastrosDoTitular.limpar(cliente);
+    int conversas = rastros.conversas();
+    int mensagens = rastros.mensagens();
+    int notificacoes = rastros.notificacoes();
+    int mensagensWhatsapp = rastros.mensagensWhatsapp();
+    int reativacoes = rastros.reativacoes();
 
     // Anonimiza dados pessoais; mantém id, tenantId e createdAt para integridade referencial
     cliente.setName(PLACEHOLDER);
@@ -130,16 +125,6 @@ public class ServicoAnonimizacaoTitular {
       note.setClientFeedbackNotes(null);
       note.setInternalFollowupNotes(null);
     }
-
-    // O dado pessoal do titular NAO mora so na ficha dele. Ate 2026-09-20 a anonimizacao parava no
-    // cliente e nas notas de atendimento, e o telefone continuava no chat, nas notificacoes e na
-    // fila de reativacao — um pedido de exclusao atendido pela metade. O que fica de proposito e o
-    // que a lei manda guardar: a nota fiscal emitida (`nfse_invoices`) e a trilha de auditoria.
-    int conversas = conversationRepository.anonimizarPorClienteRaw(tenantId, clientId);
-    int mensagens = chatMessageRepository.anonimizarPorClienteRaw(tenantId, clientId);
-    int notificacoes = notificationRepository.anonimizarPorClienteRaw(tenantId, clientId);
-    int mensagensWhatsapp = whatsAppMessageLogRepository.anonimizarPorClienteRaw(tenantId, clientId);
-    int reativacoes = reactivationCycleRepository.anonimizarPorClienteRaw(tenantId, clientId);
 
     // A trilha de auditoria guarda o retrato do cliente (nome, telefone, endereco...) por 365 dias:
     // tira o valor pessoal dos eventos dele. Sem try/catch — se falhar, a anonimizacao desfaz.

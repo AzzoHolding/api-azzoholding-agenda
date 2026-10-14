@@ -39,7 +39,7 @@ public class ImportacaoClienteJob {
   @Column(name = "nome_arquivo", nullable = false, length = 255)
   private String nomeArquivo;
 
-  @Column(name = "arquivo_storage_key", nullable = false, length = 500)
+  @Column(name = "arquivo_storage_key", length = 500)
   private String arquivoStorageKey;
 
   @Column(name = "arquivo_hash_sha256", nullable = false, length = 128)
