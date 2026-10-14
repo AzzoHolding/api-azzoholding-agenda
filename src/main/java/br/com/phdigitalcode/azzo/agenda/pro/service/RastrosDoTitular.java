@@ -7,6 +7,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import br.com.phdigitalcode.azzo.agenda.pro.entity.Cliente;
+import br.com.phdigitalcode.azzo.agenda.pro.integration.AssistantApiClient;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.MinioStorageService;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.ChatConversationRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.ChatMessageRepository;
@@ -37,6 +38,7 @@ public class RastrosDoTitular {
   private final WhatsAppMessageLogRepository whatsAppMessageLogRepository;
   private final WhatsAppBookingReactivationCycleRepository reactivationCycleRepository;
   private final MinioStorageService minioStorageService;
+  private final AssistantApiClient assistantApiClient;
 
   public RastrosDoTitular(
       ChatConversationRepository conversationRepository,
@@ -44,13 +46,15 @@ public class RastrosDoTitular {
       NotificationRepository notificationRepository,
       WhatsAppMessageLogRepository whatsAppMessageLogRepository,
       WhatsAppBookingReactivationCycleRepository reactivationCycleRepository,
-      MinioStorageService minioStorageService) {
+      MinioStorageService minioStorageService,
+      AssistantApiClient assistantApiClient) {
     this.conversationRepository = conversationRepository;
     this.chatMessageRepository = chatMessageRepository;
     this.notificationRepository = notificationRepository;
     this.whatsAppMessageLogRepository = whatsAppMessageLogRepository;
     this.reactivationCycleRepository = reactivationCycleRepository;
     this.minioStorageService = minioStorageService;
+    this.assistantApiClient = assistantApiClient;
   }
 
   public record Resultado(int conversas, int mensagens, int notificacoes, int mensagensWhatsapp, int reativacoes) {}
@@ -71,6 +75,7 @@ public class RastrosDoTitular {
     }
     int reativacoes = reactivationCycleRepository.anonimizarPorClienteRaw(tenantId, clientId);
     removerFoto(cliente);
+    esquecerNoAssistente(tenantId, telefone);
     return new Resultado(conversas, mensagens, notificacoes, mensagensWhatsapp, reativacoes);
   }
 
@@ -83,6 +88,22 @@ public class RastrosDoTitular {
     String digitos = telefone.replaceAll("\\D", "");
     if (digitos.startsWith("55") && digitos.length() >= 12) digitos = digitos.substring(2);
     return digitos.length() >= 10 ? digitos : null;
+  }
+
+  /**
+   * O assistente guarda o estado da conversa por ate 8 horas, pelo telefone (com e sem 55). Melhor
+   * esforco: o assistente fora do ar nao segura a anonimizacao, e o TTL apaga de qualquer forma.
+   */
+  private void esquecerNoAssistente(UUID tenantId, String telefone) {
+    if (telefone == null) return;
+    for (String identificador : java.util.List.of("55" + telefone, telefone)) {
+      try {
+        assistantApiClient.esquecerConversa(tenantId.toString(), identificador);
+      } catch (RuntimeException e) {
+        LOG.warn("lgpd.rastros.assistenteNaoLimpo tenantId={}", tenantId, e);
+        return;
+      }
+    }
   }
 
   /** A foto e do titular: sai do storage. Melhor esforco — o arquivo orfao nao segura a anonimizacao. */

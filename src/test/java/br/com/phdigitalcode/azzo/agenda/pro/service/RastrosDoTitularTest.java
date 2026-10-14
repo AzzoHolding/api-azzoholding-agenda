@@ -16,6 +16,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import br.com.phdigitalcode.azzo.agenda.pro.entity.Cliente;
+import br.com.phdigitalcode.azzo.agenda.pro.integration.AssistantApiClient;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.MinioStorageService;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.ChatConversationRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.ChatMessageRepository;
@@ -31,6 +32,7 @@ class RastrosDoTitularTest {
   private WhatsAppMessageLogRepository whatsapp;
   private WhatsAppBookingReactivationCycleRepository reativacoes;
   private MinioStorageService storage;
+  private AssistantApiClient assistente;
   private RastrosDoTitular rastros;
   private Cliente cliente;
 
@@ -42,7 +44,8 @@ class RastrosDoTitularTest {
     whatsapp = mock(WhatsAppMessageLogRepository.class);
     reativacoes = mock(WhatsAppBookingReactivationCycleRepository.class);
     storage = mock(MinioStorageService.class);
-    rastros = new RastrosDoTitular(conversas, mensagens, notificacoes, whatsapp, reativacoes, storage);
+    assistente = mock(AssistantApiClient.class);
+    rastros = new RastrosDoTitular(conversas, mensagens, notificacoes, whatsapp, reativacoes, storage, assistente);
 
     cliente = new Cliente();
     cliente.setId(UUID.randomUUID());
@@ -75,6 +78,15 @@ class RastrosDoTitularTest {
     verify(mensagens).anonimizarPorClienteRaw(cliente.getTenantId(), cliente.getId());
     verify(reativacoes).anonimizarPorClienteRaw(cliente.getTenantId(), cliente.getId());
     verify(storage).removerArquivoClienteAvatar("tenants/x/clientes/y/avatar.png", cliente.getTenantId());
+    // O assistente esquece a conversa, com e sem 55.
+    verify(assistente).esquecerConversa(cliente.getTenantId().toString(), "5521987599613");
+    verify(assistente).esquecerConversa(cliente.getTenantId().toString(), "21987599613");
+  }
+
+  @Test
+  void assistenteForaDoArNaoSeguraALimpeza() {
+    doThrow(new IllegalStateException("fora")).when(assistente).esquecerConversa(anyString(), anyString());
+    assertThat(rastros.limpar(cliente)).isNotNull();
   }
 
   @Test

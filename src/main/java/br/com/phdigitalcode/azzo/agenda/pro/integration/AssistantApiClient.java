@@ -89,6 +89,17 @@ public class AssistantApiClient {
         .toBodilessEntity();
   }
 
+  /** Anonimizacao do titular: o assistente apaga o estado da conversa dele (LGPD). */
+  public void esquecerConversa(String tenantId, String userIdentifier) {
+    restClient.delete()
+        .uri(uriBuilder -> uriBuilder.path("/api/v1/assistant/admin/conversation")
+            .queryParam("tenantId", tenantId)
+            .queryParam("userIdentifier", userIdentifier)
+            .build())
+        .retrieve()
+        .toBodilessEntity();
+  }
+
   public void seedReactivationContext(String tenantId, String userIdentifier, AssistantReactivationSeedRequest request) {
     restClient.post()
         .uri(uriBuilder -> uriBuilder.path("/api/v1/assistant/admin/seed-reactivation")
