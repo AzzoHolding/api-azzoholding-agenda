@@ -28,7 +28,9 @@ class LgpdTitularControllerTest {
   void setUp() {
     servicoLgpdTitular = mock(ServicoLgpdTitular.class);
     servicoAnonimizacao = mock(ServicoAnonimizacaoTitular.class);
-    controller = new LgpdTitularController(servicoLgpdTitular, servicoAnonimizacao);
+    controller = new LgpdTitularController(
+        servicoLgpdTitular, servicoAnonimizacao,
+        org.mockito.Mockito.mock(br.com.phdigitalcode.azzo.agenda.pro.service.ServicoExportacaoTitular.class));
   }
 
   @Test

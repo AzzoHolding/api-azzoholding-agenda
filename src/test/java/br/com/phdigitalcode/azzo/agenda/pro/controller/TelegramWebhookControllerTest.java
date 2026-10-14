@@ -54,6 +54,8 @@ class TelegramWebhookControllerTest {
   private Tenant tenant;
   private TenantTelegramConfig config;
 
+  private br.com.phdigitalcode.azzo.agenda.pro.service.ServicoOptOutDoTitular servicoOptOut;
+
   @BeforeEach
   void setUp() {
     tenantRepository = mock(TenantRepository.class);
@@ -62,6 +64,7 @@ class TelegramWebhookControllerTest {
     communicationChannelDispatcher = mock(CommunicationChannelDispatcher.class);
     chatService = mock(ChatService.class);
     assistantApiClient = mock(AssistantApiClient.class);
+    servicoOptOut = org.mockito.Mockito.mock(br.com.phdigitalcode.azzo.agenda.pro.service.ServicoOptOutDoTitular.class);
     controller = new TelegramWebhookController(
         tenantRepository,
         tenantTelegramConfigRepository,
@@ -69,7 +72,8 @@ class TelegramWebhookControllerTest {
         communicationChannelDispatcher,
         chatService,
         new ObjectMapper(),
-        assistantApiClient);
+        assistantApiClient,
+        servicoOptOut);
 
     tenant = new Tenant();
     tenant.setId(tenantId);
@@ -165,6 +169,25 @@ class TelegramWebhookControllerTest {
     assertThat(response.status).isEqualTo("IGNORED");
     assertThat(response.message).isEqualTo("Mensagem duplicada");
     assertThat(response.duplicateInboundMessage).isTrue();
+    verify(assistantApiClient, never()).processarMensagem(any(), any(), any(), any());
+  }
+
+  /** "PARE" para as mensagens automaticas, mesmo com modo manual, e nao vai ao assistente. */
+  @Test
+  void pareRegistraOptOutMesmoEmModoManual() {
+    ChatService.InboundProcessingResult inbound = new ChatService.InboundProcessingResult();
+    inbound.conversation = conversation();
+    inbound.client = cliente();
+    inbound.manualModeEnabled = true;
+    when(chatService.processInboundTelegramMessage(eq(tenantId), eq("123"), eq("PARE"), any(), any()))
+        .thenReturn(inbound);
+
+    String payload = "{\"message\":{\"message_id\":1,\"chat\":{\"id\":123},\"text\":\"PARE\"}}";
+    TelegramWebhookController.WebhookResponse response = controller.receive(tenantId.toString(), null, payload);
+
+    assertThat(response.message).isEqualTo("opt-out registrado");
+    verify(servicoOptOut).registrar(inbound.client);
+    verify(communicationChannelDispatcher).sendText(any());
     verify(assistantApiClient, never()).processarMensagem(any(), any(), any(), any());
   }
 

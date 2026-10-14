@@ -209,8 +209,9 @@ public class ReminderProcessingService {
     ReminderRoute route = resolveReminderRoute(appointment.getTenantId(), client);
     if (!isChannelEnabledForReminders(appointment.getTenantId(), route.channel())) return 0;
 
-    // Gate LGPD atual: opt-out somente para WhatsApp.
-    if (route.channel() == ChatChannel.WHATSAPP && Boolean.TRUE.equals(client.getWhatsappOptOut())) {
+    // Gate LGPD: opt-out vale em qualquer canal (ate 2026-10-13, so no WhatsApp — o Telegram
+    // continuava recebendo). O campo se chama whatsappOptOut por historia.
+    if (Boolean.TRUE.equals(client.getWhatsappOptOut())) {
       LOG.debug("Lembrete WhatsApp ignorado: cliente={} optou por nao receber mensagens", client.getId());
       return 0;
     }

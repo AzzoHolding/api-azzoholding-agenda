@@ -79,7 +79,6 @@ public class SecurityConfig {
                 "/api/v1/public/**",
                 "/api/v1/checkout/**",
                 "/api/v1/internal/**",
-                "/api/v1/storage/proxy",
                 "/webhook/**",
                 "/actuator/**",
                 "/v3/api-docs/**",

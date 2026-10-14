@@ -33,6 +33,7 @@ class ClienteServiceExclusaoTest {
   private VinculosDeExclusao vinculosDeExclusao;
   private ClienteService service;
   private AuditService auditService;
+  private RastrosDoTitular rastrosDoTitular;
 
   private final UUID tenantId = UUID.randomUUID();
   private Cliente cliente;
@@ -56,6 +57,8 @@ class ClienteServiceExclusaoTest {
             auditService,
             mock(MinioStorageService.class));
     ReflectionTestUtils.setField(service, "vinculosDeExclusao", vinculosDeExclusao);
+    rastrosDoTitular = mock(RastrosDoTitular.class);
+    ReflectionTestUtils.setField(service, "rastrosDoTitular", rastrosDoTitular);
 
     cliente = new Cliente();
     cliente.setId(UUID.randomUUID());
@@ -76,6 +79,7 @@ class ClienteServiceExclusaoTest {
         .hasMessageContaining("anonimizacao");
     verify(clienteRepository, never()).delete(any(Cliente.class));
     verify(auditService, never()).redigirDadosPessoaisDoCliente(any(), any());
+    verify(rastrosDoTitular, never()).limpar(any());
   }
 
   @Test
@@ -85,6 +89,8 @@ class ClienteServiceExclusaoTest {
     service.deletar(cliente.getId());
 
     verify(clienteRepository).delete(cliente);
+    // Chat, notificacoes, reativacao e foto saem junto (antes, ficavam orfaos com o telefone).
+    verify(rastrosDoTitular).limpar(cliente);
     // O evento CLIENT_DELETE guarda o retrato do cliente: sai o dado pessoal dele.
     verify(auditService).redigirDadosPessoaisDoCliente(tenantId, cliente.getId());
   }

@@ -25,6 +25,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.repository.TenantRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.TenantTelegramConfigRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.security.WebhookVerifyTokenHashService;
 import br.com.phdigitalcode.azzo.agenda.pro.service.ChatService;
+import br.com.phdigitalcode.azzo.agenda.pro.service.ServicoOptOutDoTitular;
 import br.com.phdigitalcode.azzo.agenda.pro.service.channel.ChannelSendCommand;
 import br.com.phdigitalcode.azzo.agenda.pro.service.channel.ChannelSendResult;
 import br.com.phdigitalcode.azzo.agenda.pro.service.channel.CommunicationChannelDispatcher;
@@ -57,6 +58,7 @@ public class TelegramWebhookController {
   private final ChatService chatService;
   private final ObjectMapper objectMapper;
   private final AssistantApiClient assistantApiClient;
+  private final ServicoOptOutDoTitular servicoOptOut;
 
   public TelegramWebhookController(
       TenantRepository tenantRepository,
@@ -65,7 +67,8 @@ public class TelegramWebhookController {
       CommunicationChannelDispatcher communicationChannelDispatcher,
       ChatService chatService,
       ObjectMapper objectMapper,
-      AssistantApiClient assistantApiClient) {
+      AssistantApiClient assistantApiClient,
+      ServicoOptOutDoTitular servicoOptOut) {
     this.tenantRepository = tenantRepository;
     this.tenantTelegramConfigRepository = tenantTelegramConfigRepository;
     this.webhookVerifyTokenHashService = webhookVerifyTokenHashService;
@@ -73,6 +76,7 @@ public class TelegramWebhookController {
     this.chatService = chatService;
     this.objectMapper = objectMapper;
     this.assistantApiClient = assistantApiClient;
+    this.servicoOptOut = servicoOptOut;
   }
 
   @PostMapping("/{tenantId}")
@@ -173,6 +177,20 @@ public class TelegramWebhookController {
       response.message = "Mensagem duplicada";
       return response;
     }
+    // "PARE" pelo Telegram: para as mensagens automaticas, como no WhatsApp. Nao vai ao assistente, e vale
+    // mesmo com a conversa em modo manual: o pedido e do titular, nao da conversa.
+    if (inbound.client != null && ServicoOptOutDoTitular.ehPedidoDeOptOut(content)) {
+      servicoOptOut.registrar(inbound.client);
+      communicationChannelDispatcher.sendText(
+          new ChannelSendCommand(tenantId, ChatChannel.TELEGRAM, chatId, ServicoOptOutDoTitular.CONFIRMACAO));
+      LOG.info(
+          "telegramWebhook.optOut.completed {}",
+          CorrelatedLogging.context("tenantId", tenantId, "clientId", inbound.client.getId()));
+      response.status = "PROCESSED";
+      response.message = "opt-out registrado";
+      return response;
+    }
+
     if (inbound.manualModeEnabled) {
       response.status = "IGNORED";
       response.message = "Modo manual ativo";
