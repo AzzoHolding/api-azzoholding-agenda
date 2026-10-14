@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import br.com.phdigitalcode.azzo.agenda.pro.dto.LgpdRequestDtos;
 import br.com.phdigitalcode.azzo.agenda.pro.service.ServicoAnonimizacaoTitular;
+import br.com.phdigitalcode.azzo.agenda.pro.service.ServicoExportacaoTitular;
 import br.com.phdigitalcode.azzo.agenda.pro.service.ServicoLgpdTitular;
 import jakarta.validation.Valid;
 
@@ -29,10 +30,15 @@ public class LgpdTitularController {
 
   private final ServicoLgpdTitular servicoLgpdTitular;
   private final ServicoAnonimizacaoTitular servicoAnonimizacao;
+  private final ServicoExportacaoTitular servicoExportacao;
 
-  public LgpdTitularController(ServicoLgpdTitular servicoLgpdTitular, ServicoAnonimizacaoTitular servicoAnonimizacao) {
+  public LgpdTitularController(
+      ServicoLgpdTitular servicoLgpdTitular,
+      ServicoAnonimizacaoTitular servicoAnonimizacao,
+      ServicoExportacaoTitular servicoExportacao) {
     this.servicoLgpdTitular = servicoLgpdTitular;
     this.servicoAnonimizacao = servicoAnonimizacao;
+    this.servicoExportacao = servicoExportacao;
   }
 
   @PostMapping
@@ -67,6 +73,12 @@ public class LgpdTitularController {
   public LgpdRequestDtos.ItemResponse atualizarStatus(
       @PathVariable("id") UUID id, @Valid @RequestBody LgpdRequestDtos.UpdateStatusRequest request) {
     return servicoLgpdTitular.atualizarStatus(id, request);
+  }
+
+  /** Acesso e portabilidade (art. 18, II e V): tudo o que o salao guarda sobre o cliente. */
+  @GetMapping("/clientes/{clientId}/exportacao")
+  public java.util.Map<String, Object> exportar(@PathVariable("clientId") UUID clientId) {
+    return servicoExportacao.exportar(clientId);
   }
 
   @PostMapping("/clientes/{clientId}/anonimizar")
