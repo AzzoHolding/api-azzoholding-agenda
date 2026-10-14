@@ -163,6 +163,31 @@ class ServicoFinanceiroTest {
   }
 
   @Test
+  @DisplayName("FIN-009: profissional de outro salao e recusado e nao gera comissao")
+  void profissionalDeOutroSalaoERecusado() {
+    when(contextoTenant.obterTenantIdOuFalhar()).thenReturn(TENANT_ID);
+    UUID deOutroSalao = UUID.randomUUID();
+    when(profissionalRepository.findByIdAndTenantId(deOutroSalao, TENANT_ID)).thenReturn(Optional.empty());
+
+    TransacaoRequest req = new TransacaoRequest();
+    req.type = "INCOME";
+    req.category = "Vendas";
+    req.amount = new BigDecimal("500.00");
+    req.paymentMethod = "CASH";
+    req.date = "2026-03-20";
+    req.professionalId = deOutroSalao.toString();
+    req.productCategory = "Cosmeticos";
+
+    assertThatThrownBy(() -> servicoFinanceiro.criar(req))
+        .isInstanceOf(ApiClientErrorException.class)
+        .hasMessageContaining("Profissional nao encontrado");
+    verify(transacaoRepository, never()).save(any());
+    verify(commissionService, never())
+        .registerProductCommissionIfApplicable(
+            any(), any(), any(), any(), any(), anyLong(), any(), any());
+  }
+
+  @Test
   @DisplayName("amount zero ou negativo e rejeitado com a mensagem do original")
   void amountInvalido() {
     when(contextoTenant.obterTenantIdOuFalhar()).thenReturn(TENANT_ID);

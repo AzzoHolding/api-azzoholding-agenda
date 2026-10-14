@@ -81,6 +81,10 @@ public class LgpdRetentionService {
         "DELETE FROM email_jobs WHERE status IN ('PROCESSED', 'FAILED') AND created_at < NOW() - INTERVAL '30 days'");
     int errosDeImportacao = purgar(
         "DELETE FROM importacao_cliente_erro_linha WHERE created_at < NOW() - INTERVAL '30 days'");
+    // INT-025: senha do certificado A1 em sessao que ja acabou (inclusive as que venceram sem ninguem
+    // consultar, que continuam com status ACTIVE).
+    purgar("UPDATE nfse_certificate_unlock_sessions SET password_enc = NULL "
+        + "WHERE password_enc IS NOT NULL AND (status <> 'ACTIVE' OR expires_at <= NOW())");
     int planilhas = 0;
     try {
       planilhas = processadorImportacaoClientes.limparArquivosDeJobsFinalizados();

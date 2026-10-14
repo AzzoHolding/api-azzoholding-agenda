@@ -19,6 +19,20 @@ public interface RefreshTokenRepository extends JpaRepository<RefreshToken, UUID
   @Query("select t from RefreshToken t where t.tokenHash = :tokenHash and t.revokedAt is null and t.expiresAt > :now")
   Optional<RefreshToken> findActiveByHash(String tokenHash, Instant now);
 
+  /** Qualquer estado (ativo, revogado, vencido): para reconhecer um token ja trocado que voltou. */
+  @Query("select t from RefreshToken t where t.tokenHash = :tokenHash")
+  Optional<RefreshToken> findByHash(String tokenHash);
+
+  /**
+   * Reivindica o token: so UMA requisicao consegue (o UPDATE so pega a linha ainda ativa). Devolve 0
+   * quando outra requisicao ja trocou o mesmo token.
+   */
+  @Modifying
+  @Transactional
+  @Query("update RefreshToken t set t.revokedAt = :now, t.replacedByTokenHash = :novoHash "
+      + "where t.id = :id and t.revokedAt is null")
+  int reivindicar(UUID id, String novoHash, Instant now);
+
   @Modifying
   @Transactional
   @Query("update RefreshToken t set t.revokedAt = :now where t.userId = :userId and t.revokedAt is null")

@@ -24,6 +24,12 @@ public class RefreshTokenService {
 
   private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
+  /**
+   * Um token ja trocado que reaparece DENTRO desta janela e tratado como corrida benigna (duas abas
+   * renovando juntas): so 401. Depois dela e sinal de roubo e todas as sessoes do usuario caem.
+   */
+  static final Duration JANELA_DE_CORRIDA = Duration.ofSeconds(30);
+
   private final RefreshTokenRepository refreshTokenRepository;
   private final UsuarioRepository usuarioRepository;
   private final TokenRevocationService tokenRevocationService;
@@ -62,8 +68,11 @@ public class RefreshTokenService {
     }
     Instant now = Instant.now();
     String currentHash = hashToken(rawRefreshToken.trim());
-    RefreshToken current = refreshTokenRepository.findActiveByHash(currentHash, now)
-        .orElseThrow(() -> new ApiClientErrorException("refresh_token invalido ou expirado", 401));
+    RefreshToken current = refreshTokenRepository.findActiveByHash(currentHash, now).orElse(null);
+    if (current == null) {
+      revogarFamiliaSeForReuso(currentHash, now);
+      throw new ApiClientErrorException("refresh_token invalido ou expirado", 401);
+    }
 
     Usuario user = usuarioRepository.findById(current.getUserId())
         .orElseThrow(() -> new ApiClientErrorException("Usuario do refresh_token nao encontrado", 401));
@@ -81,6 +90,11 @@ public class RefreshTokenService {
 
     String newRawToken = generateTokenValue();
     String newHash = hashToken(newRawToken);
+    // Pentest 14/10/2026 (SEG-015): consulta e troca eram separadas, sem trava — duas requisicoes
+    // com o MESMO token criavam duas sessoes validas. Agora so quem reivindica a linha ativa segue.
+    if (refreshTokenRepository.reivindicar(current.getId(), newHash, now) != 1) {
+      throw new ApiClientErrorException("refresh_token invalido ou expirado", 401);
+    }
     RefreshToken replacement = new RefreshToken();
     replacement.setUserId(user.getId());
     replacement.setTenantId(user.getTenantId());
@@ -88,11 +102,25 @@ public class RefreshTokenService {
     replacement.setExpiresAt(now.plus(Duration.ofDays(Math.max(1, refreshTokenTtlDays))));
     refreshTokenRepository.save(replacement);
 
-    current.setRevokedAt(now);
-    current.setReplacedByTokenHash(newHash);
-    refreshTokenRepository.save(current);
-
     return new RefreshSession(user, newRawToken);
+  }
+
+  /**
+   * SEG-015: um token ja TROCADO (tem sucessor) apresentado de novo, fora da janela de corrida, e o
+   * sinal classico de roubo — o ladrao ou a vitima esta usando uma copia. Revoga todas as sessoes do
+   * usuario; quem e legitimo entra de novo com a senha.
+   */
+  private void revogarFamiliaSeForReuso(String hash, Instant now) {
+    refreshTokenRepository.findByHash(hash).ifPresent(token -> {
+      boolean foiTrocado = token.getRevokedAt() != null && token.getReplacedByTokenHash() != null;
+      boolean foraDaJanela = token.getRevokedAt() != null
+          && token.getRevokedAt().plus(JANELA_DE_CORRIDA).isBefore(now);
+      if (foiTrocado && foraDaJanela) {
+        org.slf4j.LoggerFactory.getLogger(RefreshTokenService.class).warn(
+            "auth.refresh.reuso_detectado userId={} — todas as sessoes revogadas", token.getUserId());
+        revokeAllForUser(token.getUserId());
+      }
+    });
   }
 
   @Transactional

@@ -256,6 +256,7 @@ public class ServicoFinanceiro {
   public TransacaoResponse criar(TransacaoRequest req) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
 
+    exigirVinculosDoSalao(tenantId, req);
     Transacao t = new Transacao();
     t.setTenantId(tenantId);
     t.setAppointmentId(parseUuidNullable(req.appointmentId));
@@ -333,6 +334,7 @@ public class ServicoFinanceiro {
         tenantId, novaData, "FINANCE_TRANSACTION_UPDATE", "TRANSACTION", id.toString(),
         buildAuditPayload(req));
 
+    exigirVinculosDoSalao(tenantId, req);
     UUID newProfessionalId = parseUuidNullable(req.professionalId);
     UUID newStockItemId = parseUuidNullable(req.productId);
     BigDecimal newAmount = resolveAmount(req);
@@ -845,6 +847,37 @@ public class ServicoFinanceiro {
    * <b>sem</b> filtro de soft delete, ao contrario do {@code mapTransactionCountByCategoryId}.
    * Comportamento preservado como esta (a assimetria existe no original).
    */
+  /**
+   * Pentest 14/10/2026 (FIN-009): o lancamento manual aceitava profissional, produto e agendamento de
+   * QUALQUER salao — a comissao de produto era gerada para um profissional de outro tenant e o
+   * lancamento ficava amarrado a dados alheios. Agora cada id informado tem de ser deste salao (404
+   * igual a "nao existe", para nao confirmar id de outro salao). A comissao do lancamento manual com
+   * produto continua: e o fluxo legitimo de venda avulsa de produto, e a receita entra junto.
+   */
+  private void exigirVinculosDoSalao(UUID tenantId, TransacaoRequest req) {
+    UUID profissional = parseUuidNullable(req.professionalId);
+    if (profissional != null
+        && profissionalRepository.findByIdAndTenantId(profissional, tenantId).isEmpty()) {
+      throw new ApiClientErrorException("Profissional nao encontrado", 404);
+    }
+    exigirDoSalao("ItemEstoque", parseUuidNullable(req.productId), tenantId, "Produto nao encontrado");
+    exigirDoSalao(
+        "Agendamento", parseUuidNullable(req.appointmentId), tenantId, "Agendamento nao encontrado");
+  }
+
+  private void exigirDoSalao(String entidade, UUID id, UUID tenantId, String mensagem) {
+    if (id == null) return;
+    Object count =
+        entityManager
+            .createQuery("select count(e) from " + entidade + " e where e.id = :id and e.tenantId = :tenantId")
+            .setParameter("id", id)
+            .setParameter("tenantId", tenantId)
+            .getSingleResult();
+    if (!(count instanceof Number n) || n.longValue() == 0) {
+      throw new ApiClientErrorException(mensagem, 404);
+    }
+  }
+
   private long countTransactionsByCategory(UUID tenantId, UUID categoryId) {
     Object count =
         entityManager

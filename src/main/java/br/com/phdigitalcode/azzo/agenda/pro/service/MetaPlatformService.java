@@ -25,6 +25,8 @@ import org.springframework.http.HttpStatus;
 @Service
 public class MetaPlatformService {
 
+  private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger(MetaPlatformService.class);
+
   private static final String PROVIDER_META = "META";
   private static final String EVENT_TYPE_DEAUTHORIZE = "APP_DEAUTHORIZE";
   private static final String EVENT_TYPE_DATA_DELETION = "DATA_DELETION";
@@ -43,6 +45,7 @@ public class MetaPlatformService {
   public MetaAcknowledgeResponse deauthorize(String body) {
     JsonNode payload = parseSignedRequest(body, "Falha ao processar callback de desautorizacao da Meta.");
     persistEvent(EVENT_TYPE_DEAUTHORIZE, payload, "meta-deauthorize-" + UUID.randomUUID());
+    LOG.warn("meta.deauthorize.pendente_tratamento_manual metaUserId={}", text(payload.path("user_id")));
 
     MetaAcknowledgeResponse response = new MetaAcknowledgeResponse();
     response.success = true;
@@ -57,6 +60,8 @@ public class MetaPlatformService {
     JsonNode payload = parseSignedRequest(body, "Falha ao processar solicitacao de exclusao de dados da Meta.");
     String confirmationCode = "meta_del_" + UUID.randomUUID().toString().replace("-", "");
     persistEvent(EVENT_TYPE_DATA_DELETION, payload, confirmationCode);
+    LOG.warn("meta.data_deletion.pendente_tratamento_manual confirmationCode={} metaUserId={}",
+        confirmationCode, text(payload.path("user_id")));
 
     DataDeletionResponse response = new DataDeletionResponse();
     response.url = statusBaseUrl + confirmationCode;
@@ -77,7 +82,9 @@ public class MetaPlatformService {
     response.confirmationCode = confirmationCode;
     response.status = log.isProcessed() ? "received" : "pending";
     response.receivedAt = log.getCreatedAt() != null ? log.getCreatedAt().toString() : null;
-    response.message = "Solicitacao de exclusao de dados registrada.";
+    response.message = log.isProcessed()
+        ? "Solicitacao de exclusao de dados concluida."
+        : "Solicitacao de exclusao de dados registrada; em tratamento pela equipe.";
     return response;
   }
 
@@ -96,8 +103,11 @@ public class MetaPlatformService {
     log.setEventType(eventType);
     log.setPayloadJson(metaSignedRequestService.payloadToJson(payload));
     log.setPayloadHash(metaSignedRequestService.sha256(log.getPayloadJson()));
-    log.setProcessed(true);
-    log.setProcessedAt(Instant.now());
+    // Pentest 14/10/2026 (SEG-014): era gravado processed=true na hora e o status respondia
+    // "received" — a Meta recebia confirmacao de uma exclusao que nunca aconteceu. Hoje nao ha como
+    // ligar o user_id da Meta a um salao (o cadastro embutido nao guarda esse id), entao o evento fica
+    // PENDENTE e gera alerta para tratamento manual; so vira processed quando a exclusao for feita.
+    log.setProcessed(false);
     webhookEventLogRepository.save(log);
   }
 

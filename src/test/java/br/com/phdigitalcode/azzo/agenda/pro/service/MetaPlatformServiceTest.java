@@ -87,6 +87,22 @@ class MetaPlatformServiceTest {
   }
 
   @Test
+  void seg014ExclusaoNaoNasceComoProcessada() throws Exception {
+    JsonNode payload = objectMapper.readTree("{\"user_id\":\"123\"}");
+    when(metaSignedRequestService.parseAndValidateSignedRequest("corpo")).thenReturn(payload);
+    when(metaSignedRequestService.payloadToJson(payload)).thenReturn("{}");
+    when(metaSignedRequestService.sha256(anyString())).thenReturn("hash");
+
+    service.dataDeletion("corpo", "https://host/s/");
+
+    org.mockito.ArgumentCaptor<WebhookEventLog> gravado =
+        org.mockito.ArgumentCaptor.forClass(WebhookEventLog.class);
+    verify(webhookEventLogRepository).save(gravado.capture());
+    assertThat(gravado.getValue().isProcessed()).isFalse();
+    assertThat(gravado.getValue().getProcessedAt()).isNull();
+  }
+
+  @Test
   void dataDeletionStatusRetornaPendingQuandoNaoProcessado() {
     WebhookEventLog log = new WebhookEventLog();
     log.setEventType("DATA_DELETION");

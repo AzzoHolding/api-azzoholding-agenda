@@ -250,4 +250,37 @@ class ProfissionalSenhaDoDonoTest {
 
     assertThat(comum.getPasswordHash()).isNotEqualTo(HASH_ORIGINAL);
   }
+
+  // ---- AGD-031: sessoes encerradas quando OUTRA pessoa troca a senha ---------------------------
+
+  @Test
+  @DisplayName("AGD-031: reset da senha por outra pessoa encerra as sessoes do profissional")
+  void resetPorOutraPessoaEncerraSessoes() {
+    br.com.phdigitalcode.azzo.agenda.pro.security.RefreshTokenService refresh =
+        org.mockito.Mockito.mock(br.com.phdigitalcode.azzo.agenda.pro.security.RefreshTokenService.class);
+    org.springframework.test.util.ReflectionTestUtils.setField(service, "refreshTokenService", refresh);
+    usuario(comumId, PapelUsuario.PROFESSIONAL);
+    Profissional p = profissionalLigadoA(comumId);
+    logadoComo(atendenteId);
+
+    service.resetarSenha(p.getId());
+
+    verify(refresh).revokeAllForUser(comumId);
+  }
+
+  @Test
+  @DisplayName("AGD-031: quem troca a PROPRIA senha nao e deslogado")
+  void trocaDaPropriaSenhaNaoDesloga() {
+    br.com.phdigitalcode.azzo.agenda.pro.security.RefreshTokenService refresh =
+        org.mockito.Mockito.mock(br.com.phdigitalcode.azzo.agenda.pro.security.RefreshTokenService.class);
+    org.springframework.test.util.ReflectionTestUtils.setField(service, "refreshTokenService", refresh);
+    usuario(donoId, PapelUsuario.OWNER);
+    Profissional p = profissionalLigadoA(donoId);
+    logadoComo(donoId);
+
+    service.resetarSenha(p.getId());
+    service.atualizar(p.getId(), edicaoComSenha("NovaSenha@123"));
+
+    verify(refresh, never()).revokeAllForUser(any());
+  }
 }

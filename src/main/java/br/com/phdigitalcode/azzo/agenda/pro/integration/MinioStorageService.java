@@ -54,8 +54,8 @@ import jakarta.annotation.PostConstruct;
  *   <li>{@code removerArquivoImportacao} e best-effort: nunca propaga falha, so loga.
  *   <li>{@code gerarUrlAssinadaLeitura} <b>nao</b> gera presigned URL do MinIO: devolve a URL do
  *       proxy do proprio backend, para nunca expor o storage ao browser. O endpoint
- *       {@code /api/v1/storage/proxy} pertence ao modulo {@code storage}, ainda nao migrado — a URL
- *       ja e emitida, mas so respondera quando esse modulo for portado.
+ *       {@code /api/v1/storage/proxy} e atendido por {@code StorageProxyController} (pentest
+ *       14/10/2026, SEG-020), com URL assinada e com prazo.
  * </ol>
  */
 @Service
@@ -70,6 +70,12 @@ public class MinioStorageService {
   private final String bucket;
   private final int presignExpirationMinutes;
   private final String proxyBaseUrl;
+
+  /**
+   * Derivada de {@code app.security.encryption-key} (separacao de dominio pelo rotulo). Sem ela (teste
+   * que instancia direto), uma chave aleatoria do processo: os links valem so ate o reinicio.
+   */
+  private byte[] chaveDeAssinatura = new java.security.SecureRandom().generateSeed(32);
 
   private volatile MinioClient client;
   private volatile boolean operacional;
@@ -331,7 +337,14 @@ public class MinioStorageService {
     }
   }
 
-  /** URL do proxy do backend — nunca expoe o MinIO diretamente ao browser. */
+  /**
+   * URL do proxy do backend — nunca expoe o MinIO diretamente ao browser.
+   *
+   * <p>Pentest 14/10/2026 (SEG-020): a URL levava so a chave, sem assinatura nem prazo (e nenhum
+   * controller a atendia). Agora leva {@code exp} e {@code sig} (HMAC-SHA256 de chave+prazo), e o
+   * {@code StorageProxyController} so entrega com assinatura valida e dentro do prazo — a chave
+   * sozinha nao abre nada, e quem recebeu o link nao consegue troca-la por outro arquivo ou salao.
+   */
   public String gerarUrlAssinadaLeitura(String storageKey, UUID tenantId) {
     if (storageKey == null || storageKey.isBlank()) {
       throw new IllegalArgumentException("Storage key obrigatoria para gerar URL.");
@@ -341,13 +354,59 @@ public class MinioStorageService {
         proxyBaseUrl.endsWith("/")
             ? proxyBaseUrl.substring(0, proxyBaseUrl.length() - 1)
             : proxyBaseUrl;
+    long exp = calcularExpiracaoUrlAssinada().getEpochSecond();
     return base
         + "/api/v1/storage/proxy?key="
-        + URLEncoder.encode(storageKey, StandardCharsets.UTF_8);
+        + URLEncoder.encode(storageKey, StandardCharsets.UTF_8)
+        + "&exp="
+        + exp
+        + "&sig="
+        + assinar(storageKey, exp);
   }
 
   public Instant calcularExpiracaoUrlAssinada() {
     return Instant.now().plusSeconds(Math.max(presignExpirationMinutes, 1) * 60L);
+  }
+
+  /** SEG-020: assinatura valida, prazo nao vencido e chave no formato de um salao. */
+  public boolean assinaturaDeLeituraValida(String storageKey, long exp, String sig) {
+    if (storageKey == null || sig == null || !storageKey.startsWith("tenant/")) return false;
+    if (storageKey.contains("..") || Instant.now().getEpochSecond() > exp) return false;
+    return java.security.MessageDigest.isEqual(
+        assinar(storageKey, exp).getBytes(StandardCharsets.US_ASCII),
+        sig.getBytes(StandardCharsets.US_ASCII));
+  }
+
+  /** Arquivo baixado pelo proxy, com o tipo deduzido da extensao gravada na chave. */
+  public record ArquivoDoProxy(byte[] conteudo, String contentType) {}
+
+  /** So depois de {@link #assinaturaDeLeituraValida}: o salao vem da propria chave assinada. */
+  public ArquivoDoProxy baixarParaProxy(String storageKey) {
+    String semPrefixo = storageKey.substring("tenant/".length());
+    int barra = semPrefixo.indexOf('/');
+    if (barra <= 0) throw new IllegalStateException("Storage key fora do escopo do tenant.");
+    UUID tenantId = UUID.fromString(semPrefixo.substring(0, barra));
+    return new ArquivoDoProxy(baixarArquivo(storageKey, tenantId), resolverContentType(storageKey));
+  }
+
+  @Value("${app.security.encryption-key:}")
+  void definirSegredoDeAssinatura(String segredo) {
+    if (segredo == null || segredo.isBlank()) return;
+    this.chaveDeAssinatura = hmac(segredo.getBytes(StandardCharsets.UTF_8), "azzo-storage-proxy-v1");
+  }
+
+  private String assinar(String storageKey, long exp) {
+    return java.util.HexFormat.of().formatHex(hmac(chaveDeAssinatura, storageKey + "\n" + exp));
+  }
+
+  private static byte[] hmac(byte[] chave, String dado) {
+    try {
+      javax.crypto.Mac mac = javax.crypto.Mac.getInstance("HmacSHA256");
+      mac.init(new javax.crypto.spec.SecretKeySpec(chave, "HmacSHA256"));
+      return mac.doFinal(dado.getBytes(StandardCharsets.UTF_8));
+    } catch (java.security.GeneralSecurityException e) {
+      throw new IllegalStateException("HmacSHA256 indisponivel", e);
+    }
   }
 
   public boolean isStorageHabilitado() {
@@ -363,7 +422,19 @@ public class MinioStorageService {
   private synchronized void inicializarClienteSeNecessario() {
     if (!minioEnabled || operacional) return;
     try {
-      client = MinioClient.builder().endpoint(endpoint).credentials(accessKey, secretKey).build();
+      // Pentest 14/10/2026 (INT-029): sem timeout, um MinIO travado prendia a thread da requisicao
+      // (e o pool) indefinidamente.
+      okhttp3.OkHttpClient http = new okhttp3.OkHttpClient.Builder()
+          .connectTimeout(java.time.Duration.ofSeconds(5))
+          .readTimeout(java.time.Duration.ofSeconds(60))
+          .writeTimeout(java.time.Duration.ofSeconds(60))
+          .callTimeout(java.time.Duration.ofMinutes(5))
+          .build();
+      client = MinioClient.builder()
+          .endpoint(endpoint)
+          .credentials(accessKey, secretKey)
+          .httpClient(http, true)
+          .build();
 
       boolean bucketExiste = client.bucketExists(BucketExistsArgs.builder().bucket(bucket).build());
       if (!bucketExiste) {
