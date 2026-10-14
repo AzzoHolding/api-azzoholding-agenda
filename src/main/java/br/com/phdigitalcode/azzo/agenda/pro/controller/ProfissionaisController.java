@@ -48,7 +48,27 @@ public class ProfissionaisController {
   @GetMapping
   @RequiresPermission("professional:read")
   public List<ProfissionalResponse> listar(@RequestParam(name = "serviceId", required = false) String serviceId) {
-    return profissionalService.listar(serviceId);
+    List<ProfissionalResponse> equipe = profissionalService.listar(serviceId);
+    Set<String> grupos = rolesDoUsuarioAutenticado();
+    boolean isProfessionalOnly =
+        grupos.contains("PROFESSIONAL") && !grupos.contains("OWNER") && !grupos.contains("ADMIN");
+    return isProfessionalOnly ? semDadosDosColegas(equipe, userIdAutenticadoOuFalhar()) : equipe;
+  }
+
+  /**
+   * Pentest 14/10/2026 (AGD-016): o GET /{id} ja limitava o PROFESSIONAL ao proprio cadastro, mas a
+   * LISTA entregava a comissao, o e-mail e o telefone de toda a equipe. Ele continua vendo nome,
+   * especialidades e jornada dos colegas (a agenda precisa); comissao e contato, so os proprios.
+   */
+  static List<ProfissionalResponse> semDadosDosColegas(List<ProfissionalResponse> equipe, UUID eu) {
+    String meuId = eu == null ? null : eu.toString();
+    for (ProfissionalResponse p : equipe) {
+      if (meuId != null && meuId.equals(p.userId)) continue;
+      p.commissionRate = null;
+      p.email = null;
+      p.phone = null;
+    }
+    return equipe;
   }
 
   @GetMapping("/limits")

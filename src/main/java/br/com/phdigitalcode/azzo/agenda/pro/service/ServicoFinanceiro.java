@@ -507,7 +507,7 @@ public class ServicoFinanceiro {
 
   private String escapeCsv(String value) {
     if (value == null) return "";
-    String v = value.replace("\"", "\"\"");
+    String v = br.com.phdigitalcode.azzo.agenda.pro.util.CelulaCsv.semFormula(value).replace("\"", "\"\"");
     if (v.contains(";") || v.contains("\"") || v.contains("\n")) {
       return "\"" + v + "\"";
     }

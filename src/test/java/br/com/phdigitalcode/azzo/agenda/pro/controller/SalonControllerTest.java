@@ -79,15 +79,18 @@ class SalonControllerTest {
     verify(servicoSalonProfile).atualizarLogo(PNG_MAGIC_BYTES, "logo.png", "image/png");
   }
 
+  /**
+   * Pentest 14/10/2026 (SEG-021): este teste fixava o comportamento VULNERAVEL — conteudo sem
+   * assinatura de imagem era aceito como image/webp so pelo nome do arquivo. Agora e recusado.
+   */
   @Test
-  void fallbackPorExtensaoQuandoAssinaturaNaoEhReconhecida() {
+  void conteudoSemAssinaturaDeImagemERecusadoMesmoComNomeWebp() {
     byte[] conteudo = "conteudo-sem-assinatura-conhecida".getBytes(StandardCharsets.UTF_8);
-    when(servicoSalonProfile.atualizarLogo(any(), eq("logo.webp"), eq("image/webp")))
-        .thenReturn(new SalonDtos.SalonProfile());
 
-    controller.atualizarLogo(arquivo("logo.webp", conteudo));
-
-    verify(servicoSalonProfile).atualizarLogo(conteudo, "logo.webp", "image/webp");
+    assertThatThrownBy(() -> controller.atualizarLogo(arquivo("logo.webp", conteudo)))
+        .isInstanceOf(ApiClientErrorException.class)
+        .hasMessageContaining("Formato de imagem nao suportado");
+    verify(servicoSalonProfile, never()).atualizarLogo(any(), any(), any());
   }
 
   // ─── atualizarLogo: erros ─────────────────────────────────────────────────

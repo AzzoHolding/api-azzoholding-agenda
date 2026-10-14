@@ -41,10 +41,18 @@ public class RateLimitFilter extends OncePerRequestFilter {
 
   private final ObjectMapper objectMapper = new ObjectMapper();
   private final Map<String, RateLimitRule> rulesByPath;
+  /** Regras por padrao (rotas com variavel no caminho, como o slug do salao). */
+  private final Map<java.util.regex.Pattern, RateLimitRule> rulesByPattern;
   private final Map<String, Bucket> buckets = new ConcurrentHashMap<>();
 
   public RateLimitFilter(Map<String, RateLimitRule> rulesByPath) {
+    this(rulesByPath, Map.of());
+  }
+
+  public RateLimitFilter(
+      Map<String, RateLimitRule> rulesByPath, Map<java.util.regex.Pattern, RateLimitRule> rulesByPattern) {
     this.rulesByPath = rulesByPath;
+    this.rulesByPattern = rulesByPattern;
   }
 
   @Override
@@ -54,14 +62,24 @@ public class RateLimitFilter extends OncePerRequestFilter {
       chain.doFilter(request, response);
       return;
     }
-    RateLimitRule rule = rulesByPath.get(CaminhoDaRequisicao.normalizado(request)); // SEG-002: "/auth/%6Cogin" tambem conta
+    String caminho = CaminhoDaRequisicao.normalizado(request); // SEG-002: "/auth/%6Cogin" tambem conta
+    RateLimitRule rule = rulesByPath.get(caminho);
+    if (rule == null) {
+      for (Map.Entry<java.util.regex.Pattern, RateLimitRule> e : rulesByPattern.entrySet()) {
+        if (e.getKey().matcher(caminho).matches()) {
+          rule = e.getValue();
+          break;
+        }
+      }
+    }
     if (rule == null) {
       chain.doFilter(request, response);
       return;
     }
 
     String identity = resolveClientIp(request);
-    Bucket bucket = buckets.computeIfAbsent(rule.bucketName() + ":" + identity, k -> newBucket(rule));
+    RateLimitRule regra = rule;
+    Bucket bucket = buckets.computeIfAbsent(regra.bucketName() + ":" + identity, k -> newBucket(regra));
     if (bucket.tryConsume(1)) {
       chain.doFilter(request, response);
       return;
@@ -111,7 +129,11 @@ public class RateLimitFilter extends OncePerRequestFilter {
         @Value("${app.rate-limit.auth-forgot-password.max-attempts:5}") int forgotMax,
         @Value("${app.rate-limit.auth-forgot-password.window-minutes:10}") int forgotWindow,
         @Value("${app.rate-limit.auth-reset-password.max-attempts:5}") int resetMax,
-        @Value("${app.rate-limit.auth-reset-password.window-minutes:10}") int resetWindow) {
+        @Value("${app.rate-limit.auth-reset-password.window-minutes:10}") int resetWindow,
+        @Value("${app.rate-limit.public-booking.max-attempts:10}") int bookingMax,
+        @Value("${app.rate-limit.public-booking.window-minutes:10}") int bookingWindow,
+        @Value("${app.rate-limit.public-funnel.max-attempts:60}") int funnelMax,
+        @Value("${app.rate-limit.public-funnel.window-minutes:10}") int funnelWindow) {
 
       Map<String, RateLimitRule> rules = Map.of(
           "/api/v1/auth/login",
@@ -127,9 +149,17 @@ public class RateLimitFilter extends OncePerRequestFilter {
           "/api/v1/auth/resend-email-confirmation",
           new RateLimitRule("auth-resend-email-confirmation", forgotMax, Duration.ofMinutes(forgotWindow)));
 
+      // Pentest 14/10/2026 (SEG-011/AGD-012): o agendamento publico nao tinha limite — dava para
+      // encher a agenda de um salao de pedidos falsos e disparar confirmacao para telefones de
+      // terceiros. O slug esta no meio do caminho, por isso regra por padrao.
+      Map<java.util.regex.Pattern, RateLimitRule> porPadrao = Map.of(
+          java.util.regex.Pattern.compile("/api/v1/public/salons/[^/]+/appointments"),
+          new RateLimitRule("public-booking", bookingMax, Duration.ofMinutes(bookingWindow)),
+          java.util.regex.Pattern.compile("/api/v1/public/salons/[^/]+/booking-funnel/events"),
+          new RateLimitRule("public-funnel", funnelMax, Duration.ofMinutes(funnelWindow)));
       FilterRegistrationBean<RateLimitFilter> registration =
-          new FilterRegistrationBean<>(new RateLimitFilter(rules));
-      registration.addUrlPatterns("/api/v1/auth/*");
+          new FilterRegistrationBean<>(new RateLimitFilter(rules, porPadrao));
+      registration.addUrlPatterns("/api/v1/auth/*", "/api/v1/public/*");
       registration.setOrder(Ordered.HIGHEST_PRECEDENCE + 10);
       return registration;
     }

@@ -112,6 +112,12 @@ public class AuthServiceImpl implements AuthService {
 
   private final ConcurrentHashMap<String, LoginAttemptEntry> emailLoginAttempts = new ConcurrentHashMap<>();
 
+  /**
+   * Ultimo passo TOTP aceito por usuario: um codigo MFA so vale uma vez (SEG-007). Em memoria — o
+   * api_agenda roda em uma instancia; num reinicio, no maximo o codigo da janela atual vale de novo.
+   */
+  private final ConcurrentHashMap<UUID, Long> ultimoPassoMfa = new ConcurrentHashMap<>();
+
   private final TenantRepository tenantRepository;
   private final UsuarioRepository usuarioRepository;
   private final RbacRoleRepository rbacRoleRepository;
@@ -259,6 +265,9 @@ public class AuthServiceImpl implements AuthService {
 
     Usuario usuario = usuarioRepository.findByEmail(normalizedEmail).orElse(null);
     if (usuario == null) {
+      // Pentest 14/10/2026 (SEG-008): a falha so era contada para e-mail EXISTENTE, entao so conta
+      // real chegava ao 429 — o bloqueio revelava quem tem cadastro. Agora conta para todos.
+      recordFailedEmailLogin(normalizedEmail);
       LOG.warn(CorrelatedLogging.context("Login recusado", "email", normalizedEmail, "reason", "user_not_found"));
       throw new IllegalArgumentException("Credenciais invalidas");
     }
@@ -277,7 +286,8 @@ public class AuthServiceImpl implements AuthService {
         Map.of("email", usuario.getEmail()));
       throw new IllegalArgumentException("Credenciais invalidas");
     }
-    emailLoginAttempts.remove(normalizedEmail);
+    // SEG-007: o contador NAO e zerado aqui — so depois do MFA. Antes, a senha certa zerava o
+    // contador e os codigos MFA errados nao contavam: o segundo fator ficava sem limite.
 
     // Cadastro novo que ainda nao abriu o link do e-mail. DEPOIS da senha, de proposito: antes dela,
     // a resposta diria a um estranho que aquele e-mail existe e esta pendente.
@@ -324,8 +334,10 @@ public class AuthServiceImpl implements AuthService {
 
     if (requiresMfaForLogin(usuario)) {
       String secret = decryptMfaSecretOrThrow(usuario);
-      boolean mfaOk = totpService.verifyCode(secret, request.mfaCode);
+      java.util.OptionalLong passo = totpService.passoValido(secret, request.mfaCode, Instant.now());
+      boolean mfaOk = passo.isPresent() && passoAindaNaoUsado(usuario.getId(), passo.getAsLong());
       if (!mfaOk) {
+        recordFailedEmailLogin(normalizedEmail);
         LOG.warn(CorrelatedLogging.context(
             "Login recusado", "tenantId", usuario.getTenantId(), "userId", usuario.getId(),
             "email", usuario.getEmail(), "reason", "invalid_mfa_code"));
@@ -339,6 +351,7 @@ public class AuthServiceImpl implements AuthService {
       }
     }
 
+    emailLoginAttempts.remove(normalizedEmail);
     AuthResponse response = montarResposta(usuario);
     registrarAuditoriaAuth(
         usuario.getTenantId(),
@@ -534,6 +547,17 @@ public class AuthServiceImpl implements AuthService {
     resp.expires_in = jwtService.accessTokenExpiresInSeconds();
     resp.user = usuarioMapper.toResponse(usuario);
     return resp;
+  }
+
+  /** Registra o passo e diz se era novo; um passo igual ou anterior ao ultimo e reuso (SEG-007). */
+  private boolean passoAindaNaoUsado(UUID userId, long passo) {
+    boolean[] novo = {false};
+    ultimoPassoMfa.compute(userId, (k, ultimo) -> {
+      if (ultimo != null && passo <= ultimo) return ultimo;
+      novo[0] = true;
+      return passo;
+    });
+    return novo[0];
   }
 
   private void checkEmailLoginLockout(String email) {

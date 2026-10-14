@@ -80,7 +80,9 @@ class TelegramWebhookControllerTest {
     config = new TenantTelegramConfig();
     config.setTenantId(tenantId);
     config.setTelegramEnabled(true);
-    config.setTelegramWebhookSecretTokenHash(null);
+    // Webhook so aceita com o segredo certo (INT-020): os cenarios abaixo mandam "segredo".
+    config.setTelegramWebhookSecretTokenHash("hash-do-segredo");
+    when(webhookVerifyTokenHashService.hash("segredo")).thenReturn("hash-do-segredo");
 
     when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
     when(tenantTelegramConfigRepository.findById(tenantId)).thenReturn(Optional.of(config));
@@ -104,10 +106,20 @@ class TelegramWebhookControllerTest {
   void tenantSemTelegramHabilitadoEhIgnorado() {
     config.setTelegramEnabled(false);
 
-    TelegramWebhookController.WebhookResponse response = controller.receive(tenantId.toString(), null, "{}");
+    TelegramWebhookController.WebhookResponse response = controller.receive(tenantId.toString(), "segredo", "{}");
 
     assertThat(response.status).isEqualTo("IGNORED");
     assertThat(response.message).isEqualTo("Tenant sem Telegram habilitado");
+  }
+
+  /** Pentest 14/10/2026 (INT-020): sem segredo configurado, o webhook recusa — antes aceitava tudo. */
+  @Test
+  void semSegredoConfiguradoOuSemCabecalhoEhRejeitado() {
+    config.setTelegramWebhookSecretTokenHash(null);
+    assertThat(controller.receive(tenantId.toString(), "qualquer", "{}").status).isEqualTo("REJECTED");
+
+    config.setTelegramWebhookSecretTokenHash("hash-do-segredo");
+    assertThat(controller.receive(tenantId.toString(), null, "{}").status).isEqualTo("REJECTED");
   }
 
   @Test
@@ -138,7 +150,7 @@ class TelegramWebhookControllerTest {
   @Test
   void payloadInvalidoEhIgnorado() {
     TelegramWebhookController.WebhookResponse response =
-        controller.receive(tenantId.toString(), null, "{invalido");
+        controller.receive(tenantId.toString(), "segredo", "{invalido");
 
     assertThat(response.status).isEqualTo("IGNORED");
     assertThat(response.message).isEqualTo("Payload invalido");
@@ -148,7 +160,7 @@ class TelegramWebhookControllerTest {
   void mensagemSemChatIdOuConteudoEhIgnorada() {
     String payload = "{\"message\":{\"chat\":{},\"from\":{}}}";
 
-    TelegramWebhookController.WebhookResponse response = controller.receive(tenantId.toString(), null, payload);
+    TelegramWebhookController.WebhookResponse response = controller.receive(tenantId.toString(), "segredo", payload);
 
     assertThat(response.status).isEqualTo("IGNORED");
     assertThat(response.message).isEqualTo("Mensagem sem chatId ou conteudo");
@@ -164,7 +176,7 @@ class TelegramWebhookControllerTest {
         .thenReturn(inbound);
 
     String payload = "{\"message\":{\"message_id\":1,\"chat\":{\"id\":123},\"text\":\"ola\",\"from\":{\"first_name\":\"Joana\"}}}";
-    TelegramWebhookController.WebhookResponse response = controller.receive(tenantId.toString(), null, payload);
+    TelegramWebhookController.WebhookResponse response = controller.receive(tenantId.toString(), "segredo", payload);
 
     assertThat(response.status).isEqualTo("IGNORED");
     assertThat(response.message).isEqualTo("Mensagem duplicada");
@@ -183,7 +195,7 @@ class TelegramWebhookControllerTest {
         .thenReturn(inbound);
 
     String payload = "{\"message\":{\"message_id\":1,\"chat\":{\"id\":123},\"text\":\"PARE\"}}";
-    TelegramWebhookController.WebhookResponse response = controller.receive(tenantId.toString(), null, payload);
+    TelegramWebhookController.WebhookResponse response = controller.receive(tenantId.toString(), "segredo", payload);
 
     assertThat(response.message).isEqualTo("opt-out registrado");
     verify(servicoOptOut).registrar(inbound.client);
@@ -201,7 +213,7 @@ class TelegramWebhookControllerTest {
         .thenReturn(inbound);
 
     String payload = "{\"message\":{\"message_id\":1,\"chat\":{\"id\":123},\"text\":\"ola\"}}";
-    TelegramWebhookController.WebhookResponse response = controller.receive(tenantId.toString(), null, payload);
+    TelegramWebhookController.WebhookResponse response = controller.receive(tenantId.toString(), "segredo", payload);
 
     assertThat(response.status).isEqualTo("IGNORED");
     assertThat(response.message).isEqualTo("Modo manual ativo");
@@ -224,7 +236,7 @@ class TelegramWebhookControllerTest {
         .thenReturn(ChannelSendResult.sent("wamid-1"));
 
     String payload = "{\"message\":{\"message_id\":1,\"chat\":{\"id\":123},\"text\":\"ola\",\"from\":{\"first_name\":\"Joana\"}}}";
-    TelegramWebhookController.WebhookResponse response = controller.receive(tenantId.toString(), null, payload);
+    TelegramWebhookController.WebhookResponse response = controller.receive(tenantId.toString(), "segredo", payload);
 
     assertThat(response.status).isEqualTo("OK");
     assertThat(response.conversationId).isEqualTo(conv.getId().toString());
@@ -250,7 +262,7 @@ class TelegramWebhookControllerTest {
         .thenReturn(ChannelSendResult.sent("wamid-fallback"));
 
     String payload = "{\"message\":{\"message_id\":1,\"chat\":{\"id\":123},\"text\":\"ola\"}}";
-    TelegramWebhookController.WebhookResponse response = controller.receive(tenantId.toString(), null, payload);
+    TelegramWebhookController.WebhookResponse response = controller.receive(tenantId.toString(), "segredo", payload);
 
     assertThat(response.status).isEqualTo("OK");
     verify(chatService).registerOutboundAssistantMessage(
@@ -274,7 +286,7 @@ class TelegramWebhookControllerTest {
         .thenReturn(ChannelSendResult.failed("TELEGRAM_ERROR", "canal indisponivel"));
 
     String payload = "{\"message\":{\"message_id\":1,\"chat\":{\"id\":123},\"text\":\"ola\"}}";
-    TelegramWebhookController.WebhookResponse response = controller.receive(tenantId.toString(), null, payload);
+    TelegramWebhookController.WebhookResponse response = controller.receive(tenantId.toString(), "segredo", payload);
 
     assertThat(response.status).isEqualTo("ERROR");
     assertThat(response.message).isEqualTo("canal indisponivel");
@@ -286,7 +298,7 @@ class TelegramWebhookControllerTest {
         .thenThrow(new IllegalStateException("erro totalmente inesperado"));
 
     String payload = "{\"message\":{\"message_id\":1,\"chat\":{\"id\":123},\"text\":\"ola\"}}";
-    TelegramWebhookController.WebhookResponse response = controller.receive(tenantId.toString(), null, payload);
+    TelegramWebhookController.WebhookResponse response = controller.receive(tenantId.toString(), "segredo", payload);
 
     assertThat(response.status).isEqualTo("ERROR");
     assertThat(response.message).isEqualTo("Falha interna ao processar o webhook do Telegram");

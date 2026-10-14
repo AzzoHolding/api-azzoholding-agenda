@@ -62,4 +62,18 @@ class RateLimitFilterTest {
     for (int i = 0; i < 5; i++) assertThat(post("/api/v1/auth/refresh")).isEqualTo(200);
     verify(cadeia, times(5)).doFilter(any(), any());
   }
+
+  /** Pentest 14/10/2026 (SEG-011): o agendamento publico nao tinha limite nenhum. */
+  @Test
+  void agendamentoPublicoELimitadoPorIpEmQualquerSalao() throws Exception {
+    filtro = new RateLimitFilter(Map.of(), Map.of(
+        java.util.regex.Pattern.compile("/api/v1/public/salons/[^/]+/appointments"),
+        new RateLimitRule("public-booking", 2, Duration.ofMinutes(10))));
+    assertThat(post("/api/v1/public/salons/studio-bella/appointments")).isEqualTo(200);
+    assertThat(post("/api/v1/public/salons/outro-salao/appointments")).isEqualTo(200);
+    // Mesmo IP, terceiro pedido (em qualquer salao, com qualquer grafia): 429.
+    assertThat(post("/api/v1/public/salons/studio-bella/%61ppointments")).isEqualTo(429);
+    // Leitura publica (horarios, servicos) continua livre: o filtro so conta POST nas rotas com regra.
+    assertThat(post("/api/v1/public/salons/studio-bella/closures")).isEqualTo(200);
+  }
 }
