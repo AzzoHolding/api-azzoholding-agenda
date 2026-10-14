@@ -130,4 +130,17 @@ class GlobalExceptionHandlerTest {
     assertThat(response.getStatusCode().value()).isEqualTo(429);
     assertThat(response.getBody().message).contains("Muitas tentativas em pouco tempo");
   }
+
+  /** Pentest 14/10/2026 (SEG-013): falha inesperada era 400 e o 401 dependia de uma palavra na mensagem. */
+  @Test
+  void falhaInesperadaE500EUnicaFalhaDeLoginE401() {
+    assertThat(handler.handleGeneric(new NullPointerException("x")).getStatusCode().value()).isEqualTo(500);
+    assertThat(handler.handleGeneric(new IllegalArgumentException("Credenciais invalidas")).getStatusCode().value())
+        .isEqualTo(401);
+    assertThat(handler.handleGeneric(
+            new IllegalArgumentException("Atualize as credenciais da integracao")).getStatusCode().value())
+        .isEqualTo(400);
+    assertThat(handler.handleGeneric(new IllegalArgumentException("Nome obrigatorio")).getStatusCode().value())
+        .isEqualTo(400);
+  }
 }

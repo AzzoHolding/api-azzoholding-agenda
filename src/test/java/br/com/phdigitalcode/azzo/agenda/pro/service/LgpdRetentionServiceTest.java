@@ -56,8 +56,8 @@ class LgpdRetentionServiceTest {
 
     service.purgarDadosExpirados();
 
-    // webhooks, whatsapp, notificacoes, e-mails e linhas de erro da importacao
-    verify(connection, times(5)).prepareStatement(any());
+    // webhooks, whatsapp, notificacoes, e-mails, linhas de erro da importacao e senhas de certificado
+    verify(connection, times(6)).prepareStatement(any());
     verify(closureDateRepository).deleteByClosureDateBefore(any(LocalDate.class));
     verify(reactivationSendLogRepository).deleteExpired(any(Instant.class));
     verify(processadorImportacaoClientes).limparArquivosDeJobsFinalizados();
@@ -70,11 +70,12 @@ class LgpdRetentionServiceTest {
 
     service.purgarDadosSemPrazo();
 
-    verify(connection, times(3)).prepareStatement(sql.capture());
+    verify(connection, times(4)).prepareStatement(sql.capture());
     assertThat(sql.getAllValues())
         .anyMatch(s -> s.contains("FROM notifications") && s.contains("180 days"))
         .anyMatch(s -> s.contains("FROM email_jobs") && s.contains("'PROCESSED', 'FAILED'"))
-        .anyMatch(s -> s.contains("FROM importacao_cliente_erro_linha"));
+        .anyMatch(s -> s.contains("FROM importacao_cliente_erro_linha"))
+        .anyMatch(s -> s.contains("nfse_certificate_unlock_sessions") && s.contains("password_enc = NULL"));
   }
 
   @Test

@@ -357,6 +357,11 @@ public class ProfissionalService {
     String temporaryPassword = generatePassword(12);
     user.setPasswordHash(BCrypt.withDefaults().hashToString(12, temporaryPassword.toCharArray()));
     usuarioRepository.save(user);
+    // Pentest 14/10/2026 (AGD-031): a senha mudou por decisao de OUTRA pessoa — quem estava logado
+    // com a senha antiga (inclusive quem a vazou) nao pode continuar com a sessao aberta.
+    if (refreshTokenService != null && !isCurrentAuthenticatedUser(user.getId())) {
+      refreshTokenService.revokeAllForUser(user.getId());
+    }
     String userEmail = user.getEmail();
     String userName = user.getName();
     afterCommitExecutor.run(
@@ -569,6 +574,10 @@ public class ProfissionalService {
       exigirQuePodeTrocarSenhaDe(user);
       passwordPolicyValidator.validateOrThrow(newPassword);
       user.setPasswordHash(BCrypt.withDefaults().hashToString(12, newPassword.toCharArray()));
+      // AGD-031: senha definida por outra pessoa encerra as sessoes abertas com a anterior.
+      if (refreshTokenService != null && user.getId() != null && !isCurrentAuthenticatedUser(user.getId())) {
+        refreshTokenService.revokeAllForUser(user.getId());
+      }
     }
   }
 

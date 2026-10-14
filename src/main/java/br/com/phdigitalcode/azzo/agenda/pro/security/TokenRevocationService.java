@@ -48,7 +48,12 @@ public class TokenRevocationService {
     if (entry != null && entry.cachedAt().isAfter(now.minus(CACHE_TTL))) {
       return entry.revokedBefore();
     }
-    Instant revokedBefore = usuarioRepository.findById(userId).map(Usuario::getTokensRevokedBefore).orElse(null);
+    // Pentest 14/10/2026 (SEG-016): usuario que nao existe mais (excluido) tinha o token aceito ate
+    // expirar. Agora conta como revogado — Instant.MAX e maior que qualquer iat.
+    // Cuidado: Optional.map de campo nulo tambem vira vazio — o MAX e so para usuario INEXISTENTE,
+    // nao para quem nunca teve revogacao (tokensRevokedBefore nulo).
+    java.util.Optional<Usuario> usuario = usuarioRepository.findById(userId);
+    Instant revokedBefore = usuario.isEmpty() ? Instant.MAX : usuario.get().getTokensRevokedBefore();
     cache.put(userId, new CacheEntry(revokedBefore, now));
     return revokedBefore;
   }

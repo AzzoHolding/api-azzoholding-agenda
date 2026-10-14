@@ -79,6 +79,8 @@ public class SecurityConfig {
                 "/api/v1/public/**",
                 "/api/v1/checkout/**",
                 "/api/v1/internal/**",
+                // SEG-020: sem JWT (vai em <img>); quem autoriza e a assinatura com prazo da URL.
+                "/api/v1/storage/proxy",
                 "/webhook/**",
                 "/actuator/**",
                 "/v3/api-docs/**",

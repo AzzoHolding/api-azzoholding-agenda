@@ -31,6 +31,7 @@ public interface EmailJobRepository extends JpaRepository<EmailJob, UUID> {
       """
       update EmailJob j
          set j.status = br.com.phdigitalcode.azzo.agenda.pro.entity.enums.EmailJobStatus.PROCESSED,
+             j.payloadJson = '{}',
              j.providerStatus = :providerStatus,
              j.fromEmail = :fromEmail,
              j.processedAt = :processedAt,
@@ -49,6 +50,7 @@ public interface EmailJobRepository extends JpaRepository<EmailJob, UUID> {
       """
       update EmailJob j
          set j.status = br.com.phdigitalcode.azzo.agenda.pro.entity.enums.EmailJobStatus.FAILED,
+             j.payloadJson = '{}',
              j.providerStatus = :providerStatus,
              j.errorMessage = :errorMessage,
              j.fromEmail = :fromEmail,
@@ -96,7 +98,7 @@ public interface EmailJobRepository extends JpaRepository<EmailJob, UUID> {
 
   default boolean reagendar(
       UUID jobId, int tentativas, Instant proxima, String providerStatus, String errorMessage, String fromEmail) {
-    return reagendarInternal(jobId, tentativas, proxima, providerStatus, errorMessage, fromEmail) > 0;
+    return reagendarInternal(jobId, tentativas, proxima, providerStatus, truncar(errorMessage), fromEmail) > 0;
   }
 
   default List<EmailJob> findNextNewBatch(int limit) {
@@ -107,8 +109,17 @@ public interface EmailJobRepository extends JpaRepository<EmailJob, UUID> {
     return markProcessedInternal(jobId, providerStatus, fromEmail, processedAt) > 0;
   }
 
+  /**
+   * Pentest 14/10/2026 (INT-022): o payload guarda o LINK com o token de redefinicao/confirmacao em
+   * claro. Ao terminar (enviado ou falha definitiva) ele vira '{}' — so o job pendente precisa dele.
+   * A mensagem de erro vinha com a pilha inteira: fica nos 1000 primeiros caracteres.
+   */
   default boolean markFailed(
       UUID jobId, String providerStatus, String errorMessage, String fromEmail, Instant processedAt) {
-    return markFailedInternal(jobId, providerStatus, errorMessage, fromEmail, processedAt) > 0;
+    return markFailedInternal(jobId, providerStatus, truncar(errorMessage), fromEmail, processedAt) > 0;
+  }
+
+  static String truncar(String texto) {
+    return texto == null || texto.length() <= 1000 ? texto : texto.substring(0, 1000);
   }
 }

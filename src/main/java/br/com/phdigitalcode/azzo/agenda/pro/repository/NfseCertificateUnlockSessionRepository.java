@@ -26,14 +26,16 @@ public interface NfseCertificateUnlockSessionRepository
 
   @Modifying
   @Query(
-      "update NfseCertificateUnlockSessionEntity s set s.status = 'REVOKED', s.revokedAt = :now"
+      // Pentest 14/10/2026 (INT-025): a senha do certificado A1 (cifrada, mas reversivel) ficava na
+      // sessao revogada/expirada para sempre. Sai junto com o fim da sessao.
+      "update NfseCertificateUnlockSessionEntity s set s.status = 'REVOKED', s.revokedAt = :now, s.passwordEnc = null"
           + " where s.tenantId = :tenantId and s.userId = :userId and s.status = 'ACTIVE'")
   int revokeActiveSessions(
       @Param("now") Instant now, @Param("tenantId") UUID tenantId, @Param("userId") UUID userId);
 
   @Modifying
   @Query(
-      "update NfseCertificateUnlockSessionEntity s set s.status = 'EXPIRED'"
+      "update NfseCertificateUnlockSessionEntity s set s.status = 'EXPIRED', s.passwordEnc = null"
           + " where s.status = 'ACTIVE' and s.expiresAt <= :now")
   int expireActiveSessionsPastDue(@Param("now") Instant now);
 
