@@ -1,9 +1,6 @@
 package br.com.phdigitalcode.azzo.agenda.pro.controller;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.net.URLConnection;
-import java.util.Locale;
 import java.util.Set;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -104,18 +101,17 @@ public class SalonController {
     return servicoSalonProfile.removerLogo();
   }
 
-  private String detectarContentType(byte[] bytesArquivo, String nomeArquivo) {
-    try (ByteArrayInputStream input = new ByteArrayInputStream(bytesArquivo)) {
-      String detectado = URLConnection.guessContentTypeFromStream(input);
-      if (detectado != null && !detectado.isBlank()) return detectado;
-    } catch (IOException ignored) {
-      // no-op
-    }
-
-    String nome = nomeArquivo == null ? "" : nomeArquivo.toLowerCase(Locale.ROOT);
-    if (nome.endsWith(".webp")) return "image/webp";
-    if (nome.endsWith(".png")) return "image/png";
-    if (nome.endsWith(".jpg") || nome.endsWith(".jpeg")) return "image/jpeg";
+  /**
+   * Tipo pelo CONTEUDO, nunca pelo nome (pentest 14/10/2026, SEG-021): o
+   * {@code guessContentTypeFromStream} nao reconhece WEBP, e o codigo caia na extensao do nome —
+   * qualquer conteudo (HTML, SVG com script) chamado {@code a.webp} era aceito como imagem.
+   */
+  static String detectarContentType(byte[] bytesArquivo, String nomeArquivo) {
+    byte[] b = bytesArquivo == null ? new byte[0] : bytesArquivo;
+    if (b.length >= 8 && (b[0] & 0xFF) == 0x89 && b[1] == 'P' && b[2] == 'N' && b[3] == 'G') return "image/png";
+    if (b.length >= 3 && (b[0] & 0xFF) == 0xFF && (b[1] & 0xFF) == 0xD8 && (b[2] & 0xFF) == 0xFF) return "image/jpeg";
+    if (b.length >= 12 && b[0] == 'R' && b[1] == 'I' && b[2] == 'F' && b[3] == 'F'
+        && b[8] == 'W' && b[9] == 'E' && b[10] == 'B' && b[11] == 'P') return "image/webp";
     return "application/octet-stream";
   }
 }

@@ -148,7 +148,10 @@ public interface ChatMessageRepository extends JpaRepository<ChatMessageEntity, 
     if (cursorId == null) {
       return listByConversationOrdered(tenantId, conversationId, pageable);
     }
-    Optional<ChatMessageEntity> cursor = findById(cursorId);
+    // Pentest 14/10/2026 (INT-033): o cursor era buscado so pelo id, sem tenant — a data de uma
+    // mensagem de outro salao virava limite da consulta (oraculo de existencia e ordem).
+    Optional<ChatMessageEntity> cursor = findById(cursorId)
+        .filter(m -> tenantId.equals(m.getTenantId()) && conversationId.equals(m.getConversationId()));
     if (cursor.isEmpty()) {
       return listByConversationOrdered(tenantId, conversationId, pageable);
     }

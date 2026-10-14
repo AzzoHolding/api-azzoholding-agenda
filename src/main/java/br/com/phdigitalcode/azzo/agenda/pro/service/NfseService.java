@@ -1142,7 +1142,7 @@ public class NfseService {
 
   private String csvCell(Object value) {
     if (value == null) return "\"\"";
-    String raw = String.valueOf(value);
+    String raw = br.com.phdigitalcode.azzo.agenda.pro.util.CelulaCsv.semFormula(String.valueOf(value));
     String escaped = raw.replace("\"", "\"\"");
     return "\"" + escaped + "\"";
   }

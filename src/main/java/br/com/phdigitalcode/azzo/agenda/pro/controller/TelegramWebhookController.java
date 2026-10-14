@@ -271,9 +271,17 @@ public class TelegramWebhookController {
   private boolean isSecretTokenValid(TenantTelegramConfig config, String rawSecretToken) {
     if (config == null) return false;
     String expectedHash = normalize(config.getTelegramWebhookSecretTokenHash());
-    if (expectedHash == null) return true;
+    // Pentest 14/10/2026 (INT-020): sem segredo configurado o webhook aceitava QUALQUER chamada —
+    // so o tenantId do path separava um estranho de injetar mensagens como se fossem de clientes.
+    // Agora e fail-closed: o segredo e criado ao configurar ou testar o bot (ensureWebhookSecret).
+    // Em 14/10/2026, nenhum salao com Telegram ligado estava sem segredo.
+    if (expectedHash == null || rawSecretToken == null || rawSecretToken.isBlank()) return false;
     String candidateHash = webhookVerifyTokenHashService.hash(rawSecretToken);
-    return expectedHash.equals(candidateHash);
+    // SEG-024: comparacao em tempo constante.
+    return candidateHash != null
+        && java.security.MessageDigest.isEqual(
+            expectedHash.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+            candidateHash.getBytes(java.nio.charset.StandardCharsets.UTF_8));
   }
 
   private JsonNode firstMessageNode(JsonNode payload) {
