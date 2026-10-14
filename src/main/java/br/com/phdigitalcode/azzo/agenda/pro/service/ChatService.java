@@ -559,6 +559,21 @@ public class ChatService {
         tenantId, conversationId, clientId, content, providerMessageId, status, providerErrorCode, providerErrorMessage));
   }
 
+  /**
+   * Mensagem automatica do salao (lembrete) enviada fora do chat: entra no historico da conversa,
+   * criando a conversa se o cliente ainda nao tem uma. Sem isto o lembrete saia pelo WhatsApp e o
+   * chat nao mostrava nada — e a resposta "CONFIRMAR" chegava sem contexto para a equipe.
+   */
+  public void registrarMensagemAutomatica(
+      UUID tenantId, Cliente client, ChatChannel channel, String externalContactId, String content,
+      String providerMessageId) {
+    requiresNewTransaction.executeWithoutResult(txStatus -> {
+      ChatConversationEntity conversation = resolveOrCreateConversation(tenantId, client, channel, externalContactId);
+      registerOutboundAssistantMessageInternal(
+          tenantId, conversation.getId(), client.getId(), content, providerMessageId, ChatMessageStatus.SENT, null, null);
+    });
+  }
+
   private ChatMessageEntity registerOutboundAssistantMessageInternal(
       UUID tenantId,
       UUID conversationId,
