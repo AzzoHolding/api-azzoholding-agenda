@@ -75,6 +75,7 @@ class ReminderProcessingServiceTest {
   private CustomerCommunicationChannelResolver customerCommunicationChannelResolver;
   private AssistantApiClient assistantApiClient;
   private ServicoTemplatesDoWhatsapp servicoTemplates;
+  private ChatService chatService;
   private ReminderProcessingService service;
 
   @BeforeEach
@@ -91,6 +92,7 @@ class ReminderProcessingServiceTest {
     customerCommunicationChannelResolver = mock(CustomerCommunicationChannelResolver.class);
     assistantApiClient = mock(AssistantApiClient.class);
     servicoTemplates = mock(ServicoTemplatesDoWhatsapp.class);
+    chatService = mock(ChatService.class);
     // Sem template aprovado o servico cai no texto livre, que e o comportamento que estes testes
     // ja cobriam — manter isso preserva o que eles verificam.
     when(servicoTemplates.enviar(any(), anyString(), any(), anyString(), any(), anyString()))
@@ -116,6 +118,7 @@ class ReminderProcessingServiceTest {
             communicationChannelDispatcher,
             customerCommunicationChannelResolver,
             assistantApiClient,
+            chatService,
             mock(PlatformTransactionManager.class));
   }
 
@@ -347,6 +350,45 @@ class ReminderProcessingServiceTest {
     verify(assistantApiClient)
         .seedReminderContext(
             appointment.getTenantId().toString(), client.getPhone(), appointment.getId().toString(), client.getName());
+    // O lembrete entra no chat da conversa do cliente.
+    verify(chatService)
+        .registrarMensagemAutomatica(
+            eq(appointment.getTenantId()), eq(client), eq(ChatChannel.WHATSAPP), eq(client.getPhone()), anyString(),
+            eq("msg-1"));
+  }
+
+  @Test
+  void falhaAoRegistrarNoChatNaoDesfazOEnvio() {
+    Agendamento appointment = agendamentoAmanha();
+    TenantOperationalSettings settings = settings(appointment.getTenantId());
+    settings.setD1ReminderEnabled(true);
+    settings.setD1ReminderHora("00:00");
+    stubGateD1(appointment, settings);
+
+    Cliente client = clienteComTelefone(appointment.getClientId(), appointment.getTenantId());
+    when(clienteRepository.findByIdAndTenantId(appointment.getClientId(), appointment.getTenantId()))
+        .thenReturn(Optional.of(client));
+    when(customerCommunicationChannelResolver.resolve(eq(appointment.getTenantId()), eq(client), any(String[].class)))
+        .thenReturn(new ResolvedChannel(ChatChannel.WHATSAPP, client.getPhone(), null));
+    when(tenantWhatsAppConfigRepository.findByTenantIdOrCreate(appointment.getTenantId()))
+        .thenReturn(enabledWhatsAppConfig());
+    when(communicationChannelDispatcher.sendText(any())).thenReturn(ChannelSendResult.sent("msg-1"));
+    org.mockito.Mockito.doThrow(new IllegalStateException("banco fora"))
+        .when(chatService)
+        .registrarMensagemAutomatica(any(), any(), any(), any(), any(), any());
+
+    assertThat(service.processAppointment(appointment.getId())).isEqualTo(1);
+
+    verify(notificationPublisher)
+        .publish(
+            eq(appointment.getTenantId()),
+            eq(appointment.getId()),
+            eq("WHATSAPP_REMINDER"),
+            eq(client.getPhone()),
+            any(),
+            eq(StatusNotification.SENT),
+            eq((String) null),
+            any());
   }
 
   @Test

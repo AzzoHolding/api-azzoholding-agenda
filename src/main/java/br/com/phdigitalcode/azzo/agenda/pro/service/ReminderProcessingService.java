@@ -77,6 +77,7 @@ public class ReminderProcessingService {
   private final CommunicationChannelDispatcher communicationChannelDispatcher;
   private final CustomerCommunicationChannelResolver customerCommunicationChannelResolver;
   private final AssistantApiClient assistantApiClient;
+  private final ChatService chatService;
   private final TransactionTemplate requiresNewTransaction;
 
   public ReminderProcessingService(
@@ -92,6 +93,7 @@ public class ReminderProcessingService {
       CommunicationChannelDispatcher communicationChannelDispatcher,
       CustomerCommunicationChannelResolver customerCommunicationChannelResolver,
       AssistantApiClient assistantApiClient,
+      ChatService chatService,
       PlatformTransactionManager transactionManager) {
     this.servicoTemplates = servicoTemplates;
     this.agendamentoRepository = agendamentoRepository;
@@ -105,6 +107,7 @@ public class ReminderProcessingService {
     this.communicationChannelDispatcher = communicationChannelDispatcher;
     this.customerCommunicationChannelResolver = customerCommunicationChannelResolver;
     this.assistantApiClient = assistantApiClient;
+    this.chatService = chatService;
     this.requiresNewTransaction = new TransactionTemplate(transactionManager);
     this.requiresNewTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
   }
@@ -228,6 +231,7 @@ public class ReminderProcessingService {
       notificationStatus = StatusNotification.SENT;
       sentAt = Instant.now();
       seedAssistantContext(appointment, client, route.destination());
+      registrarNoChat(appointment, client, route, message, sendResult.providerMessageId());
     } catch (RuntimeException e) {
       notificationStatus = StatusNotification.FAILED;
       errorMessage = sanitizeErrorMessage(e.getMessage());
@@ -324,6 +328,24 @@ public class ReminderProcessingService {
       throw new IllegalArgumentException("Cliente sem telefone valido para lembrete via WhatsApp.");
     }
     return new ReminderRoute(ChatChannel.WHATSAPP, whatsAppDestination);
+  }
+
+  /**
+   * O lembrete aparece no chat da conversa do cliente. Melhor esforco: o lembrete ja saiu, e uma
+   * falha aqui nao pode marca-lo como nao enviado nem gerar reenvio.
+   */
+  private void registrarNoChat(
+      Agendamento appointment, Cliente client, ReminderRoute route, String message, String providerMessageId) {
+    try {
+      chatService.registrarMensagemAutomatica(
+          appointment.getTenantId(), client, route.channel(), route.destination(), message, providerMessageId);
+    } catch (RuntimeException e) {
+      LOG.warn(
+          "Lembrete enviado mas nao registrado no chat: appointment={} tenant={}",
+          appointment.getId(),
+          appointment.getTenantId(),
+          e);
+    }
   }
 
   private void seedAssistantContext(Agendamento appointment, Cliente client, String userIdentifier) {
