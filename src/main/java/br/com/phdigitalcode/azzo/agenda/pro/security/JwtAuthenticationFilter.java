@@ -45,6 +45,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
   private static final Logger LOG = LoggerFactory.getLogger(JwtAuthenticationFilter.class);
   static final String ACCESS_TOKEN_COOKIE = "AZZO_ACCESS_TOKEN";
+  /** Valor da claim {@code origem} que o api_gerenciamento poe no token do proxy administrativo. */
+  static final String ORIGEM_PROXY_GESTAO = "api-gerenciamento-admin-proxy";
 
   private final JwtService jwtService;
   private final TokenRevocationService tokenRevocationService;
@@ -66,7 +68,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         UUID tenantId = jwtService.extractTenantId(claims);
         Long iat = claims.getIssuedAt() != null ? claims.getIssuedAt().toInstant().getEpochSecond() : null;
 
-        if (iat != null && tokenRevocationService.isRevoked(userId, iat)) {
+        // Token do proxy administrativo da Gestao: o subject e um usuario INTERNO da Gestao, que nao
+        // existe na tabela de usuarios daqui — a revogacao por usuario (que desde o SEG-016 trata
+        // usuario inexistente como revogado) derrubava toda tela da Gestao que passa pelo proxy, com
+        // 401 e volta para o login (incidente de 17/10/2026). Esse token vive 60 s e a conta interna
+        // e cortada na propria Gestao (GER-003, FiltroDeContaVigente).
+        boolean tokenDoProxyDaGestao = ORIGEM_PROXY_GESTAO.equals(claims.get("origem", String.class));
+        if (iat != null && !tokenDoProxyDaGestao && tokenRevocationService.isRevoked(userId, iat)) {
           LOG.warn("JWT rejeitado: token revogado (userId={})", userId);
         } else {
           Set<String> roles = jwtService.extractRoles(claims);
