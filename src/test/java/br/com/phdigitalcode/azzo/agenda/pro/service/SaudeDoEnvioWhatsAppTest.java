@@ -115,6 +115,15 @@ class SaudeDoEnvioWhatsAppTest {
   }
 
   @Test
+  void nomeDeExibicaoNaoAprovadoBloqueiaOSalao() {
+    String motivo = saude.registrarFalhaDeEnvio(config, comoOClienteLanca(erroDaMeta(HttpStatus.BAD_REQUEST, 131037,
+        "WhatsApp provided number needs display name approval before message can be sent.")));
+
+    assertThat(motivo).contains("131037", "display name approval");
+    assertThat(saude.verificar(config).podeEnviar()).isFalse();
+  }
+
+  @Test
   void depoisDaJanelaUmaMensagemPassaComoTeste() {
     saude.registrarFalhaDeEnvio(config,
         comoOClienteLanca(erroDaMeta(HttpStatus.BAD_REQUEST, 131042, "Payment issue")));

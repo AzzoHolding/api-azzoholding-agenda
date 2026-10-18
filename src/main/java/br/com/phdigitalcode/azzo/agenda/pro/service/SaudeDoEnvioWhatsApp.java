@@ -48,11 +48,12 @@ public class SaudeDoEnvioWhatsApp {
   /**
    * Codigos da Graph API que significam "este salao nao envia nada", e nao "esta mensagem falhou":
    * 190 token invalido/expirado; 10, 200 e 131005 permissao; 133010 numero nao registrado; 131031
-   * conta bloqueada; 131042 problema de pagamento. O 100 (parametro invalido) fica de fora: no envio
+   * conta bloqueada; 131042 problema de pagamento; 131037 nome de exibicao do numero ainda nao
+   * aprovado (visto em producao em 17/10/2026: nenhuma mensagem do salao sai). O 100 (parametro invalido) fica de fora: no envio
    * ele tambem aparece para o numero de UM cliente. Phone Number ID errado e pego na consulta do
    * numero, onde qualquer 4xx e do salao.
    */
-  static final Set<Integer> CODIGOS_DO_SALAO = Set.of(190, 10, 200, 131005, 133010, 131031, 131042);
+  static final Set<Integer> CODIGOS_DO_SALAO = Set.of(190, 10, 200, 131005, 133010, 131031, 131042, 131037);
 
   public record Situacao(boolean podeEnviar, String motivo) {
     static Situacao ok() {
