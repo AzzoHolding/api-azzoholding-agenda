@@ -99,6 +99,8 @@ public class WhatsAppWebhookController {
   private final LicenseStatusService licenseStatusService;
 
   private final String metaAppSecret;
+  /** Opcional (setter): os testes que montam o controller na mao seguem sem a checagem. */
+  private br.com.phdigitalcode.azzo.agenda.pro.service.SaudeDoEnvioWhatsApp saudeDoEnvio;
   private final boolean debugEnabled;
   private final String activeProfile;
 
@@ -139,6 +141,11 @@ public class WhatsAppWebhookController {
     this.metaAppSecret = metaAppSecret;
     this.debugEnabled = debugEnabled;
     this.activeProfile = activeProfile;
+  }
+
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setSaudeDoEnvio(br.com.phdigitalcode.azzo.agenda.pro.service.SaudeDoEnvioWhatsApp saudeDoEnvio) {
+    this.saudeDoEnvio = saudeDoEnvio;
   }
 
   @GetMapping(produces = MediaType.TEXT_PLAIN_VALUE)
@@ -432,6 +439,9 @@ public class WhatsAppWebhookController {
 
     ChatService.InboundProcessingResult inbound = chatService.processInboundWhatsAppMessage(
         tenant.getId(), fromPhone, body, contactName, providerInboundMessageId);
+    // So a falha DEPOIS da resposta do assistente e do envio pelo WhatsApp; antes disso o erro e do
+    // assistente (ex.: 401 da chave interna) e nao pode marcar o WhatsApp do salao como fora.
+    boolean assistenteRespondeu = false;
     try {
       if (inbound.duplicateInboundMessage) {
         LOG.warn(
@@ -446,6 +456,21 @@ public class WhatsAppWebhookController {
         return ProcessingResult.success("mensagem registrada em modo manual ativo para " + maskPhone(fromPhone), null);
       }
 
+      // 17/10/2026: antes de gastar tokens de IA, o WhatsApp deste salao consegue responder? Se o
+      // envio esta indisponivel (token vencido, numero desconectado...), a resposta nunca chegaria.
+      // A mensagem do cliente ja ficou registrada no chat acima; o salao recebe o alerta.
+      if (saudeDoEnvio != null) {
+        var situacao = saudeDoEnvio.verificar(config);
+        if (!situacao.podeEnviar()) {
+          LOG.warn(
+              "whatsapp.assistant.pulado_envio_indisponivel tenant={} from={} wamid={} motivo={}",
+              tenant.getId(), maskPhone(fromPhone), providerInboundMessageId, situacao.motivo());
+          registrarNotificacaoEnvioIndisponivel(tenant, fromPhone, contactName, situacao.motivo());
+          return ProcessingResult.failure(
+              "assistente nao chamado: envio do WhatsApp indisponivel (" + situacao.motivo() + ")", null);
+        }
+      }
+
       LOG.info("whatsapp.assistant.calling tenant={} from={} wamid={}", tenant.getId(), maskPhone(fromPhone), providerInboundMessageId);
       if (debugEnabled) {
         LOG.debug(
@@ -455,6 +480,7 @@ public class WhatsAppWebhookController {
 
       AssistantMessageResponse assistantResponse = assistantApiClient.processarMensagem(
           tenant.getId().toString(), fromPhone, contactName, new AssistantMessageRequest(body));
+      assistenteRespondeu = true;
 
       LOG.info(
           "whatsapp.assistant.ok tenant={} from={} wamid={} stage={} replyLength={}",
@@ -479,6 +505,7 @@ public class WhatsAppWebhookController {
               tenant.getId(), maskPhone(fromPhone), providerInboundMessageId, outbound);
         }
         String providerMessageId = whatsAppClient.sendMessage(config, fromPhone, outbound);
+        if (saudeDoEnvio != null) saudeDoEnvio.registrarEnvioOk(config);
         LOG.info(
             "WhatsApp webhook outbound assistant tenant={} inboundWamid={} outboundProviderMessageId={} conversationId={} clientId={}",
             tenant.getId(), providerInboundMessageId, providerMessageId, inbound.conversation.getId(), inbound.client.getId());
@@ -503,6 +530,14 @@ public class WhatsAppWebhookController {
               "error", error,
               "root", CorrelatedLogging.throwableSummary(e)),
           e);
+      String envioIndisponivel =
+          assistenteRespondeu && saudeDoEnvio != null ? saudeDoEnvio.registrarFalhaDeEnvio(config, e) : null;
+      if (envioIndisponivel != null) {
+        // O WhatsApp do salao nao envia: o fallback falharia igual. Alerta e para por aqui.
+        registrarNotificacaoEnvioIndisponivel(tenant, fromPhone, contactName, envioIndisponivel);
+        return ProcessingResult.failure(
+            "envio do WhatsApp indisponivel tenant=" + tenant.getId() + ": " + envioIndisponivel, null);
+      }
       if (isTenantConfigurationError(error)) {
         registrarNotificacaoConfiguracao(tenant, fromPhone, contactName, error);
       } else {
@@ -538,6 +573,15 @@ public class WhatsAppWebhookController {
 
     notificationPublisher.publish(
         tenant.getId(), null, CHANNEL_WHATSAPP_CONFIG_ALERT, fromPhone, message, StatusNotification.FAILED, error, null, 60L * 30L);
+  }
+
+  private void registrarNotificacaoEnvioIndisponivel(Tenant tenant, String fromPhone, String contactName, String motivo) {
+    String customerName = (contactName == null || contactName.isBlank()) ? "Cliente sem nome informado" : contactName;
+    String message = "O WhatsApp do salao nao esta conseguindo enviar mensagens (" + motivo + "). "
+        + "Cliente " + customerName + ", telefone " + fromPhone
+        + ", mandou mensagem e ficou sem resposta automatica — confira a configuracao do WhatsApp e responda pelo chat.";
+    notificationPublisher.publish(
+        tenant.getId(), null, CHANNEL_WHATSAPP_CONFIG_ALERT, fromPhone, message, StatusNotification.FAILED, motivo, null, 60L * 30L);
   }
 
   private void registrarNotificacaoFalhaEntrega(Tenant tenant, String fromPhone, String contactName, String error) {

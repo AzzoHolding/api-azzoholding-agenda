@@ -415,6 +415,74 @@ class WhatsAppWebhookControllerTest {
     verify(assistantApiClient, never()).processarMensagem(any(), any(), any(), any());
   }
 
+  // ---- saude do envio (17/10/2026): nao gastar IA quando o WhatsApp nao envia ----
+
+  @Test
+  void envioIndisponivelNaoChamaOAssistenteEAvisaOSalao() {
+    WhatsAppWebhookController controller = controllerWithoutSecret();
+    br.com.phdigitalcode.azzo.agenda.pro.service.SaudeDoEnvioWhatsApp saude =
+        mock(br.com.phdigitalcode.azzo.agenda.pro.service.SaudeDoEnvioWhatsApp.class);
+    when(saude.verificar(config)).thenReturn(
+        new br.com.phdigitalcode.azzo.agenda.pro.service.SaudeDoEnvioWhatsApp.Situacao(false, "token vencido"));
+    controller.setSaudeDoEnvio(saude);
+    ChatService.InboundProcessingResult inbound = new ChatService.InboundProcessingResult();
+    inbound.conversation = conversation();
+    inbound.client = cliente();
+    when(chatService.processInboundWhatsAppMessage(any(), any(), any(), any(), any())).thenReturn(inbound);
+
+    controller.receive(null, textMessagePayload("wamid-1", "5511988887777", "ola"));
+
+    verify(assistantApiClient, never()).processarMensagem(any(), any(), any(), any());
+    verify(whatsAppClient, never()).sendMessage(any(), any(), any());
+    verify(notificationPublisher).publish(
+        eq(tenantId), eq((UUID) null), eq("WHATSAPP_CONFIG_ALERT"), eq("5511988887777"),
+        anyString(), eq(StatusNotification.FAILED), eq("token vencido"), eq((java.time.Instant) null), eq(1800L));
+  }
+
+  @Test
+  void falhaDoSalaoNoEnvioDepoisDaIaMarcaESemTentarOFallback() {
+    WhatsAppWebhookController controller = controllerWithoutSecret();
+    br.com.phdigitalcode.azzo.agenda.pro.service.SaudeDoEnvioWhatsApp saude =
+        mock(br.com.phdigitalcode.azzo.agenda.pro.service.SaudeDoEnvioWhatsApp.class);
+    when(saude.verificar(config)).thenReturn(
+        new br.com.phdigitalcode.azzo.agenda.pro.service.SaudeDoEnvioWhatsApp.Situacao(true, null));
+    when(saude.registrarFalhaDeEnvio(eq(config), any())).thenReturn("a Meta recusou o envio (HTTP 401)");
+    controller.setSaudeDoEnvio(saude);
+    ChatService.InboundProcessingResult inbound = new ChatService.InboundProcessingResult();
+    inbound.conversation = conversation();
+    inbound.client = cliente();
+    when(chatService.processInboundWhatsAppMessage(any(), any(), any(), any(), any())).thenReturn(inbound);
+    when(assistantApiClient.processarMensagem(any(), any(), any(), any()))
+        .thenReturn(new AssistantMessageResponse("Oi! Tenho horario sim."));
+    when(whatsAppClient.sendMessage(any(), any(), any()))
+        .thenThrow(new IllegalStateException("Falha ao enviar mensagem no WhatsApp - Token nao autorizado"));
+
+    controller.receive(null, textMessagePayload("wamid-1", "5511988887777", "ola"));
+
+    // Uma tentativa so (a resposta); o "nao foi possivel processar" falharia igual.
+    verify(whatsAppClient, times(1)).sendMessage(any(), any(), any());
+  }
+
+  @Test
+  void falhaDoAssistenteNaoContaComoFalhaDoWhatsApp() {
+    WhatsAppWebhookController controller = controllerWithoutSecret();
+    br.com.phdigitalcode.azzo.agenda.pro.service.SaudeDoEnvioWhatsApp saude =
+        mock(br.com.phdigitalcode.azzo.agenda.pro.service.SaudeDoEnvioWhatsApp.class);
+    when(saude.verificar(config)).thenReturn(
+        new br.com.phdigitalcode.azzo.agenda.pro.service.SaudeDoEnvioWhatsApp.Situacao(true, null));
+    controller.setSaudeDoEnvio(saude);
+    ChatService.InboundProcessingResult inbound = new ChatService.InboundProcessingResult();
+    inbound.conversation = conversation();
+    inbound.client = cliente();
+    when(chatService.processInboundWhatsAppMessage(any(), any(), any(), any(), any())).thenReturn(inbound);
+    when(assistantApiClient.processarMensagem(any(), any(), any(), any()))
+        .thenThrow(new RuntimeException("assistant 401"));
+
+    controller.receive(null, textMessagePayload("wamid-1", "5511988887777", "ola"));
+
+    verify(saude, never()).registrarFalhaDeEnvio(any(), any());
+  }
+
   // ---- POST receive: from/body ausente ------------------------------------
 
   @Test
