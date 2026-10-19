@@ -200,4 +200,66 @@ class InternalApiKeyFilterTest {
     verify(chain, times(1)).doFilter(any(), any());
     assertThat(request.getAttribute(InternalApiKeyFilter.ATRIBUTO_CHAMADA_INTERNA)).isEqualTo(Boolean.TRUE);
   }
+
+  // ---- SEG-018: uma chave por servico ------------------------------------------------------
+
+  private static final String CHAVE_ASSISTANT = "chave-do-assistant";
+  private static final String CHAVE_GESTAO = "chave-da-gestao";
+
+  private MockHttpServletRequest comChave(String uri, String chave) {
+    MockHttpServletRequest request = request(uri);
+    request.addHeader("X-Internal-Api-Key", chave);
+    return request;
+  }
+
+  @Test
+  @DisplayName("SEG-018: chave do assistant vale nos endpoints dele e marca o chamador")
+  void chaveDoAssistantNosEndpointsDele() throws Exception {
+    InternalApiKeyFilter porServico = new InternalApiKeyFilter(CHAVE, CHAVE_ASSISTANT, CHAVE_GESTAO, true);
+    MockHttpServletRequest req = comChave("/api/v1/internal/assistant/services", CHAVE_ASSISTANT);
+
+    porServico.doFilter(req, response, chain);
+
+    verify(chain, times(1)).doFilter(any(), any());
+    assertThat(req.getAttribute(InternalApiKeyFilter.ATRIBUTO_CHAMADOR)).isEqualTo("assistant");
+  }
+
+  @Test
+  @DisplayName("SEG-018: chave do assistant nos planos da Gestao e recusada com 403")
+  void chaveDoAssistantForaDoEscopo() throws Exception {
+    InternalApiKeyFilter porServico = new InternalApiKeyFilter(CHAVE, CHAVE_ASSISTANT, CHAVE_GESTAO, true);
+
+    porServico.doFilter(comChave("/api/v1/internal/plans/todos", CHAVE_ASSISTANT), response, chain);
+
+    verify(chain, never()).doFilter(any(), any());
+    assertThat(response.getStatus()).isEqualTo(403);
+  }
+
+  @Test
+  @DisplayName("SEG-018: chave da Gestao vale nos planos e nao nos endpoints do assistant")
+  void chaveDaGestaoSoNosPlanos() throws Exception {
+    InternalApiKeyFilter porServico = new InternalApiKeyFilter(CHAVE, CHAVE_ASSISTANT, CHAVE_GESTAO, true);
+
+    porServico.doFilter(comChave("/api/v1/internal/plans/venda-interna", CHAVE_GESTAO), response, chain);
+    verify(chain, times(1)).doFilter(any(), any());
+
+    MockHttpServletResponse outra = new MockHttpServletResponse();
+    porServico.doFilter(comChave("/api/v1/internal/assistant/clients", CHAVE_GESTAO), outra, chain);
+    assertThat(outra.getStatus()).isEqualTo(403);
+  }
+
+  @Test
+  @DisplayName("SEG-018: chave unica antiga vale na transicao e e recusada quando desligada")
+  void chaveLegadaNaTransicao() throws Exception {
+    InternalApiKeyFilter transicao = new InternalApiKeyFilter(CHAVE, CHAVE_ASSISTANT, CHAVE_GESTAO, true);
+    MockHttpServletRequest req = comChave("/api/v1/internal/plans/todos", CHAVE);
+    transicao.doFilter(req, response, chain);
+    verify(chain, times(1)).doFilter(any(), any());
+    assertThat(req.getAttribute(InternalApiKeyFilter.ATRIBUTO_CHAMADOR)).isEqualTo("legado");
+
+    InternalApiKeyFilter desligada = new InternalApiKeyFilter(CHAVE, CHAVE_ASSISTANT, CHAVE_GESTAO, false);
+    MockHttpServletResponse recusada = new MockHttpServletResponse();
+    desligada.doFilter(comChave("/api/v1/internal/plans/todos", CHAVE), recusada, chain);
+    assertThat(recusada.getStatus()).isEqualTo(401);
+  }
 }

@@ -69,6 +69,13 @@ app:
       domain: ${AUTH_COOKIE_DOMAIN:__unset__}
   internal:
     api-key: ${INTERNAL_API_KEY:changeme-dev}
+    # SEG-018: uma chave por servico, cada uma so vale nos caminhos dele. Vazias = desligadas.
+    # Com as duas configuradas (e o mesmo valor no INTERNAL_API_KEY do assistant e da Gestao),
+    # desligar a chave unica antiga com INTERNAL_API_KEY_LEGADA_ATIVA=false.
+    chaves:
+      assistant: ${INTERNAL_API_KEY_ASSISTANT:}
+      gerenciamento: ${INTERNAL_API_KEY_GERENCIAMENTO:}
+    aceitar-chave-legada: ${INTERNAL_API_KEY_LEGADA_ATIVA:true}
   public:
     booking:
       base-url: ${PUBLIC_BOOKING_BASE_URL:http://localhost:5173}
