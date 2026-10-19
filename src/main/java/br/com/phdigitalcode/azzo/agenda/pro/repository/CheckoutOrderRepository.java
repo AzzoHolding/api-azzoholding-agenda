@@ -37,6 +37,10 @@ public interface CheckoutOrderRepository extends JpaRepository<CheckoutOrder, UU
       @Param("status") StatusCheckout status,
       @Param("now") Instant now);
 
+  /** Fim do ultimo plano confirmado do salao (nulo se nunca teve um). Base do prazo de fim de contrato. */
+  @Query("select max(o.validUntil) from CheckoutOrder o where o.tenantId = :tenantId and o.status = :status")
+  Instant fimDoUltimoPlano(@Param("tenantId") UUID tenantId, @Param("status") StatusCheckout status);
+
   default boolean possuiPlanoVigente(UUID tenantId, Instant now) {
     return contarPlanosVigentes(tenantId, StatusCheckout.CONFIRMED, now) > 0;
   }

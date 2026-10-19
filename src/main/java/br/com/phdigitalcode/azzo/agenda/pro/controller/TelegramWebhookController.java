@@ -180,7 +180,7 @@ public class TelegramWebhookController {
     // "PARE" pelo Telegram: para as mensagens automaticas, como no WhatsApp. Nao vai ao assistente, e vale
     // mesmo com a conversa em modo manual: o pedido e do titular, nao da conversa.
     if (inbound.client != null && ServicoOptOutDoTitular.ehPedidoDeOptOut(content)) {
-      servicoOptOut.registrar(inbound.client);
+      servicoOptOut.registrar(inbound.client, ServicoOptOutDoTitular.ORIGEM_TELEGRAM);
       communicationChannelDispatcher.sendText(
           new ChannelSendCommand(tenantId, ChatChannel.TELEGRAM, chatId, ServicoOptOutDoTitular.CONFIRMACAO));
       LOG.info(

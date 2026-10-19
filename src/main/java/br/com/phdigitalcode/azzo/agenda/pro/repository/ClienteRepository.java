@@ -18,6 +18,10 @@ import br.com.phdigitalcode.azzo.agenda.pro.entity.Cliente;
 @Repository
 public interface ClienteRepository extends JpaRepository<Cliente, UUID> {
 
+  /** Clientes ainda nao anonimizados do salao, em lotes (rotina de fim de contrato). */
+  @Query("select c.id from Cliente c where c.tenantId = :tenantId and c.anonymizedAt is null order by c.id")
+  List<UUID> idsNaoAnonimizados(@Param("tenantId") UUID tenantId, Pageable pagina);
+
   Optional<Cliente> findByIdAndTenantId(UUID id, UUID tenantId);
 
   List<Cliente> findByTenantIdOrderByName(UUID tenantId);
