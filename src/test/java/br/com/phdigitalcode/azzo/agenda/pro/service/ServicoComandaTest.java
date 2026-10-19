@@ -1206,12 +1206,106 @@ class ServicoComandaTest {
     ComandaDtos.ResgatarFidelidadeRequest req = new ComandaDtos.ResgatarFidelidadeRequest();
     req.pontos = 50000;
 
-    service.resgatarFidelidade(comandaId, req);
+    // FIN-007: antes o desconto era cortado em R$ 20 e os 50000 pontos debitados mesmo assim.
+    assertThatThrownBy(() -> service.resgatarFidelidade(comandaId, req))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("Use no maximo 2000 pontos");
+    assertThat(comanda.getDesconto()).isEqualByComparingTo("0.00");
+    assertThat(cliente.getLoyaltyPoints()).isEqualTo(100000);
+  }
 
-    assertThat(comanda.getDesconto()).isEqualByComparingTo("20.00");
-    assertThat(comanda.getTotal()).isEqualByComparingTo("0.00");
-    // O saldo e debitado integralmente mesmo com o desconto capado — comportamento do original.
-    assertThat(cliente.getLoyaltyPoints()).isEqualTo(50000);
+  // FIN-007 ----------------------------------------------------------------
+
+  private Cliente resgatar(Comanda comanda, String valorDoItem, int saldo, int pontos) {
+    comanda.setClientId(clientId);
+    itensDaComanda(item(ComandaItem.TIPO_SERVICO, valorDoItem, null));
+    TenantLoyaltySettings config = new TenantLoyaltySettings();
+    config.setAtivo(true);
+    config.setPontosPorResgateReal(new BigDecimal("100"));
+    when(tenantLoyaltySettingsRepository.findByTenantId(eq(tenantId))).thenReturn(Optional.of(config));
+    Cliente cliente = new Cliente();
+    cliente.setId(clientId);
+    cliente.setLoyaltyPoints(saldo);
+    when(clienteRepository.findByIdAndTenantId(eq(clientId), eq(tenantId))).thenReturn(Optional.of(cliente));
+    ComandaDtos.ResgatarFidelidadeRequest req = new ComandaDtos.ResgatarFidelidadeRequest();
+    req.pontos = pontos;
+    service.resgatarFidelidade(comandaId, req);
+    return cliente;
+  }
+
+  @Test
+  void fin007ResgateFicaRegistradoNaComanda() {
+    Comanda comanda = comanda(Comanda.STATUS_ABERTA);
+    resgatar(comanda, "200.00", 5000, 3000);
+
+    assertThat(comanda.getPontosFidelidadeResgatados()).isEqualTo(3000);
+    assertThat(comanda.getValorResgateFidelidade()).isEqualByComparingTo("30.00");
+  }
+
+  @Test
+  void fin007CancelarDevolveOsPontosResgatados() {
+    Comanda comanda = comanda(Comanda.STATUS_ABERTA);
+    Cliente cliente = resgatar(comanda, "200.00", 5000, 3000);
+    assertThat(cliente.getLoyaltyPoints()).isEqualTo(2000);
+
+    ComandaDtos.CancelarComandaRequest req = new ComandaDtos.CancelarComandaRequest();
+    req.motivo = "desistiu";
+    service.cancelar(comandaId, req);
+
+    assertThat(cliente.getLoyaltyPoints()).isEqualTo(5000);
+    assertThat(comanda.getStatus()).isEqualTo(Comanda.STATUS_CANCELADA);
+  }
+
+  @Test
+  void fin007DescontoPercentualSomaAoResgateEmVezDeApagar() {
+    Comanda comanda = comanda(Comanda.STATUS_ABERTA);
+    Cliente cliente = resgatar(comanda, "200.00", 5000, 3000);
+
+    ComandaDtos.AplicarDescontoRequest req = new ComandaDtos.AplicarDescontoRequest();
+    req.percentual = new BigDecimal("5");
+    req.motivo = "aniversario";
+    service.aplicarDesconto(comandaId, req);
+
+    // 5% de 200 = 10, mais 30 do resgate.
+    assertThat(comanda.getDesconto()).isEqualByComparingTo("40.00");
+    assertThat(comanda.getTotal()).isEqualByComparingTo("160.00");
+    assertThat(comanda.getDescontoMotivo()).isEqualTo("aniversario; Resgate de 3000 pontos de fidelidade");
+    assertThat(cliente.getLoyaltyPoints()).isEqualTo(2000);
+  }
+
+  @Test
+  void fin007DescontoQueNaoDeixaEspacoDesfazOResgateEDevolveOsPontos() {
+    Comanda comanda = comanda(Comanda.STATUS_ABERTA);
+    Cliente cliente = resgatar(comanda, "200.00", 5000, 3000);
+
+    ComandaDtos.AplicarDescontoRequest req = new ComandaDtos.AplicarDescontoRequest();
+    req.percentual = new BigDecimal("100");
+    req.motivo = "cortesia";
+    service.aplicarDesconto(comandaId, req);
+
+    assertThat(comanda.getDesconto()).isEqualByComparingTo("200.00");
+    assertThat(comanda.getPontosFidelidadeResgatados()).isZero();
+    assertThat(comanda.getDescontoMotivo()).isEqualTo("cortesia");
+    assertThat(cliente.getLoyaltyPoints()).isEqualTo(5000);
+  }
+
+  @Test
+  void fin007EstornarDevolveOsPontosResgatados() {
+    Comanda comanda = comanda(Comanda.STATUS_FECHADA);
+    comanda.setClientId(clientId);
+    comanda.setPontosFidelidadeResgatados(1500);
+    comanda.setValorResgateFidelidade(new BigDecimal("15.00"));
+    Cliente cliente = new Cliente();
+    cliente.setId(clientId);
+    cliente.setLoyaltyPoints(100);
+    when(clienteRepository.findByIdAndTenantId(eq(clientId), eq(tenantId))).thenReturn(Optional.of(cliente));
+
+    ComandaDtos.EstornarComandaRequest req = new ComandaDtos.EstornarComandaRequest();
+    req.motivo = "erro de lancamento";
+    service.estornar(comandaId, req);
+
+    assertThat(cliente.getLoyaltyPoints()).isEqualTo(1600);
+    assertThat(comanda.getStatus()).isEqualTo(Comanda.STATUS_ESTORNADA);
   }
 
   @Test
