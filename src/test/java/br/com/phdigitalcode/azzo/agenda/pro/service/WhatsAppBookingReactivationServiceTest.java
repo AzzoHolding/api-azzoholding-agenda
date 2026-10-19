@@ -262,7 +262,8 @@ class WhatsAppBookingReactivationServiceTest {
     assertThat(cycle.getAppointmentIdCreatedAfterAbandonment()).isEqualTo(appointmentId);
     assertThat(cycle.getConvertedAt()).isNotNull();
     assertThat(cycle.getNextAttemptAt()).isNull();
-    verify(cycleRepository, never()).save(any());
+    // INT-001: a conversao grava o ciclo explicitamente (sem efeito extra quando ja gerenciado).
+    verify(cycleRepository).save(cycle);
   }
 
   @Test
@@ -686,6 +687,62 @@ class WhatsAppBookingReactivationServiceTest {
     when(observabilityService.maskUserIdentifier("+55 (11) 99999-1111")).thenReturn("5511*******11");
 
     assertThat(service.maskUserIdentifier("+55 (11) 99999-1111")).isEqualTo("5511*******11");
+  }
+
+  // ─── INT-001: entidade desanexada precisa ser gravada ───────────────────
+
+  @Test
+  void int001MarcarEnvioGravaCicloETentativa() {
+    WhatsAppBookingReactivationCycleEntity cycle = cicloDesanexado();
+    WhatsAppBookingReactivationAttemptEntity attempt = new WhatsAppBookingReactivationAttemptEntity();
+    attempt.setId(UUID.randomUUID());
+
+    service.markAttemptSent(cycle, attempt, "wamid.1");
+
+    assertThat(cycle.getNextAttemptNumber()).isEqualTo(2);
+    verify(cycleRepository).save(cycle);
+    verify(attemptRepository).save(attempt);
+    assertThat(attempt.getStatus()).isEqualTo(WhatsAppBookingReactivationAttemptStatus.SENT);
+  }
+
+  @Test
+  void int001MarcarFalhaGravaCicloETentativa() {
+    WhatsAppBookingReactivationCycleEntity cycle = cicloDesanexado();
+    WhatsAppBookingReactivationAttemptEntity attempt = new WhatsAppBookingReactivationAttemptEntity();
+
+    service.markAttemptFailed(cycle, attempt, "erro");
+
+    verify(cycleRepository).save(cycle);
+    verify(attemptRepository).save(attempt);
+  }
+
+  @Test
+  void int001CancelarConverterECancelarTentativaGravam() {
+    WhatsAppBookingReactivationCycleEntity a = cicloDesanexado();
+    WhatsAppBookingReactivationCycleEntity b = cicloDesanexado();
+    WhatsAppBookingReactivationCycleEntity c = cicloDesanexado();
+    WhatsAppBookingReactivationAttemptEntity tentativa = new WhatsAppBookingReactivationAttemptEntity();
+
+    service.cancelCycle(a, "OPT_OUT");
+    service.markConverted(b, null);
+    service.markAttemptCancelled(c, tentativa, "INVALID_DESTINATION");
+
+    verify(cycleRepository).save(a);
+    verify(cycleRepository).save(b);
+    verify(cycleRepository).save(c);
+    verify(attemptRepository).save(tentativa);
+    assertThat(a.getStatus()).isEqualTo(WhatsAppBookingReactivationStatus.CANCELLED);
+    assertThat(b.getStatus()).isEqualTo(WhatsAppBookingReactivationStatus.CONVERTED);
+  }
+
+  private static WhatsAppBookingReactivationCycleEntity cicloDesanexado() {
+    WhatsAppBookingReactivationCycleEntity cycle = new WhatsAppBookingReactivationCycleEntity();
+    cycle.setId(UUID.randomUUID());
+    cycle.setTenantId(UUID.randomUUID());
+    cycle.setStatus(WhatsAppBookingReactivationStatus.ACTIVE);
+    cycle.setNextAttemptNumber(1);
+    cycle.setAbandonedAt(Instant.now());
+    return cycle;
   }
 
   // ─── helpers ────────────────────────────────────────────────────────────

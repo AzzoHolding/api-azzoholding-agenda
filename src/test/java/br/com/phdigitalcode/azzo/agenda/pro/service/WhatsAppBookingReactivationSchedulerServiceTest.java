@@ -165,6 +165,21 @@ class WhatsAppBookingReactivationSchedulerServiceTest {
     assertThat(result).isEqualTo(0); // cycle nao encontrado no repositorio -> 0
   }
 
+  @Test
+  void int001UmCicloQueFalhaNaoImpedeOsOutros() {
+    WhatsAppBookingReactivationCycleEntity quebrado = cycle();
+    WhatsAppBookingReactivationCycleEntity bom = cycle();
+    when(whatsAppBookingReactivationService.listDueCycles(any())).thenReturn(List.of(quebrado, bom));
+    when(cycleRepository.findById(quebrado.getId())).thenThrow(new IllegalStateException("falha no banco"));
+    when(cycleRepository.findById(bom.getId())).thenReturn(Optional.of(bom));
+    when(tenantOperationalSettingsService.isReactivationEnabled(tenantId)).thenReturn(false);
+
+    int result = service.processDueCycles();
+
+    assertThat(result).isEqualTo(1);
+    verify(whatsAppBookingReactivationService).cancelCycle(bom, "REACTIVATION_DISABLED");
+  }
+
   // ---- gates sequenciais -----------------------------------------------------
 
   @Test

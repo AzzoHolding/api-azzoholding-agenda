@@ -13,8 +13,6 @@ import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Propagation;
-import org.springframework.transaction.annotation.Transactional;
 
 import br.com.phdigitalcode.azzo.agenda.pro.dto.assistant.AssistantReactivationSeedRequest;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.ChatConversationEntity;
@@ -110,13 +108,23 @@ public class WhatsAppBookingReactivationSchedulerService {
     LOG.info("WhatsAppBookingReactivation iniciado. cycles={}", cycleIds.size());
     int processed = 0;
     for (UUID cycleId : cycleIds) {
-      processed += processCycle(cycleId);
+      // Um ciclo com problema (ex.: telefone invalido) nao pode impedir os outros de rodar.
+      try {
+        processed += processCycle(cycleId);
+      } catch (RuntimeException e) {
+        LOG.error("reactivation_cycle_failed cycleId={}", cycleId, e);
+      }
     }
     LOG.info("WhatsAppBookingReactivation finalizado. cyclesProcessados={}", processed);
     return processed;
   }
 
-  @Transactional(propagation = Propagation.REQUIRES_NEW)
+  /**
+   * Sem transacao propria de proposito (INT-001): o {@code @Transactional(REQUIRES_NEW)} que havia
+   * aqui nunca valia, porque {@link #processDueCycles()} chama por auto-invocacao. Cada passo grava
+   * sozinho (os {@code mark*}/{@code cancelCycle} fazem {@code save}), e o envio ja feito nao e
+   * desfeito por uma falha depois dele, o que uma transacao unica faria (e a mensagem sairia de novo).
+   */
   public int processCycle(UUID cycleId) {
     WhatsAppBookingReactivationCycleEntity cycle = cycleRepository.findById(cycleId).orElse(null);
     if (cycle == null || cycle.getTenantId() == null) return 0;
