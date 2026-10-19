@@ -874,8 +874,21 @@ public class ServicoComanda {
     Map<String, Object> antesDoDesconto = dadosDoDesconto(comanda);
     List<ComandaItem> itens = comandaItemRepository.findByComandaIdOrderByCreatedAt(comanda.getId());
     BigDecimal subtotal = somarItens(itens);
-    comanda.setDesconto(NumericUtil.percentOf(subtotal, request.percentual.doubleValue()));
-    comanda.setDescontoMotivo(request.motivo.trim());
+    BigDecimal descontoPercentual = NumericUtil.percentOf(subtotal, request.percentual.doubleValue());
+    // FIN-007: o desconto percentual SOMA ao resgate de fidelidade (antes o sobrescrevia, e os pontos
+    // ja debitados sumiam). Se os dois juntos passam do subtotal, o resgate e desfeito e os pontos
+    // voltam ao cliente, em vez de serem gastos num desconto que nao cabe.
+    if (NumericUtil.add(descontoPercentual, comanda.getValorResgateFidelidade()).compareTo(subtotal) > 0) {
+      desfazerResgateDeFidelidade(tenantId, comanda, "desconto percentual nao deixa espaco para o resgate");
+    }
+    comanda.setDesconto(
+        subtotal.min(NumericUtil.add(descontoPercentual, comanda.getValorResgateFidelidade())));
+    comanda.setDescontoMotivo(
+        comanda.getPontosFidelidadeResgatados() > 0
+            ? concatenarMotivo(
+                request.motivo.trim(),
+                "Resgate de " + comanda.getPontosFidelidadeResgatados() + " pontos de fidelidade")
+            : request.motivo.trim());
     comanda.setTotal(NumericUtil.maxZero(NumericUtil.subtract(subtotal, comanda.getDesconto())));
 
     auditar(tenantId, "POS_DISCOUNT_APPLY", comanda, antesDoDesconto, dadosDoDesconto(comanda));
@@ -1493,6 +1506,8 @@ public class ServicoComanda {
       }
     }
 
+    devolverPontosResgatados(tenantId, comanda, "cancelamento da comanda");
+
     comanda.setStatus(Comanda.STATUS_CANCELADA);
     comanda.setCancelMotivo(request.motivo.trim());
     comanda.setClosedAt(Instant.now());
@@ -1581,6 +1596,9 @@ public class ServicoComanda {
                           cliente.getLoyaltyPoints() - comanda.getPontosFidelidadeCreditados())));
     }
 
+    // FIN-007: o estorno revertia so os pontos CREDITADOS pela venda; os RESGATADOS nela se perdiam.
+    devolverPontosResgatados(tenantId, comanda, "estorno da comanda");
+
     List<ClientPackagePurchase> comprasPacote =
         clientPackagePurchaseRepository.findByTenantIdAndComandaId(tenantId, comanda.getId());
     exigirPacotesVendidosSemUso(comprasPacote);
@@ -1662,9 +1680,18 @@ public class ServicoComanda {
             .divide(config.getPontosPorResgateReal(), 2, RoundingMode.HALF_UP);
     List<ComandaItem> itens = comandaItemRepository.findByComandaIdOrderByCreatedAt(comanda.getId());
     BigDecimal subtotal = somarItens(itens);
-    comanda.setDesconto(
-        NumericUtil.maxZero(NumericUtil.add(comanda.getDesconto(), valorResgate)));
-    if (comanda.getDesconto().compareTo(subtotal) > 0) comanda.setDesconto(subtotal);
+    // FIN-007: o excedente acima do total era descartado e os pontos debitados mesmo assim.
+    BigDecimal restante = NumericUtil.maxZero(NumericUtil.subtract(subtotal, comanda.getDesconto()));
+    if (valorResgate.compareTo(restante) > 0) {
+      int maximo =
+          restante.multiply(config.getPontosPorResgateReal()).setScale(0, RoundingMode.DOWN).intValue();
+      throw new IllegalArgumentException(
+          "O resgate (R$ " + valorResgate + ") passa do que falta pagar na comanda (R$ " + restante
+              + "). Use no maximo " + maximo + " pontos.");
+    }
+    comanda.setDesconto(NumericUtil.add(comanda.getDesconto(), valorResgate));
+    comanda.setPontosFidelidadeResgatados(comanda.getPontosFidelidadeResgatados() + request.pontos);
+    comanda.setValorResgateFidelidade(NumericUtil.add(comanda.getValorResgateFidelidade(), valorResgate));
     comanda.setDescontoMotivo(
         concatenarMotivo(
             comanda.getDescontoMotivo(),
@@ -1679,6 +1706,37 @@ public class ServicoComanda {
     resgate.put("clientId", comanda.getClientId().toString());
     auditar(tenantId, "POS_LOYALTY_REDEEM", comanda, null, resgate);
     return obter(id);
+  }
+
+  /**
+   * FIN-007: devolve ao cliente os pontos resgatados nesta comanda. Usado quando a comanda deixa de
+   * existir como venda (cancelamento e estorno sao estados finais, entao nao ha devolucao dupla).
+   */
+  private void devolverPontosResgatados(UUID tenantId, Comanda comanda, String motivo) {
+    int pontos = comanda.getPontosFidelidadeResgatados();
+    if (pontos <= 0 || comanda.getClientId() == null) return;
+    clienteRepository
+        .findByIdAndTenantId(comanda.getClientId(), tenantId)
+        .ifPresent(cliente -> cliente.setLoyaltyPoints(cliente.getLoyaltyPoints() + pontos));
+    Map<String, Object> devolucao = new HashMap<>();
+    devolucao.put("pontos", pontos);
+    devolucao.put("valorResgate", comanda.getValorResgateFidelidade());
+    devolucao.put("clientId", comanda.getClientId().toString());
+    devolucao.put("motivo", motivo);
+    auditar(tenantId, "POS_LOYALTY_REFUND", comanda, null, devolucao);
+  }
+
+  /**
+   * FIN-007: desfaz o resgate de uma comanda ainda aberta: pontos de volta ao cliente e o valor do
+   * resgate sai do desconto.
+   */
+  private void desfazerResgateDeFidelidade(UUID tenantId, Comanda comanda, String motivo) {
+    if (comanda.getPontosFidelidadeResgatados() <= 0) return;
+    devolverPontosResgatados(tenantId, comanda, motivo);
+    comanda.setDesconto(
+        NumericUtil.maxZero(NumericUtil.subtract(comanda.getDesconto(), comanda.getValorResgateFidelidade())));
+    comanda.setPontosFidelidadeResgatados(0);
+    comanda.setValorResgateFidelidade(BigDecimal.ZERO);
   }
 
   private String concatenarMotivo(String motivoAtual, String novoMotivo) {
@@ -1796,6 +1854,11 @@ public class ServicoComanda {
     List<ComandaItem> itens = comandaItemRepository.findByComandaIdOrderByCreatedAt(comanda.getId());
     BigDecimal subtotal = somarItens(itens);
     comanda.setSubtotal(subtotal);
+    // FIN-007: tirar itens ate o resgate passar do subtotal desfaz o resgate (pontos de volta), em
+    // vez de cortar o desconto e deixar os pontos gastos. O caixa pode resgatar de novo o que couber.
+    if (comanda.getValorResgateFidelidade().compareTo(subtotal) > 0) {
+      desfazerResgateDeFidelidade(comanda.getTenantId(), comanda, "itens retirados, resgate passou do total");
+    }
     // Reaplica o desconto ja registrado (em valor, nao percentual) sobre o novo subtotal, mas nunca
     // deixa o desconto exceder o subtotal apos a mudanca de itens.
     if (comanda.getDesconto().compareTo(subtotal) > 0) {

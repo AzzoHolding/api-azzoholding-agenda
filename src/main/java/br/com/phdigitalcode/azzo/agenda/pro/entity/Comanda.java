@@ -88,6 +88,17 @@ public class Comanda {
   @Column(name = "pontos_fidelidade_creditados", nullable = false)
   private int pontosFidelidadeCreditados = 0;
 
+  /**
+   * FIN-007: pontos de fidelidade resgatados nesta comanda e o valor que viraram de desconto (parte
+   * de {@code desconto}). Guardados para devolver ao cliente no cancelamento, no estorno ou quando
+   * o resgate deixa de caber no total.
+   */
+  @Column(name = "pontos_fidelidade_resgatados", nullable = false)
+  private int pontosFidelidadeResgatados = 0;
+
+  @Column(name = "valor_resgate_fidelidade", nullable = false)
+  private BigDecimal valorResgateFidelidade = BigDecimal.ZERO;
+
   @Column(name = "opened_at", nullable = false)
   private Instant openedAt;
 
@@ -124,5 +135,21 @@ public class Comanda {
   @Override
   public int hashCode() {
     return getClass().hashCode();
+  }
+
+  public int getPontosFidelidadeResgatados() {
+    return pontosFidelidadeResgatados;
+  }
+
+  public void setPontosFidelidadeResgatados(int pontosFidelidadeResgatados) {
+    this.pontosFidelidadeResgatados = pontosFidelidadeResgatados;
+  }
+
+  public BigDecimal getValorResgateFidelidade() {
+    return valorResgateFidelidade == null ? BigDecimal.ZERO : valorResgateFidelidade;
+  }
+
+  public void setValorResgateFidelidade(BigDecimal valorResgateFidelidade) {
+    this.valorResgateFidelidade = valorResgateFidelidade;
   }
 }
