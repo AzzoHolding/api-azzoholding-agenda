@@ -64,6 +64,13 @@ public class TenantWhatsAppConfig {
   private Instant embeddedSignupCompletedAt;
 
   /**
+   * Quem autorizou o app na Meta no cadastro embutido ({@code user_id} do {@code debug_token}).
+   * E por ele que os callbacks de exclusao de dados e de desautorizacao chegam ao salao (SEG-014).
+   */
+  @Column(name = "meta_user_id", length = 64)
+  private String metaUserId;
+
+  /**
    * PIN de 6 digitos usado no registro do numero no Cloud API, criptografado.
    *
    * <p>No modelo de provedor, quem define o PIN de um numero novo e o Azzo — e guardar e

@@ -335,6 +335,49 @@ class ServicoTenantWhatsappTest {
   }
 
   @Test
+  void seg014CadastroEmbutidoGuardaQuemAutorizouNaMeta() {
+    TenantWhatsAppConfig config = configVazia();
+    when(repository.findByTenantIdOrCreate(tenantId)).thenReturn(config);
+    when(metaEmbeddedSignupClient.exchangeCodeForAccessToken("code-123")).thenReturn("token-embedded");
+    MetaEmbeddedSignupClient.PhoneNumberDetails phoneDetails = new MetaEmbeddedSignupClient.PhoneNumberDetails();
+    phoneDetails.id = "1234567890";
+    when(metaEmbeddedSignupClient.fetchPhoneNumberDetails("token-embedded", "1234567890")).thenReturn(phoneDetails);
+    when(metaEmbeddedSignupClient.fetchTokenUserId("token-embedded")).thenReturn("meta-user-42");
+    when(whatsAppClient.testConnection(any(TenantWhatsAppConfig.class))).thenReturn(true);
+
+    TenantWhatsAppDtos.EmbeddedSignupCompleteRequest request = new TenantWhatsAppDtos.EmbeddedSignupCompleteRequest();
+    request.code = "code-123";
+    request.setupInfo = new TenantWhatsAppDtos.SetupInfo();
+    request.setupInfo.phoneNumberId = "1234567890";
+
+    serviceEmbeddedHabilitado.concluirEmbeddedSignup(request);
+
+    assertThat(config.getMetaUserId()).isEqualTo("meta-user-42");
+  }
+
+  @Test
+  void seg014FalhaAoBuscarQuemAutorizouNaoDerrubaAConexao() {
+    TenantWhatsAppConfig config = configVazia();
+    when(repository.findByTenantIdOrCreate(tenantId)).thenReturn(config);
+    when(metaEmbeddedSignupClient.exchangeCodeForAccessToken("code-123")).thenReturn("token-embedded");
+    MetaEmbeddedSignupClient.PhoneNumberDetails phoneDetails = new MetaEmbeddedSignupClient.PhoneNumberDetails();
+    phoneDetails.id = "1234567890";
+    when(metaEmbeddedSignupClient.fetchPhoneNumberDetails("token-embedded", "1234567890")).thenReturn(phoneDetails);
+    when(metaEmbeddedSignupClient.fetchTokenUserId("token-embedded")).thenThrow(new IllegalStateException("debug_token falhou"));
+    when(whatsAppClient.testConnection(any(TenantWhatsAppConfig.class))).thenReturn(true);
+
+    TenantWhatsAppDtos.EmbeddedSignupCompleteRequest request = new TenantWhatsAppDtos.EmbeddedSignupCompleteRequest();
+    request.code = "code-123";
+    request.setupInfo = new TenantWhatsAppDtos.SetupInfo();
+    request.setupInfo.phoneNumberId = "1234567890";
+
+    TenantWhatsAppDtos.EmbeddedSignupStatusResponse response = serviceEmbeddedHabilitado.concluirEmbeddedSignup(request);
+
+    assertThat(response.connected).isTrue();
+    assertThat(config.getMetaUserId()).isNull();
+  }
+
+  @Test
   void concluirEmbeddedSignupComFalhaNaTrocaDeCodeMarcaFailed() {
     when(repository.findByTenantIdOrCreate(tenantId)).thenReturn(configVazia());
     when(metaEmbeddedSignupClient.exchangeCodeForAccessToken("code-invalido"))

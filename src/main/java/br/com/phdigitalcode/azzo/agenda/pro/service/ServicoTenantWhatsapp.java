@@ -596,6 +596,7 @@ public class ServicoTenantWhatsapp {
       config.setDisplayPhoneNumber(
           firstNonBlank(phoneDetails.displayPhoneNumber, request.setupInfo.phoneNumber, config.getDisplayPhoneNumber()));
       config.setWhatsappTokenSource(TOKEN_SOURCE_EMBEDDED);
+      config.setMetaUserId(buscarQuemAutorizou(accessToken));
       ensureWebhookVerifyToken(config);
 
       // O QUE FALTAVA. Guardar a credencial nao faz o numero enviar: enquanto ele nao for
@@ -626,6 +627,20 @@ public class ServicoTenantWhatsapp {
       tenantWhatsAppConfigRepository.save(config);
       registrarAuditoria(tenantId, "WHATSAPP_EMBEDDED_SIGNUP_COMPLETE", tenantId.toString(), null, java.util.Map.of("status", ONBOARDING_FAILED), false);
       return toEmbeddedSignupStatus(config);
+    }
+  }
+
+  /**
+   * SEG-014: guarda quem autorizou o app, para os callbacks de exclusao/desautorizacao da Meta
+   * acharem este salao. Falhar aqui nao derruba a conexao (a credencial e boa); sem o id, o
+   * callback cai no tratamento manual, como era antes.
+   */
+  private String buscarQuemAutorizou(String accessToken) {
+    try {
+      return metaEmbeddedSignupClient.fetchTokenUserId(accessToken);
+    } catch (RuntimeException e) {
+      LOG.warn("whatsapp.embedded_signup.meta_user_id_indisponivel motivo={}", sanitizeEmbeddedError(e.getMessage()));
+      return null;
     }
   }
 

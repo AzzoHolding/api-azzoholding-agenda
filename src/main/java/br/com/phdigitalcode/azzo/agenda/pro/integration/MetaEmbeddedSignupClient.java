@@ -1,5 +1,6 @@
 package br.com.phdigitalcode.azzo.agenda.pro.integration;
 
+import java.net.URI;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -94,9 +95,38 @@ public class MetaEmbeddedSignupClient implements MetaEmbeddedSignupGateway {
     return details;
   }
 
+  @Override
+  public String fetchTokenUserId(String accessToken) {
+    String inputToken = required(accessToken, "Access token da Meta ausente.");
+    ensureMetaCredentialsConfigured();
+    String uri = GRAPH_BASE + graphApiVersion + "/debug_token"
+        + "?input_token=" + encode(inputToken)
+        + "&access_token=" + encode(appId + "|" + appSecret);
+    JsonNode payload = sendGet(uri, null, "Falha ao consultar o dono do token na Meta.");
+    return text(payload.path("data").path("user_id"));
+  }
+
+  @Override
+  public void revokeUserPermissions(String metaUserId) {
+    String userId = required(metaUserId, "user_id da Meta ausente.");
+    ensureMetaCredentialsConfigured();
+    String uri = GRAPH_BASE + graphApiVersion + "/" + encodePath(userId) + "/permissions"
+        + "?access_token=" + encode(appId + "|" + appSecret);
+    try {
+      restClient.delete().uri(URI.create(uri)).retrieve().toBodilessEntity();
+    } catch (RestClientResponseException e) {
+      JsonNode payload = tryParseJson(e.getResponseBodyAsString());
+      throw new IllegalStateException(extractErrorMessage(payload, "Falha ao revogar permissoes na Meta."), e);
+    } catch (Exception e) {
+      throw new IllegalStateException("Falha ao revogar permissoes na Meta.", e);
+    }
+  }
+
   private JsonNode sendGet(String uri, String accessToken, String defaultErrorMessage) {
     try {
-      RestClient.RequestHeadersSpec<?> spec = restClient.get().uri(uri);
+      // URI pronto: os parametros ja vao codificados (URLEncoder); como String, o RestClient codificava
+      // de novo e o "|" do token do app chegava a Meta como %257C.
+      RestClient.RequestHeadersSpec<?> spec = restClient.get().uri(URI.create(uri));
       if (accessToken != null && !accessToken.isBlank()) {
         spec = spec.header("Authorization", "Bearer " + accessToken);
       }

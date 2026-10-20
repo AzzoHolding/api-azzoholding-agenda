@@ -45,6 +45,44 @@ class MetaEmbeddedSignupClientTest {
   }
 
   @Test
+  void seg014LeQuemAutorizouNoDebugTokenComOTokenDoApp() {
+    server.expect(requestTo(
+            "https://graph.facebook.com/v18.0/debug_token"
+                + "?input_token=EAAB&access_token=app-id-123%7Capp-secret-456"))
+        .andExpect(method(HttpMethod.GET))
+        .andRespond(withSuccess("{\"data\":{\"user_id\":\"10229\",\"is_valid\":true}}", MediaType.APPLICATION_JSON));
+
+    assertThat(client.fetchTokenUserId("EAAB")).isEqualTo("10229");
+    server.verify();
+  }
+
+  @Test
+  void seg014RevogaAsPermissoesDoUsuarioComOTokenDoApp() {
+    server.expect(requestTo(
+            "https://graph.facebook.com/v18.0/10229/permissions"
+                + "?access_token=app-id-123%7Capp-secret-456"))
+        .andExpect(method(HttpMethod.DELETE))
+        .andRespond(withSuccess("{\"success\":true}", MediaType.APPLICATION_JSON));
+
+    client.revokeUserPermissions("10229");
+    server.verify();
+  }
+
+  @Test
+  void seg014FalhaNaRevogacaoViraIllegalState() {
+    server.expect(requestTo(
+            "https://graph.facebook.com/v18.0/10229/permissions"
+                + "?access_token=app-id-123%7Capp-secret-456"))
+        .andRespond(withStatus(HttpStatus.BAD_REQUEST)
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("{\"error\":{\"message\":\"Invalid user\",\"code\":100}}"));
+
+    assertThatThrownBy(() -> client.revokeUserPermissions("10229"))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("Invalid user");
+  }
+
+  @Test
   void deveFalharQuandoMetaNaoRetornaAccessToken() {
     server.expect(requestTo(
             "https://graph.facebook.com/v18.0/oauth/access_token"
