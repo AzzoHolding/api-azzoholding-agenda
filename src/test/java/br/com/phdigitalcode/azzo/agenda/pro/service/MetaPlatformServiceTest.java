@@ -4,11 +4,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -20,8 +23,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.MetaDtos.DataDeletionResponse;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.MetaDtos.DataDeletionStatusResponse;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.MetaDtos.MetaAcknowledgeResponse;
+import br.com.phdigitalcode.azzo.agenda.pro.entity.TenantWhatsAppConfig;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.WebhookEventLog;
 import br.com.phdigitalcode.azzo.agenda.pro.exception.ApiClientErrorException;
+import br.com.phdigitalcode.azzo.agenda.pro.integration.MetaEmbeddedSignupGateway;
+import br.com.phdigitalcode.azzo.agenda.pro.repository.TenantWhatsAppConfigRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.WebhookEventLogRepository;
 
 /**
@@ -33,13 +39,18 @@ class MetaPlatformServiceTest {
   private final ObjectMapper objectMapper = new ObjectMapper();
   private MetaSignedRequestService metaSignedRequestService;
   private WebhookEventLogRepository webhookEventLogRepository;
+  private TenantWhatsAppConfigRepository tenantWhatsAppConfigRepository;
+  private MetaEmbeddedSignupGateway metaEmbeddedSignupGateway;
   private MetaPlatformService service;
 
   @BeforeEach
   void setUp() {
     metaSignedRequestService = mock(MetaSignedRequestService.class);
     webhookEventLogRepository = mock(WebhookEventLogRepository.class);
-    service = new MetaPlatformService(metaSignedRequestService, webhookEventLogRepository);
+    tenantWhatsAppConfigRepository = mock(TenantWhatsAppConfigRepository.class);
+    metaEmbeddedSignupGateway = mock(MetaEmbeddedSignupGateway.class);
+    service = new MetaPlatformService(
+        metaSignedRequestService, webhookEventLogRepository, tenantWhatsAppConfigRepository, metaEmbeddedSignupGateway);
   }
 
   @Test
@@ -149,5 +160,87 @@ class MetaPlatformServiceTest {
 
     assertThatThrownBy(() -> service.dataDeletionStatus("abc"))
         .isInstanceOf(ApiClientErrorException.class);
+  }
+  // ---- SEG-014 parte 2: o callback acha o salao pelo meta_user_id e apaga a credencial ----------
+
+  private TenantWhatsAppConfig conectadoPelaMeta(String metaUserId) {
+    TenantWhatsAppConfig config = new TenantWhatsAppConfig();
+    config.setTenantId(java.util.UUID.randomUUID());
+    config.setWhatsappAccessTokenEnc("token-cifrado");
+    config.setWhatsappEnabled(true);
+    config.setWhatsappOnboardingStatus("CONNECTED");
+    config.setWhatsappTokenSource("EMBEDDED_CODE_EXCHANGE");
+    config.setMetaUserId(metaUserId);
+    return config;
+  }
+
+  private WebhookEventLog eventoGravado() {
+    org.mockito.ArgumentCaptor<WebhookEventLog> gravado =
+        org.mockito.ArgumentCaptor.forClass(WebhookEventLog.class);
+    verify(webhookEventLogRepository).save(gravado.capture());
+    return gravado.getValue();
+  }
+
+  private void assinado(String json) throws Exception {
+    JsonNode payload = objectMapper.readTree(json);
+    when(metaSignedRequestService.parseAndValidateSignedRequest("corpo")).thenReturn(payload);
+    when(metaSignedRequestService.payloadToJson(payload)).thenReturn(json);
+    when(metaSignedRequestService.sha256(anyString())).thenReturn("hash");
+  }
+
+  @Test
+  void seg014ExclusaoApagaACredencialDoSalaoEMarcaProcessada() throws Exception {
+    assinado("{\"user_id\":\"123\"}");
+    TenantWhatsAppConfig config = conectadoPelaMeta("123");
+    when(tenantWhatsAppConfigRepository.findByMetaUserId("123")).thenReturn(List.of(config));
+
+    service.dataDeletion("corpo", "https://host/s/");
+
+    assertThat(config.getWhatsappAccessTokenEnc()).isEmpty();
+    assertThat(config.isWhatsappEnabled()).isFalse();
+    assertThat(config.getWhatsappOnboardingStatus()).isEqualTo("NOT_STARTED");
+    assertThat(config.getMetaUserId()).isNull();
+    verify(tenantWhatsAppConfigRepository).save(config);
+    verify(metaEmbeddedSignupGateway).revokeUserPermissions("123");
+    WebhookEventLog evento = eventoGravado();
+    assertThat(evento.isProcessed()).isTrue();
+    assertThat(evento.getProcessedAt()).isNotNull();
+  }
+
+  @Test
+  void seg014DesautorizacaoTambemApagaACredencial() throws Exception {
+    assinado("{\"user_id\":\"123\"}");
+    TenantWhatsAppConfig config = conectadoPelaMeta("123");
+    when(tenantWhatsAppConfigRepository.findByMetaUserId("123")).thenReturn(List.of(config));
+
+    service.deauthorize("corpo");
+
+    assertThat(config.getWhatsappAccessTokenEnc()).isEmpty();
+    assertThat(config.isWhatsappEnabled()).isFalse();
+    assertThat(eventoGravado().isProcessed()).isTrue();
+  }
+
+  @Test
+  void seg014FalhaAoRevogarNaMetaNaoImpedeApagarAqui() throws Exception {
+    assinado("{\"user_id\":\"123\"}");
+    TenantWhatsAppConfig config = conectadoPelaMeta("123");
+    when(tenantWhatsAppConfigRepository.findByMetaUserId("123")).thenReturn(List.of(config));
+    doThrow(new IllegalStateException("fora do ar")).when(metaEmbeddedSignupGateway).revokeUserPermissions("123");
+
+    service.dataDeletion("corpo", "https://host/s/");
+
+    assertThat(config.getWhatsappAccessTokenEnc()).isEmpty();
+    assertThat(eventoGravado().isProcessed()).isTrue();
+  }
+
+  @Test
+  void seg014SemSalaoLigadoFicaPendenteENaoChamaAMeta() throws Exception {
+    assinado("{\"user_id\":\"999\"}");
+    when(tenantWhatsAppConfigRepository.findByMetaUserId("999")).thenReturn(List.of());
+
+    service.dataDeletion("corpo", "https://host/s/");
+
+    assertThat(eventoGravado().isProcessed()).isFalse();
+    verify(metaEmbeddedSignupGateway, never()).revokeUserPermissions(anyString());
   }
 }

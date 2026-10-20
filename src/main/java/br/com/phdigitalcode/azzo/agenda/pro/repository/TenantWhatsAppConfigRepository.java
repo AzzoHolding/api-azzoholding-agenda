@@ -29,6 +29,10 @@ public interface TenantWhatsAppConfigRepository extends JpaRepository<TenantWhat
 
   List<TenantWhatsAppConfig> findByWhatsappPhoneNumberId(String whatsappPhoneNumberId);
 
+  List<TenantWhatsAppConfig> findByMetaUserId(String metaUserId);
+
+  List<TenantWhatsAppConfig> findByWhatsappTokenSourceAndMetaUserIdIsNull(String whatsappTokenSource);
+
   boolean existsByWhatsappWebhookVerifyTokenHash(String whatsappWebhookVerifyTokenHash);
 
   /** Espelha {@code findByPhoneNumberId} do {@code WhatsAppWebhookResource} original. */
