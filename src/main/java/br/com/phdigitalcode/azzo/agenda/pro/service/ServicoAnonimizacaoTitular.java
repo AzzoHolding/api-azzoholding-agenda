@@ -72,7 +72,22 @@ public class ServicoAnonimizacaoTitular {
   @Transactional
   public AnonimizacaoResponse anonimizar(UUID clientId) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    return anonimizarNoSalao(tenantId, clientId, obterActorId(), "Anonimizacao executada pelo operador");
+  }
 
+  /**
+   * Anonimizacao sem usuario logado: usada pela rotina de fim de contrato do salao (LGPD, politica
+   * 2026.10 secao 6). Mesmo efeito da do operador; so muda quem e registrado como autor (ninguem) e o
+   * texto da solicitacao.
+   */
+  @Transactional
+  public AnonimizacaoResponse anonimizarPorFimDeContrato(UUID tenantId, UUID clientId) {
+    return anonimizarNoSalao(
+        tenantId, clientId, null, "Anonimizacao automatica por fim do contrato do salao (prazo legal vencido)");
+  }
+
+  private AnonimizacaoResponse anonimizarNoSalao(
+      UUID tenantId, UUID clientId, UUID autorId, String descricao) {
     Cliente cliente = clienteRepository.findByIdAndTenantId(clientId, tenantId)
         .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Cliente nao encontrado"));
 
@@ -139,10 +154,10 @@ public class ServicoAnonimizacaoTitular {
     lgpdRequest.setRequesterName(PLACEHOLDER);
     lgpdRequest.setRequesterEmail("anonimizado@sistema");
     lgpdRequest.setRequesterDocument(null);
-    lgpdRequest.setDescription("Anonimizacao executada pelo operador para cliente " + clientId);
+    lgpdRequest.setDescription(descricao + " para cliente " + clientId);
     lgpdRequest.setResponseSummary(
         "Dados pessoais anonimizados. Historico financeiro e de agendamentos preservado para obrigacao fiscal.");
-    lgpdRequest.setCreatedByUserId(obterActorId());
+    lgpdRequest.setCreatedByUserId(autorId);
     lgpdRequest.setClosedAt(now);
     requestRepository.save(lgpdRequest);
 
@@ -161,10 +176,10 @@ public class ServicoAnonimizacaoTitular {
             + mensagensWhatsapp + " mensagem(ns) de WhatsApp e "
             + reativacoes + " ciclo(s) de reativacao anonimizados e "
             + eventosDeAuditoria + " evento(s) de auditoria redigidos.");
-    event.setActorUserId(obterActorId());
+    event.setActorUserId(autorId);
     eventRepository.save(event);
 
-    auditar(tenantId, clientId, lgpdRequest.getId(), notes.size());
+    auditar(tenantId, clientId, lgpdRequest.getId(), notes.size(), autorId);
 
     LOG.info(
         "lgpd_anonymization_completed clientId={} tenantId={} protocol={} notesAnonymized={} "
@@ -203,16 +218,17 @@ public class ServicoAnonimizacaoTitular {
     }
   }
 
-  private void auditar(UUID tenantId, UUID clientId, UUID lgpdRequestId, int notesCount) {
+  private void auditar(UUID tenantId, UUID clientId, UUID lgpdRequestId, int notesCount, UUID autorId) {
     try {
       AuditEventCommand command = new AuditEventCommand();
       command.tenantId = tenantId;
-      command.actorUserId = obterActorId();
+      command.actorUserId = autorId;
       command.module = AuditConstants.Module.LGPD;
       command.action = "LGPD_CLIENT_ANONYMIZATION";
       command.entityType = "CLIENT";
       command.entityId = clientId.toString();
-      command.sourceChannel = AuditConstants.SourceChannel.API;
+      command.sourceChannel =
+          autorId == null ? AuditConstants.SourceChannel.SCHEDULER : AuditConstants.SourceChannel.API;
       command.after = Map.of(
           "clientId", clientId.toString(),
           "lgpdRequestId", lgpdRequestId.toString(),

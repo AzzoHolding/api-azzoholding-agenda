@@ -198,7 +198,8 @@ class TelegramWebhookControllerTest {
     TelegramWebhookController.WebhookResponse response = controller.receive(tenantId.toString(), "segredo", payload);
 
     assertThat(response.message).isEqualTo("opt-out registrado");
-    verify(servicoOptOut).registrar(inbound.client);
+    verify(servicoOptOut).registrar(
+        inbound.client, br.com.phdigitalcode.azzo.agenda.pro.service.ServicoOptOutDoTitular.ORIGEM_TELEGRAM);
     verify(communicationChannelDispatcher).sendText(any());
     verify(assistantApiClient, never()).processarMensagem(any(), any(), any(), any());
   }

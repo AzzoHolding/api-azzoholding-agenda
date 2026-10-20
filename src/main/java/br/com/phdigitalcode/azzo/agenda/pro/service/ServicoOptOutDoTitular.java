@@ -8,8 +8,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import br.com.phdigitalcode.azzo.agenda.pro.entity.Cliente;
+import br.com.phdigitalcode.azzo.agenda.pro.entity.ReactivationConsentHistoryEntity;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.WhatsAppBookingReactivationCycleEntity;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.ClienteRepository;
+import br.com.phdigitalcode.azzo.agenda.pro.repository.ReactivationConsentHistoryRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.WhatsAppBookingReactivationCycleRepository;
 
 /**
@@ -34,17 +36,23 @@ public class ServicoOptOutDoTitular {
 
   private static final List<String> PALAVRAS = List.of("PARE", "STOP", "NAO QUERO", "SAIR", "REMOVER");
 
+  /** Origem gravada no historico de consentimento para o "PARE" vindo do Telegram (V148). */
+  public static final String ORIGEM_TELEGRAM = "TELEGRAM_REPLY";
+
   private final ClienteRepository clienteRepository;
   private final WhatsAppBookingReactivationCycleRepository reactivationCycleRepository;
   private final WhatsAppBookingReactivationService whatsAppBookingReactivationService;
+  private final ReactivationConsentHistoryRepository consentHistoryRepository;
 
   public ServicoOptOutDoTitular(
       ClienteRepository clienteRepository,
       WhatsAppBookingReactivationCycleRepository reactivationCycleRepository,
-      WhatsAppBookingReactivationService whatsAppBookingReactivationService) {
+      WhatsAppBookingReactivationService whatsAppBookingReactivationService,
+      ReactivationConsentHistoryRepository consentHistoryRepository) {
     this.clienteRepository = clienteRepository;
     this.reactivationCycleRepository = reactivationCycleRepository;
     this.whatsAppBookingReactivationService = whatsAppBookingReactivationService;
+    this.consentHistoryRepository = consentHistoryRepository;
   }
 
   /**
@@ -57,6 +65,22 @@ public class ServicoOptOutDoTitular {
         .replaceAll("\\p{M}", "")
         .toUpperCase(Locale.ROOT);
     return PALAVRAS.contains(normalizado);
+  }
+
+  /**
+   * Registra o opt-out e deixa a linha no historico de consentimento com a origem do pedido.
+   * Antes so mudava a ficha: o "PARE" do Telegram nao aparecia no historico (o CHECK de origem nao
+   * aceitava Telegram; ampliado na V148).
+   */
+  @Transactional
+  public void registrar(Cliente cliente, String origem) {
+    registrar(cliente);
+    ReactivationConsentHistoryEntity consent = new ReactivationConsentHistoryEntity();
+    consent.setTenantId(cliente.getTenantId());
+    consent.setClientId(cliente.getId());
+    consent.setAction("OPT_OUT");
+    consent.setSource(origem);
+    consentHistoryRepository.save(consent);
   }
 
   @Transactional
