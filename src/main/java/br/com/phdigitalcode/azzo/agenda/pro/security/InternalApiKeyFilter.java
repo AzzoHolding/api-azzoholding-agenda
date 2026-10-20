@@ -6,6 +6,7 @@ import java.security.MessageDigest;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -66,6 +67,9 @@ public class InternalApiKeyFilter extends OncePerRequestFilter {
   private final boolean aceitarChaveLegada;
   private final java.util.List<ChaveDeServico> chavesDeServico;
 
+  // @Autowired obrigatorio: com dois construtores, o Spring nao escolhe sozinho e a aplicacao nao sobe
+  // (queda de 20/10/2026, os testes unitarios instanciam na mao e nao pegaram).
+  @Autowired
   public InternalApiKeyFilter(
       @Value("${app.internal.api-key:changeme-dev}") String configuredApiKey,
       @Value("${app.internal.chaves.assistant:}") String chaveAssistant,
