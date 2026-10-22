@@ -573,7 +573,8 @@ public class ServicoPublicBooking {
   private String normalizePhone(String phone) {
     if (phone == null) return null;
     String digits = phone.replaceAll("\\D", "");
-    return digits.length() < 10 ? null : digits;
+    // Mesma regra do cadastro (TelefoneBr): 13 digitos sem o 55 nao e celular e nao recebe WhatsApp.
+    return br.com.phdigitalcode.azzo.agenda.pro.util.TelefoneBr.valido(digits) ? digits : null;
   }
 
   private LocalTime parseTimeOrThrow(String value) {
