@@ -288,7 +288,7 @@ public class ClienteService {
   private void aplicar(ClienteRequest req, Cliente c) {
     c.setName(normalizeText(req.name));
     c.setEmail(normalizeEmail(req.email));
-    c.setPhone(normalizeDigits(req.phone));
+    c.setPhone(br.com.phdigitalcode.azzo.agenda.pro.util.TelefoneBr.normalizarSeMudou(req.phone, c.getPhone()));
     c.setBirthDate(DataUtil.parseDataISO(req.birthDate));
     c.setNotes(normalizeText(req.notes));
     c.setCpfCnpj(normalizeDigits(req.cpfCnpj));
