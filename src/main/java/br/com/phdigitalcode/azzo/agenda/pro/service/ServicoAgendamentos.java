@@ -276,6 +276,13 @@ public class ServicoAgendamentos {
 
     AppointmentDetailResponse response = new AppointmentDetailResponse();
     response.appointment = toResponse(appointment);
+    comandaRepository
+        .findFirstByAppointmentAndTenant(id, tenantId)
+        .ifPresent(
+            comanda -> {
+              response.comandaId = comanda.getId().toString();
+              response.comandaStatus = comanda.getStatus();
+            });
     response.careNotes =
         appointmentCustomerNoteRepository
             .findByTenantIdAndAppointmentIdOrderByCreatedAtDesc(tenantId, id)
