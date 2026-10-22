@@ -40,6 +40,8 @@ import org.mockito.ArgumentCaptor;
  */
 class ServicoConfirmacaoDeAgendamentoCancelamentoTest {
 
+  private final RegistroDeEnvioDoWhatsapp registroDeEnvio = org.mockito.Mockito.mock(RegistroDeEnvioDoWhatsapp.class);
+
   private static final UUID TENANT = UUID.randomUUID();
   private static final String FONE = "11999990000";
 
@@ -72,7 +74,8 @@ class ServicoConfirmacaoDeAgendamentoCancelamentoTest {
             mock(TenantRepository.class),
             tenantWhatsAppConfigRepository,
             operationalSettingsRepository,
-            canalDoCliente);
+            canalDoCliente,
+            registroDeEnvio);
 
     configuracoes = new TenantOperationalSettings();
     configuracoes.setWhatsappNotifications(true);

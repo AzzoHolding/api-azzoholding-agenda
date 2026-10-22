@@ -46,6 +46,8 @@ import br.com.phdigitalcode.azzo.agenda.pro.service.channel.ChannelSendResult;
  */
 class ServicoConfirmacaoDeAgendamentoTest {
 
+  private final RegistroDeEnvioDoWhatsapp registroDeEnvio = org.mockito.Mockito.mock(RegistroDeEnvioDoWhatsapp.class);
+
   private final UUID tenantId = UUID.randomUUID();
   private final UUID clienteId = UUID.randomUUID();
   private final UUID agendamentoId = UUID.randomUUID();
@@ -76,7 +78,7 @@ class ServicoConfirmacaoDeAgendamentoTest {
         new ServicoConfirmacaoDeAgendamento(
             servicoTemplates, clienteRepository, itemRepository, servicoRepository,
             profissionalRepository, tenantRepository, configRepository, settingsRepository,
-            canalDoCliente);
+            canalDoCliente, registroDeEnvio);
 
     TenantOperationalSettings settings = new TenantOperationalSettings();
     settings.setWhatsappNotifications(true);
@@ -224,5 +226,28 @@ class ServicoConfirmacaoDeAgendamentoTest {
         .thenThrow(new IllegalStateException("(#131037) display name"));
 
     servico.enviar(tenantId, agendamento());
+  }
+  @Test
+  @DisplayName("registra a confirmacao em Mensagens enviadas, com o wamid, para o status de entrega achar")
+  void registraNoLogDoWhatsapp() {
+    servico.enviar(tenantId, agendamento());
+
+    ArgumentCaptor<ChannelSendResult> resultado = ArgumentCaptor.forClass(ChannelSendResult.class);
+    verify(registroDeEnvio)
+        .registrar(
+            eq(tenantId), eq(agendamentoId), eq(RegistroDeEnvioDoWhatsapp.CONFIRMACAO),
+            eq("5521987599613"), anyString(), resultado.capture());
+    assertThat(resultado.getValue().providerMessageId()).isEqualTo("wamid.1");
+  }
+
+  @Test
+  @DisplayName("pelo Telegram nao registra no log do WhatsApp")
+  void telegramNaoRegistraNoLog() {
+    when(canalDoCliente.resolve(any(), any(), any()))
+        .thenReturn(new CustomerCommunicationChannelResolver.ResolvedChannel(ChatChannel.TELEGRAM, "12345678901", null));
+
+    servico.enviar(tenantId, agendamento());
+
+    org.mockito.Mockito.verifyNoInteractions(registroDeEnvio);
   }
 }
