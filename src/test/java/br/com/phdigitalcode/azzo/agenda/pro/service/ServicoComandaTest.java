@@ -445,6 +445,21 @@ class ServicoComandaTest {
   }
 
   @ParameterizedTest
+  @ValueSource(strings = {"0.5", "1.5", "0"})
+  void servicoComQuantidadeFracionariaOuMenorQueUmFalha(String quantidade) {
+    comanda(Comanda.STATUS_ABERTA).setClientId(clientId);
+    ComandaDtos.AdicionarItemRequest req = new ComandaDtos.AdicionarItemRequest();
+    req.tipo = ComandaItem.TIPO_SERVICO;
+    req.referenciaId = serviceId.toString();
+    req.quantidade = new BigDecimal(quantidade);
+
+    // "1,5 corte" foi aceito no teste ponta a ponta de 21/10/2026.
+    assertThatThrownBy(() -> service.adicionarItem(comandaId, req))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("A quantidade de um serviço precisa ser um número inteiro, de 1 em diante.");
+  }
+
+  @ParameterizedTest
   @ValueSource(strings = {"0.001", "0.5", "1.5", "2.01", "0"})
   void pacoteComQuantidadeFracionariaOuMenorQueUmFalha(String quantidade) {
     pacoteNoCatalogo("500.00");
@@ -621,7 +636,7 @@ class ServicoComandaTest {
                 service.registrarPagamento(
                     comandaId, pedidoDePagamento(ComandaPagamento.MEIO_CARTAO_CREDITO_EXTERNO, "100.00")))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("O valor passa do que falta pagar (80.00). So o pagamento em dinheiro tem troco.");
+        .hasMessage("O valor passa do que falta pagar (R$ 80,00). Só o pagamento em dinheiro tem troco.");
 
     verify(comandaPagamentoRepository, never()).save(any());
   }
@@ -668,7 +683,7 @@ class ServicoComandaTest {
             () ->
                 service.registrarPagamento(
                     comandaId, pedidoDePagamento(ComandaPagamento.MEIO_CARTAO_DEBITO_EXTERNO, "95.00")))
-        .hasMessageContaining("O valor passa do que falta pagar (90.00)");
+        .hasMessageContaining("O valor passa do que falta pagar (R$ 90,00)");
   }
 
   /** Pix ainda pendente nao paga a conta: o caixa pode receber a diferenca de outro modo. */

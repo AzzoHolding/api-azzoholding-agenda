@@ -222,6 +222,12 @@ public final class SchedulingDtos {
   /** Espelha {@code api/dto/AppointmentDetailResponse.java}. */
   public static class AppointmentDetailResponse {
     public AgendamentoResponse appointment;
+    /**
+     * A comanda ligada ao atendimento, quando existe ({@code ABERTA}, {@code FECHADA}...). A tela
+     * usa para nao perguntar "para onde vai o pagamento" de um atendimento ja pago.
+     */
+    public String comandaId;
+    public String comandaStatus;
     public List<AppointmentCustomerNoteResponse> careNotes = new ArrayList<>();
     public List<AppointmentTimelineEventResponse> timeline = new ArrayList<>();
   }

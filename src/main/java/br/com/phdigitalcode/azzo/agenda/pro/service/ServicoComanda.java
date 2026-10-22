@@ -358,6 +358,13 @@ public class ServicoComanda {
     item.setQuantidade(request.quantidade != null ? request.quantidade : BigDecimal.ONE);
 
     if (ComandaItem.TIPO_SERVICO.equals(request.tipo)) {
+      // Servico e por atendimento: "1,5 corte" foi aceito no teste ponta a ponta de 21/10/2026
+      // (R$ 75,75). Mesma regra do pacote.
+      if (item.getQuantidade().compareTo(BigDecimal.ONE) < 0
+          || item.getQuantidade().stripTrailingZeros().scale() > 0) {
+        throw new IllegalArgumentException(
+            "A quantidade de um serviço precisa ser um número inteiro, de 1 em diante.");
+      }
       Servico servico =
           servicoRepository
               .findByIdAndTenantId(referenciaId, tenantId)
@@ -1023,7 +1030,9 @@ public class ServicoComanda {
     if (!ComandaPagamento.MEIO_DINHEIRO.equals(request.meio)
         && request.valor.compareTo(restante) > 0) {
       throw new IllegalArgumentException(
-          "O valor passa do que falta pagar (" + restante + "). So o pagamento em dinheiro tem troco.");
+          "O valor passa do que falta pagar ("
+              + String.format(java.util.Locale.of("pt", "BR"), "R$ %,.2f", restante)
+              + "). Só o pagamento em dinheiro tem troco.");
     }
   }
 

@@ -408,7 +408,7 @@ class ServicoAgendamentosTest {
 
       assertThatThrownBy(() -> service.criar(requestValido()))
           .isInstanceOf(IllegalArgumentException.class)
-          .hasMessage("Salao fechado ou fora do horario de funcionamento informado");
+          .hasMessage("Salão fechado ou fora do horário de funcionamento.");
     }
 
     @Test
@@ -748,6 +748,19 @@ class ServicoAgendamentosTest {
   @Nested
   @DisplayName("atualizarStatus")
   class AtualizarStatus {
+
+    @Test
+    @DisplayName("iniciar um atendimento de dia futuro e bloqueado")
+    void iniciarAtendimentoDeDiaFuturoEBloqueado() {
+      Agendamento a =
+          agendamentoExistente(StatusAgendamento.CONFIRMED, LocalDate.now(ZONE_BR).plusDays(1), "10:00", "10:30");
+      when(agendamentoRepository.findByIdAndTenantId(a.getId(), tenantId)).thenReturn(Optional.of(a));
+
+      assertThatThrownBy(() -> service.atualizarStatus(a.getId(), "IN_PROGRESS"))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("só pode ser iniciado ou concluído no dia");
+      assertThat(a.getStatus()).isEqualTo(StatusAgendamento.CONFIRMED);
+    }
 
     @Test
     @DisplayName("concluir sem nenhuma nota operacional e bloqueado")

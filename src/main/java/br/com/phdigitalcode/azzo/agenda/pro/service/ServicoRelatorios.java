@@ -625,18 +625,21 @@ public class ServicoRelatorios {
     int cancelados = agendSumRow[2] != null ? ((Number) agendSumRow[2]).intValue() : 0;
     // A receita de servicos e a da comanda (ReceitaDeServicosSql); a contagem de agendamentos
     // continua vindo da agenda.
-    BigDecimal receitaAgend =
-        bd(
+    Object[] receitaRow =
+        (Object[])
             entityManager
                 .createNativeQuery(
                     "WITH " + br.com.phdigitalcode.azzo.agenda.pro.util.ReceitaDeServicosSql.CTE + """
-                    SELECT COALESCE(SUM(r.valor), 0) FROM receita_servicos r
+                    SELECT COALESCE(SUM(r.valor), 0), COUNT(DISTINCT r.venda_id)::int
+                    FROM receita_servicos r
                     WHERE r.dia BETWEEN :from AND :to
                     """)
                 .setParameter("tenantId", tenantId)
                 .setParameter("from", inicio)
                 .setParameter("to", fim)
-                .getSingleResult());
+                .getSingleResult();
+    BigDecimal receitaAgend = bd(receitaRow[0]);
+    int vendas = receitaRow[1] != null ? ((Number) receitaRow[1]).intValue() : 0;
 
     List<Object[]> topServRows =
         entityManager
@@ -734,8 +737,12 @@ public class ServicoRelatorios {
     response.agendamentos.totalAgendamentos = totalAgend;
     response.agendamentos.agendamentosConcluidos = concluidos;
     response.agendamentos.agendamentosCancelados = cancelados;
+    // Ticket = receita / vendas, as duas pela data da venda — como no relatorio de Vendas. Dividir
+    // pelos concluidos (data do agendamento) misturava datas: no teste ponta a ponta de 21/10/2026
+    // o atendimento era de 22/10 e a venda de 21/10, e o Gerencial de 01 a 21/10 mostrou R$ 108,45
+    // de receita com ticket de R$ 0,00.
     response.agendamentos.ticketMedio =
-        concluidos > 0 ? receitaAgend.divide(BigDecimal.valueOf(concluidos), 2, RoundingMode.HALF_UP) : BigDecimal.ZERO;
+        vendas > 0 ? receitaAgend.divide(BigDecimal.valueOf(vendas), 2, RoundingMode.HALF_UP) : BigDecimal.ZERO;
 
     response.topServicos = new ArrayList<>();
     for (Object[] row : topServRows) {
