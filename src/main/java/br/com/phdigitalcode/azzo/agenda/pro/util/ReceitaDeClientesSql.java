@@ -11,8 +11,10 @@ package br.com.phdigitalcode.azzo.agenda.pro.util;
  * <p>Cada linha e uma VISITA:
  *
  * <ul>
- *   <li><b>comanda FECHADA do cliente</b>: o total cobrado (sem gorjeta), no dia em que fechou —
- *       inclui produto e pacote vendidos;
+ *   <li><b>comanda FECHADA do cliente</b>: o total cobrado (sem gorjeta) — inclui produto e pacote
+ *       vendidos. O dia e o do AGENDAMENTO quando a comanda veio de um; sem agendamento (venda
+ *       avulsa), o dia em que fechou. Ate 21/10/2026 era sempre o do fechamento, e um atendimento de
+ *       22/10 fechado em 21/10 virava "ultima visita 21/10" (teste ponta a ponta);
  *   <li><b>agendamento concluido sem comanda fechada</b>: conta como visita; o valor e o do
  *       agendamento so quando nao ha comanda nenhuma (regra antiga). Com comanda aberta, estornada ou
  *       cancelada, o cliente veio mas o dinheiro nao entrou: valor zero.
@@ -29,10 +31,11 @@ public final class ReceitaDeClientesSql {
       """
       visitas_clientes AS (
         SELECT c.client_id,
-               (c.closed_at AT TIME ZONE 'America/Sao_Paulo')::date AS dia,
+               COALESCE(ap.date, (c.closed_at AT TIME ZONE 'America/Sao_Paulo')::date) AS dia,
                c.id AS visita_id,
                c.total AS valor
         FROM comandas c
+        LEFT JOIN appointments ap ON ap.id = c.appointment_id AND ap.tenant_id = c.tenant_id
         WHERE c.tenant_id = :tenantId
           AND c.status = 'FECHADA'
           AND c.client_id IS NOT NULL
