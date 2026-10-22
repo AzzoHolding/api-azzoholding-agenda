@@ -409,7 +409,7 @@ public class ProfissionalService {
   private void aplicar(ProfissionalRequest req, Profissional p, UUID tenantId) {
     p.setName(req.name);
     p.setEmail(req.email != null ? req.email.trim().toLowerCase(Locale.ROOT) : null);
-    p.setPhone(req.phone);
+    p.setPhone(br.com.phdigitalcode.azzo.agenda.pro.util.TelefoneBr.normalizarSeMudou(req.phone, p.getPhone()));
     p.setAvatar(req.avatar);
     p.setSpecialties(resolveSpecialties(tenantId, req.specialties));
     // A coluna `commission_rate` e NOT NULL (como no original Quarkus): "sem comissao" se
