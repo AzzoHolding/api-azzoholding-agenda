@@ -61,6 +61,8 @@ import br.com.phdigitalcode.azzo.agenda.pro.service.channel.CommunicationChannel
  */
 class ReminderProcessingServiceTest {
 
+  private final RegistroDeEnvioDoWhatsapp registroDeEnvio = org.mockito.Mockito.mock(RegistroDeEnvioDoWhatsapp.class);
+
   private static final ZoneId ZONE_BR = ZoneId.of("America/Sao_Paulo");
 
   private AgendamentoRepository agendamentoRepository;
@@ -119,7 +121,8 @@ class ReminderProcessingServiceTest {
             customerCommunicationChannelResolver,
             assistantApiClient,
             chatService,
-            mock(PlatformTransactionManager.class));
+            mock(PlatformTransactionManager.class),
+            registroDeEnvio);
   }
 
   // ============================================================
@@ -355,6 +358,11 @@ class ReminderProcessingServiceTest {
         .registrarMensagemAutomatica(
             eq(appointment.getTenantId()), eq(client), eq(ChatChannel.WHATSAPP), eq(client.getPhone()), anyString(),
             eq("msg-1"));
+    // E em "Mensagens enviadas", com o wamid, para o status de entrega da Meta achar a linha.
+    verify(registroDeEnvio)
+        .registrar(
+            eq(appointment.getTenantId()), eq(appointment.getId()), eq(RegistroDeEnvioDoWhatsapp.LEMBRETE),
+            eq(client.getPhone()), anyString(), any());
   }
 
   @Test

@@ -79,6 +79,7 @@ public class ReminderProcessingService {
   private final AssistantApiClient assistantApiClient;
   private final ChatService chatService;
   private final TransactionTemplate requiresNewTransaction;
+  private final RegistroDeEnvioDoWhatsapp registroDeEnvio;
 
   public ReminderProcessingService(
       ServicoTemplatesDoWhatsapp servicoTemplates,
@@ -94,7 +95,8 @@ public class ReminderProcessingService {
       CustomerCommunicationChannelResolver customerCommunicationChannelResolver,
       AssistantApiClient assistantApiClient,
       ChatService chatService,
-      PlatformTransactionManager transactionManager) {
+      PlatformTransactionManager transactionManager,
+      RegistroDeEnvioDoWhatsapp registroDeEnvio) {
     this.servicoTemplates = servicoTemplates;
     this.agendamentoRepository = agendamentoRepository;
     this.tenantRepository = tenantRepository;
@@ -108,6 +110,7 @@ public class ReminderProcessingService {
     this.customerCommunicationChannelResolver = customerCommunicationChannelResolver;
     this.assistantApiClient = assistantApiClient;
     this.chatService = chatService;
+    this.registroDeEnvio = registroDeEnvio;
     this.requiresNewTransaction = new TransactionTemplate(transactionManager);
     this.requiresNewTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
   }
@@ -225,6 +228,11 @@ public class ReminderProcessingService {
           sendReminderMessage(
               appointment.getTenantId(), route.channel(), route.destination(), message,
               valoresDoTemplate);
+      if (route.channel() == ChatChannel.WHATSAPP) {
+        registroDeEnvio.registrar(
+            appointment.getTenantId(), appointment.getId(), RegistroDeEnvioDoWhatsapp.LEMBRETE,
+            route.destination(), message, sendResult);
+      }
       if (!sendResult.success()) {
         throw new IllegalStateException(firstNonBlank(
             sendResult.providerErrorMessage(), sendResult.providerErrorCode(), "Falha ao enviar lembrete"));

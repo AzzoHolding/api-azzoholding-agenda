@@ -54,6 +54,7 @@ public class ServicoConfirmacaoDeAgendamento {
   private final TenantWhatsAppConfigRepository tenantWhatsAppConfigRepository;
   private final TenantOperationalSettingsRepository operationalSettingsRepository;
   private final CustomerCommunicationChannelResolver canalDoCliente;
+  private final RegistroDeEnvioDoWhatsapp registroDeEnvio;
 
   public ServicoConfirmacaoDeAgendamento(
       ServicoTemplatesDoWhatsapp servicoTemplates,
@@ -64,7 +65,8 @@ public class ServicoConfirmacaoDeAgendamento {
       TenantRepository tenantRepository,
       TenantWhatsAppConfigRepository tenantWhatsAppConfigRepository,
       TenantOperationalSettingsRepository operationalSettingsRepository,
-      CustomerCommunicationChannelResolver canalDoCliente) {
+      CustomerCommunicationChannelResolver canalDoCliente,
+      RegistroDeEnvioDoWhatsapp registroDeEnvio) {
     this.servicoTemplates = servicoTemplates;
     this.clienteRepository = clienteRepository;
     this.agendamentoItemRepository = agendamentoItemRepository;
@@ -74,6 +76,7 @@ public class ServicoConfirmacaoDeAgendamento {
     this.tenantWhatsAppConfigRepository = tenantWhatsAppConfigRepository;
     this.operationalSettingsRepository = operationalSettingsRepository;
     this.canalDoCliente = canalDoCliente;
+    this.registroDeEnvio = registroDeEnvio;
   }
 
   /**
@@ -86,7 +89,7 @@ public class ServicoConfirmacaoDeAgendamento {
   public void enviar(UUID tenantId, Agendamento agendamento) {
     enviarAviso(
         tenantId, agendamento, WhatsAppTemplateEntity.CONFIRMACAO, "confirmacao",
-        this::textoEquivalente);
+        RegistroDeEnvioDoWhatsapp.CONFIRMACAO, this::textoEquivalente);
   }
 
   /**
@@ -106,7 +109,7 @@ public class ServicoConfirmacaoDeAgendamento {
   public void enviarCancelamento(UUID tenantId, Agendamento agendamento) {
     enviarAviso(
         tenantId, agendamento, WhatsAppTemplateEntity.CANCELAMENTO, "cancelamento",
-        this::textoEquivalenteDoCancelamento);
+        RegistroDeEnvioDoWhatsapp.CANCELAMENTO, this::textoEquivalenteDoCancelamento);
   }
 
   private void enviarAviso(
@@ -114,6 +117,7 @@ public class ServicoConfirmacaoDeAgendamento {
       Agendamento agendamento,
       String finalidade,
       String rotulo,
+      String eventoDoLog,
       java.util.function.Function<Map<String, String>, String> textoEquivalente) {
     if (tenantId == null || agendamento == null || agendamento.getClientId() == null) return;
 
@@ -139,14 +143,20 @@ public class ServicoConfirmacaoDeAgendamento {
       }
 
       Map<String, String> valores = valoresDaConfirmacao(tenantId, agendamento, cliente);
+      boolean porTelegram = canal.channel() == ChatChannel.TELEGRAM;
+      String texto = textoEquivalente.apply(valores);
       ChannelSendResult resultado =
           servicoTemplates.enviar(
               tenantId,
               finalidade,
-              canal.channel() == ChatChannel.TELEGRAM ? ChatChannel.TELEGRAM : ChatChannel.WHATSAPP,
+              porTelegram ? ChatChannel.TELEGRAM : ChatChannel.WHATSAPP,
               destino,
               valores,
-              textoEquivalente.apply(valores));
+              texto);
+      // "Mensagens enviadas" e o log do WhatsApp: o Telegram nao tem status de entrega para ligar.
+      if (!porTelegram) {
+        registroDeEnvio.registrar(tenantId, agendamento.getId(), eventoDoLog, destino, texto, resultado);
+      }
 
       if (resultado != null && !resultado.success()) {
         // O motivo da Meta no log: sem ele, uma mensagem que nao chega vira mistério.
