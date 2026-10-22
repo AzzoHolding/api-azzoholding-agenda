@@ -369,7 +369,7 @@ class ServicoPublicBookingTest {
 
     assertThatThrownBy(() -> service.criarAgendamentoPublico("salao-teste", request))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("horario de funcionamento");
+        .hasMessageContaining("horário de funcionamento");
   }
 
   @Test

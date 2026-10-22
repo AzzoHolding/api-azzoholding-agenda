@@ -394,6 +394,7 @@ public class ServicoAgendamentos {
     StatusAgendamento novoStatus = StatusAgendamento.fromValue(status);
     StatusAgendamento.validarTransicao(statusAnterior, novoStatus);
     validarNoShowPermitido(a, novoStatus);
+    validarAtendimentoNoDia(a, statusAnterior, novoStatus);
     validarNotaOperacionalObrigatoria(tenantId, a, novoStatus);
     if (statusAnterior == StatusAgendamento.COMPLETED && novoStatus != StatusAgendamento.COMPLETED) {
       validarComandaNaoFechadaParaSairDeCompleted(tenantId, a);
@@ -686,7 +687,7 @@ public class ServicoAgendamentos {
       if (!tenantOperationalSettingsService.isBusinessOpenAt(
           tenantId, a.getDate(), editStart, editEnd)) {
         throw new IllegalArgumentException(
-            "Salao fechado ou fora do horario de funcionamento informado");
+            "Salão fechado ou fora do horário de funcionamento.");
       }
       if (specialClosureService.isClosedAt(
           tenantId, a.getProfessionalId(), a.getDate(), editStart, editEnd)) {
@@ -1752,7 +1753,7 @@ public class ServicoAgendamentos {
     }
     LocalTime end = parseTimeOrThrow(a.getEndTime());
     if (!tenantOperationalSettingsService.isBusinessOpenAt(tenantId, a.getDate(), start, end)) {
-      throw new IllegalArgumentException("Salao fechado ou fora do horario de funcionamento informado");
+      throw new IllegalArgumentException("Salão fechado ou fora do horário de funcionamento.");
     }
     // Verificar fechamentos especiais parciais e por profissional
     if (specialClosureService.isClosedAt(tenantId, a.getProfessionalId(), a.getDate(), start, end)) {
@@ -2450,6 +2451,27 @@ public class ServicoAgendamentos {
               "tenantId", tenantId,
               "appointmentId", agendamento.getId(),
               "erro", e.getMessage()));
+    }
+  }
+
+  /**
+   * Iniciar ou concluir so a partir do dia do agendamento.
+   *
+   * <p>No teste ponta a ponta de 21/10/2026, "Em atendimento" num horario de 22/10 abriu a comanda
+   * em 21/10, e a receita entrou no dia errado. Marcar um horario de amanha como atendido hoje e
+   * erro de clique; o caminho certo e remarcar para hoje.
+   */
+  private void validarAtendimentoNoDia(
+      Agendamento agendamento, StatusAgendamento statusAnterior, StatusAgendamento novoStatus) {
+    boolean comecaAgora =
+        (novoStatus == StatusAgendamento.IN_PROGRESS && statusAnterior != StatusAgendamento.IN_PROGRESS)
+            || (novoStatus == StatusAgendamento.COMPLETED && statusAnterior != StatusAgendamento.COMPLETED);
+    if (!comecaAgora || agendamento == null || agendamento.getDate() == null) return;
+    if (agendamento.getDate().isAfter(LocalDate.now(ZONE_BR))) {
+      throw new IllegalArgumentException(
+          "Este atendimento é de "
+              + agendamento.getDate().format(java.time.format.DateTimeFormatter.ofPattern("dd/MM"))
+              + ": só pode ser iniciado ou concluído no dia. Para atender hoje, remarque para hoje.");
     }
   }
 

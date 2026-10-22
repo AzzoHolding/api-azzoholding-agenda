@@ -252,7 +252,7 @@ public class ServicoPublicBooking {
       throw new IllegalArgumentException("Esse horario ja passou. Escolha outro horario.");
     }
     if (!tenantOperationalSettingsService.isBusinessOpenAt(tenant.getId(), data, startTime, endTime)) {
-      throw new IllegalArgumentException("Salao fechado ou fora do horario de funcionamento informado");
+      throw new IllegalArgumentException("Salão fechado ou fora do horário de funcionamento.");
     }
     // Verificar fechamentos especiais (all_day e parciais, incluindo do profissional)
     if (specialClosureService.isClosedAt(tenant.getId(), professionalUuid, data, startTime, endTime)) {
