@@ -151,6 +151,27 @@ class AppointmentServiceTest {
     assertThat(service.findAvailableSlots(tenantId, professionalId, DATA, 30, 0)).isNotEmpty();
   }
 
+  /** Teste de dialogos de 24/10/2026: 14:30 era oferecido num fechamento de 14h as 16h. */
+  @Test
+  @DisplayName("fechamento de parte do dia tira os horarios desse trecho")
+  void fechamentoParcialTiraOTrecho() {
+    janelaSalao("09:00", "19:00");
+    profissionalExiste();
+    jornada("09:00", "19:00");
+    semAgendamentos();
+    when(specialClosureService.trechosFechados(tenantId, professionalId, DATA))
+        .thenReturn(List.<LocalTime[]>of(new LocalTime[] {LocalTime.of(14, 0), LocalTime.of(16, 0)}));
+
+    List<TimeSlotResponse> slots = service.findAvailableSlots(tenantId, professionalId, DATA, 30, 0);
+
+    assertThat(slots).isNotEmpty();
+    assertThat(slots).noneSatisfy(slot -> {
+      assertThat(slot.startTime).isBefore(LocalTime.of(16, 0));
+      assertThat(slot.endTime).isAfter(LocalTime.of(14, 0));
+    });
+    assertThat(slots).anySatisfy(slot -> assertThat(slot.startTime).isEqualTo(LocalTime.of(16, 0)));
+  }
+
   // ---------- portoes que zeram a agenda ----------
 
   @Test

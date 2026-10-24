@@ -207,7 +207,12 @@ public class AppointmentService {
     }
 
     List<Agendamento> appointments = loadActiveAppointments(tenantId, professionalId, date);
-    List<TimeRange> busyRanges = mergeRanges(converterParaFaixasOcupadas(appointments));
+    List<TimeRange> ocupados = new ArrayList<>(converterParaFaixasOcupadas(appointments));
+    // Fechamento de parte do dia (Configuracoes > Horarios > Dias de inatividade) tambem ocupa.
+    for (java.time.LocalTime[] trecho : specialClosureService.trechosFechados(tenantId, professionalId, date)) {
+      ocupados.add(new TimeRange(trecho[0], trecho[1]));
+    }
+    List<TimeRange> busyRanges = mergeRanges(ocupados);
     List<TimeRange> blockedRanges = mergeRanges(expandirComBuffer(busyRanges, bufferMinutes));
     List<TimeRange> freeRanges = calculateFreeRanges(workingRanges, blockedRanges);
 

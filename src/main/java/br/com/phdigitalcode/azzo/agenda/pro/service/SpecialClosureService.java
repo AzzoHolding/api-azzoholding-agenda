@@ -241,6 +241,21 @@ public class SpecialClosureService {
     return closureRepository.listDistinctDatesInRange(tenantId, from, to);
   }
 
+  /**
+   * Trechos fechados de uma data (fechamento de parte do dia), do salao e deste profissional, como
+   * pares {inicio, fim}. O motor de horarios desconta estes trechos: antes so o dia inteiro era
+   * descontado, e o assistente oferecia 14:30 num fechamento de 14h as 16h que a criacao recusava
+   * (teste de dialogos de 24/10/2026).
+   */
+  public List<java.time.LocalTime[]> trechosFechados(UUID tenantId, UUID professionalId, LocalDate date) {
+    if (tenantId == null || date == null) return List.of();
+    return closureRepository.findByTenantIdAndClosureDateAndAllDayFalse(tenantId, date).stream()
+        .filter(e -> e.getStartTime() != null && e.getEndTime() != null)
+        .filter(e -> e.getProfessionalId() == null || e.getProfessionalId().equals(professionalId))
+        .map(e -> new java.time.LocalTime[] {e.getStartTime(), e.getEndTime()})
+        .toList();
+  }
+
   /** Verifica se o salao esta fechado na data (fechamento {@code all_day} sem profissional). */
   public boolean isClosedOnSpecialDate(UUID tenantId, LocalDate date) {
     if (tenantId == null || date == null) return false;

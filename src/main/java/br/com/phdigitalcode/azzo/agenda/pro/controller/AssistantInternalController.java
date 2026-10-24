@@ -87,6 +87,7 @@ public class AssistantInternalController {
   private final ContextoTenant contextoTenant;
   private final TenantOperationalSettingsService tenantOperationalSettingsService;
   private final br.com.phdigitalcode.azzo.agenda.pro.repository.TenantAddressRepository tenantAddressRepository;
+  private final br.com.phdigitalcode.azzo.agenda.pro.service.SpecialClosureService specialClosureService;
 
   public AssistantInternalController(
       TenantRepository tenantRepository,
@@ -103,7 +104,8 @@ public class AssistantInternalController {
       TenantWhatsAppConfigRepository tenantWhatsAppConfigRepository,
       ContextoTenant contextoTenant,
       TenantOperationalSettingsService tenantOperationalSettingsService,
-      br.com.phdigitalcode.azzo.agenda.pro.repository.TenantAddressRepository tenantAddressRepository) {
+      br.com.phdigitalcode.azzo.agenda.pro.repository.TenantAddressRepository tenantAddressRepository,
+      br.com.phdigitalcode.azzo.agenda.pro.service.SpecialClosureService specialClosureService) {
     this.tenantRepository = tenantRepository;
     this.servicoService = servicoService;
     this.profissionalService = profissionalService;
@@ -119,6 +121,7 @@ public class AssistantInternalController {
     this.contextoTenant = contextoTenant;
     this.tenantOperationalSettingsService = tenantOperationalSettingsService;
     this.tenantAddressRepository = tenantAddressRepository;
+    this.specialClosureService = specialClosureService;
   }
 
   // ─── Info do Tenant ───────────────────────────────────────────────────────
@@ -142,6 +145,23 @@ public class AssistantInternalController {
    * Retorna os horarios de funcionamento do salao para o assistente virtual. Usa o mesmo
    * armazenamento do painel de configuracoes.
    */
+  /**
+   * Dias em que o salao inteiro fica fechado (Configuracoes > Horarios > Dias de inatividade, dia
+   * inteiro). O assistente usa para nao oferecer nem dizer que abre num feriado cadastrado: antes so
+   * olhava o horario semanal (teste de dialogos de 24/10/2026).
+   */
+  @GetMapping("/tenant/closed-dates")
+  public List<String> listarDiasFechados(
+      @RequestParam("tenantId") String tenantId,
+      @RequestParam(value = "from", required = false) String from,
+      @RequestParam(value = "to", required = false) String to) {
+    LocalDate de = from != null && !from.isBlank() ? LocalDate.parse(from) : null;
+    LocalDate ate = to != null && !to.isBlank() ? LocalDate.parse(to) : null;
+    return specialClosureService.listarDatasIndisponiveis(UUID.fromString(tenantId), de, ate).stream()
+        .map(LocalDate::toString)
+        .toList();
+  }
+
   @GetMapping("/tenant/business-hours")
   public List<SalonDtos.BusinessHour> obterHorariosFuncionamento(@RequestParam("tenantId") String tenantId) {
     UUID tid = UUID.fromString(tenantId);
