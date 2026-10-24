@@ -479,7 +479,6 @@ public class CommissionService {
 
     Profissional professional = getProfessionalOrFail(tenantId, professionalId);
     CommissionRuleSet ruleSet = resolveApplicableRuleSet(tenantId, professionalId);
-    if (ruleSet == null) return;
 
     for (AgendamentoItem appointmentItem : appointmentItems) {
       if (appointmentItem == null || appointmentItem.getId() == null || appointmentItem.getServiceId() == null) {
@@ -497,8 +496,15 @@ public class CommissionService {
               : servicoRepository.findById(appointmentItem.getServiceId()).orElse(null);
       if (service == null || !tenantId.equals(service.getTenantId())) continue;
 
-      CommissionRule rule = resolveApplicableRule(ruleSet, service);
-      if (rule == null) continue;
+      CommissionRule rule = ruleSet != null ? resolveApplicableRule(ruleSet, service) : null;
+      if (rule == null) {
+        registrarPeloPercentualDoProfissional(
+            tenantId, professional, service, appointmentItem.getId(),
+            "APPOINTMENT:" + appointmentId + ":ITEM:" + appointmentItem.getId(),
+            PERIOD_KEY_FORMAT.format(appointmentDate != null ? appointmentDate : LocalDate.now()),
+            appointmentItem.getTotalPrice());
+        continue;
+      }
 
       BigDecimal grossAmt =
           appointmentItem.getGrossAmount() != null ? appointmentItem.getGrossAmount() : BigDecimal.ZERO;
@@ -599,13 +605,20 @@ public class CommissionService {
 
     Profissional professional = getProfessionalOrFail(tenantId, professionalId);
     CommissionRuleSet ruleSet = resolveApplicableRuleSet(tenantId, professionalId);
-    if (ruleSet == null) return;
 
     Servico service = servicoRepository.findById(serviceId).orElse(null);
     if (service == null || !tenantId.equals(service.getTenantId())) return;
 
-    CommissionRule rule = resolveApplicableRule(ruleSet, service);
-    if (rule == null) return;
+    CommissionRule rule = ruleSet != null ? resolveApplicableRule(ruleSet, service) : null;
+    if (rule == null) {
+      Instant quando = effectiveAt != null ? effectiveAt : Instant.now();
+      registrarPeloPercentualDoProfissional(
+          tenantId, professional, service, comandaItemId,
+          "COMANDA:" + comandaId + ":ITEM:" + comandaItemId,
+          PERIOD_KEY_FORMAT.format(quando.atZone(ZONA_BR).toLocalDate()),
+          netAmount);
+      return;
+    }
 
     long baseAmountCents =
         computeBaseAmount(
@@ -1192,6 +1205,55 @@ public class CommissionService {
         .findById(entry.getRuleId())
         .map(CommissionRule::getRefundPolicy)
         .orElse("REVERSE_COMMISSION");
+  }
+
+  /**
+   * Sem regra que se aplique, a comissao sai pelo percentual do CADASTRO do profissional, sobre o
+   * que foi cobrado.
+   *
+   * <p>O campo "Comissao (%)" do cadastro era gravado e nao entrava em calculo nenhum: com 40% no
+   * profissional e nenhuma regra, fechar a comanda nao gerava comissao (teste ponta a ponta de
+   * 23/10/2026). Decisao do dono: o cadastro e o padrao; as regras de Financeiro > Comissoes valem
+   * por cima dele, para servico ou categoria. Sem percentual (zero ou vazio), nada.
+   */
+  private void registrarPeloPercentualDoProfissional(
+      UUID tenantId,
+      Profissional professional,
+      Servico service,
+      UUID originId,
+      String originReference,
+      String periodKey,
+      BigDecimal valorCobrado) {
+    BigDecimal percentual = professional.getCommissionRate();
+    if (NumericUtil.isZeroOrNegative(percentual) || percentual.compareTo(BigDecimal.valueOf(100)) > 0) return;
+    long baseAmountCents = Math.max(0L, NumericUtil.toCents(valorCobrado != null ? valorCobrado : BigDecimal.ZERO));
+    long totalAmountCents = calculatePercentAmountCents(baseAmountCents, percentual);
+    if (totalAmountCents <= 0) return;
+
+    CommissionEntry entry = new CommissionEntry();
+    entry.setTenantId(tenantId);
+    entry.setProfessionalId(professional.getId());
+    entry.setOriginType("SERVICE");
+    entry.setOriginId(originId);
+    entry.setOriginReference(originReference);
+    entry.setPeriodKey(periodKey);
+    entry.setBaseAmountCents(baseAmountCents);
+    entry.setPercentValue(percentual);
+    entry.setPercentAmountCents(totalAmountCents);
+    entry.setFixedAmountCents(0L);
+    entry.setTotalAmountCents(totalAmountCents);
+    entry.setEntryStatus("OPEN");
+    entry.setNotes("Comissao do cadastro do profissional: " + service.getName());
+    entryRepository.save(entry);
+
+    auditSuccess(
+        tenantId,
+        authenticatedUser.idOuNulo(),
+        "COMMISSION_ENTRY_AUTO_CREATE",
+        "COMMISSION_ENTRY",
+        entry.getId(),
+        null,
+        toEntryResponse(entry, professional.getName()));
   }
 
   private CommissionRuleSet resolveApplicableRuleSet(UUID tenantId, UUID professionalId) {

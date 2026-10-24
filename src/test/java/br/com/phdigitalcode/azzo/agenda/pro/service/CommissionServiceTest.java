@@ -220,6 +220,53 @@ class CommissionServiceTest {
   }
 
   @Test
+  @DisplayName("Sem regra, a comanda gera a comissao pelo percentual do cadastro do profissional")
+  void semRegraUsaOPercentualDoCadastroNaComanda() {
+    Profissional p = profissional();
+    p.setCommissionRate(new BigDecimal("40"));
+    UUID comandaItemId = UUID.randomUUID();
+    when(entryRepository.findLatestNonReversedByTenantAndOrigin(TENANT_ID, "SERVICE", comandaItemId))
+        .thenReturn(Optional.empty());
+    when(profissionalRepository.findById(PROFESSIONAL_ID)).thenReturn(Optional.of(p));
+    when(ruleSetRepository.listActiveProfessionalScoped(TENANT_ID, PROFESSIONAL_ID)).thenReturn(List.of());
+    when(ruleSetRepository.listActiveGlobalScoped(TENANT_ID)).thenReturn(List.of());
+    when(servicoRepository.findById(SERVICE_ID)).thenReturn(Optional.of(servico()));
+
+    // O caso do teste ponta a ponta de 23/10/2026: 40% no cadastro, nenhuma regra, R$ 80 cobrados.
+    commissionService.registerServiceCommissionForComandaItemIfApplicable(
+        TENANT_ID, UUID.randomUUID(), comandaItemId, PROFESSIONAL_ID, SERVICE_ID,
+        new BigDecimal("80.00"), new BigDecimal("80.00"), java.time.Instant.now());
+
+    ArgumentCaptor<CommissionEntry> salvo = ArgumentCaptor.forClass(CommissionEntry.class);
+    verify(entryRepository).save(salvo.capture());
+    assertThat(salvo.getValue().getBaseAmountCents()).isEqualTo(8000L);
+    assertThat(salvo.getValue().getTotalAmountCents()).isEqualTo(3200L);
+    assertThat(salvo.getValue().getRuleSetId()).isNull();
+    assertThat(salvo.getValue().getPercentValue()).isEqualByComparingTo("40");
+  }
+
+  @Test
+  @DisplayName("Sem regra, a conclusao sem comanda tambem usa o percentual do cadastro, sobre o valor cobrado")
+  void semRegraUsaOPercentualDoCadastroNaConclusao() {
+    Profissional p = profissional();
+    p.setCommissionRate(new BigDecimal("40"));
+    AgendamentoItem agendamentoItem = item(new BigDecimal("80.00"), new BigDecimal("70.00"));
+    when(profissionalRepository.findById(PROFESSIONAL_ID)).thenReturn(Optional.of(p));
+    when(ruleSetRepository.listActiveProfessionalScoped(TENANT_ID, PROFESSIONAL_ID)).thenReturn(List.of());
+    when(ruleSetRepository.listActiveGlobalScoped(TENANT_ID)).thenReturn(List.of());
+    when(entryRepository.findLatestNonReversedByTenantAndOrigin(TENANT_ID, "SERVICE", agendamentoItem.getId()))
+        .thenReturn(Optional.empty());
+    when(servicoRepository.findById(SERVICE_ID)).thenReturn(Optional.of(servico()));
+
+    commissionService.registerServiceCommissionsIfApplicable(
+        TENANT_ID, APPOINTMENT_ID, PROFESSIONAL_ID, List.of(agendamentoItem), LocalDate.now());
+
+    ArgumentCaptor<CommissionEntry> salvo = ArgumentCaptor.forClass(CommissionEntry.class);
+    verify(entryRepository).save(salvo.capture());
+    assertThat(salvo.getValue().getTotalAmountCents()).isEqualTo(2800L);
+  }
+
+  @Test
   @DisplayName("Estorno marca a entrada como REVERSED e concatena o motivo nas notas")
   void estornoMarcaReversed() {
     CommissionEntry entry = entradaAberta();
