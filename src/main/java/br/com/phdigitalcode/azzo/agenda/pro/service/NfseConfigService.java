@@ -59,14 +59,14 @@ public class NfseConfigService {
             .orElseThrow(
                 () ->
                     new ApiClientErrorException(
-                        "Configuracao NFS-e nao encontrada para o ambiente informado.", 404));
+                        "Configuração NFS-e não encontrada para o ambiente informado.", 404));
     return toConfigDto(entity);
   }
 
   @Transactional
   public NfseDtos.Config salvarConfig(NfseDtos.Config request) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
-    if (request == null) throw new IllegalArgumentException("Configuracao NFS-e obrigatoria.");
+    if (request == null) throw new IllegalArgumentException("Configuração NFS-e obrigatória.");
 
     NfseAmbiente ambiente = parseAmbiente(request.ambiente);
     validarConfig(request);
@@ -128,7 +128,7 @@ public class NfseConfigService {
       throw new IllegalArgumentException("NFSE_CONFIG_MISSING_ALIQUOTA_ISS");
     }
     if (isBlank(request.itemListaServicoPadrao)) {
-      throw new IllegalArgumentException("NFSE_CONFIG_MISSING_ITEM_LISTA_SERVICO");
+      throw new IllegalArgumentException("NFSE_CONFIG_MISSING_ITEM_LISTA_SERVIÇO");
     }
     String provedorEfetivo =
         isBlank(request.provedor)
@@ -178,7 +178,7 @@ public class NfseConfigService {
     try {
       return NfseAmbiente.valueOf(raw.trim().toUpperCase(Locale.ROOT));
     } catch (Exception ex) {
-      throw new IllegalArgumentException("Ambiente NFS-e invalido.");
+      throw new IllegalArgumentException("Ambiente NFS-e inválido.");
     }
   }
 
@@ -187,7 +187,7 @@ public class NfseConfigService {
     try {
       return NfseEmissionMode.valueOf(value.trim().toUpperCase(Locale.ROOT));
     } catch (Exception ex) {
-      throw new IllegalArgumentException("Modo de emissao NFS-e invalido.");
+      throw new IllegalArgumentException("Modo de emissão NFS-e inválido.");
     }
   }
 
@@ -196,12 +196,12 @@ public class NfseConfigService {
     try {
       return NfseCpfPolicyMode.valueOf(value.trim().toUpperCase(Locale.ROOT));
     } catch (Exception ex) {
-      throw new IllegalArgumentException("Politica CPF NFS-e invalida.");
+      throw new IllegalArgumentException("Politica CPF NFS-e inválida.");
     }
   }
 
   private String normalize(String value) {
-    if (isBlank(value)) throw new IllegalArgumentException("Campo obrigatorio ausente.");
+    if (isBlank(value)) throw new IllegalArgumentException("Campo obrigatório ausente.");
     return value.trim();
   }
 

@@ -16,13 +16,18 @@ import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import br.com.phdigitalcode.azzo.agenda.pro.dto.SalonDtos;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.Tenant;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.TenantAddress;
+import br.com.phdigitalcode.azzo.agenda.pro.exception.ApiClientErrorException;
+import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditEventCommand;
+import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditService;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.MinioStorageService;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.TenantAddressRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.TenantRepository;
+import br.com.phdigitalcode.azzo.agenda.pro.security.AuthenticatedUser;
 import br.com.phdigitalcode.azzo.agenda.pro.security.ContextoTenant;
 
 /**
@@ -39,6 +44,7 @@ class ServicoSalonProfileTest {
   private TenantOperationalSettingsService tenantOperationalSettingsService;
   private PublicBookingUrlService publicBookingUrlService;
   private MinioStorageService minioStorageService;
+  private AuditService auditService;
   private ServicoSalonProfile service;
 
   @BeforeEach
@@ -49,6 +55,7 @@ class ServicoSalonProfileTest {
     tenantOperationalSettingsService = mock(TenantOperationalSettingsService.class);
     publicBookingUrlService = mock(PublicBookingUrlService.class);
     minioStorageService = mock(MinioStorageService.class);
+    auditService = mock(AuditService.class);
     service =
         new ServicoSalonProfile(
             contextoTenant,
@@ -56,7 +63,9 @@ class ServicoSalonProfileTest {
             tenantAddressRepository,
             tenantOperationalSettingsService,
             publicBookingUrlService,
-            minioStorageService);
+            minioStorageService,
+            auditService,
+            mock(AuthenticatedUser.class));
   }
 
   private Tenant tenant(UUID tenantId) {
@@ -176,7 +185,7 @@ class ServicoSalonProfileTest {
     SalonDtos.SalonProfile request = new SalonDtos.SalonProfile();
     request.salonName = "Novo Nome";
     request.salonSlug = "novo-slug";
-    request.salonCpfCnpj = "123.456.789-01";
+    request.salonCpfCnpj = "123.456.789-09";
     request.city = "Sao Paulo";
     request.state = "SP";
     request.businessHours = List.of();
@@ -184,7 +193,7 @@ class ServicoSalonProfileTest {
 
     SalonDtos.SalonProfile result = service.atualizarPrivado(request);
 
-    assertThat(tenant.getDocument()).isEqualTo("12345678901");
+    assertThat(tenant.getDocument()).isEqualTo("12345678909");
     assertThat(tenant.getName()).isEqualTo("Novo Nome");
     assertThat(result.city).isEqualTo("Sao Paulo");
     verify(tenantAddressRepository).save(any(TenantAddress.class));
@@ -207,13 +216,102 @@ class ServicoSalonProfileTest {
     when(publicBookingUrlService.buildPublicBookingUrl(any())).thenReturn("https://qa.local/agendar/slug");
 
     SalonDtos.SalonProfile request = new SalonDtos.SalonProfile();
-    request.salonCpfCnpj = "12345678901234"; // 14 digitos (CNPJ)
+    request.salonCpfCnpj = "11222333000181"; // 14 digitos (CNPJ valido)
     request.street = "Rua Nova";
 
     service.atualizarPrivado(request);
 
     assertThat(existingAddress.getStreet()).isEqualTo("Rua Nova");
     verify(tenantAddressRepository).save(existingAddress);
+  }
+
+  // ─── limite de trocas do CPF/CNPJ ───────────────────────────────────────
+
+  private SalonDtos.SalonProfile pedidoComDocumento(String documento) {
+    SalonDtos.SalonProfile request = new SalonDtos.SalonProfile();
+    request.salonName = "Salao QA";
+    request.salonSlug = "salao-qa";
+    request.salonCpfCnpj = documento;
+    return request;
+  }
+
+  private Tenant tenantComDocumento(UUID tenantId, String documento, int trocas) {
+    contextoTenant.definirTenantId(tenantId);
+    Tenant tenant = tenant(tenantId);
+    tenant.setDocument(documento);
+    tenant.setDocumentChangeCount(trocas);
+    when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+    when(tenantAddressRepository.findById(tenantId)).thenReturn(Optional.empty());
+    when(tenantAddressRepository.save(any(TenantAddress.class))).thenAnswer(inv -> inv.getArgument(0));
+    when(tenantOperationalSettingsService.getBusinessHours(tenantId)).thenReturn(List.of());
+    when(tenantOperationalSettingsService.getSpecialClosureDates(tenantId)).thenReturn(List.of());
+    when(publicBookingUrlService.buildPublicBookingUrl(any())).thenReturn("https://qa.local/agendar/salao-qa");
+    return tenant;
+  }
+
+  @Test
+  void definirOPrimeiroDocumentoDeSalaoLegadoNaoGastaTroca() {
+    Tenant tenant = tenantComDocumento(UUID.randomUUID(), null, 0);
+
+    SalonDtos.SalonProfile result = service.atualizarPrivado(pedidoComDocumento("12345678909"));
+
+    assertThat(tenant.getDocumentChangeCount()).isZero();
+    assertThat(result.documentChangesRemaining).isEqualTo(2);
+    assertThat(result.documentChangeLimit).isEqualTo(2);
+  }
+
+  /** A tela reenvia o perfil inteiro a cada gravacao, com o documento igual. */
+  @Test
+  void reenviarOMesmoDocumentoNaoGastaTroca() {
+    Tenant tenant = tenantComDocumento(UUID.randomUUID(), "12345678909", 0);
+
+    service.atualizarPrivado(pedidoComDocumento("123.456.789-09"));
+
+    assertThat(tenant.getDocumentChangeCount()).isZero();
+  }
+
+  @Test
+  void trocarODocumentoGastaUmaTrocaEInformaQuantasRestam() {
+    Tenant tenant = tenantComDocumento(UUID.randomUUID(), "12345678909", 0);
+
+    SalonDtos.SalonProfile primeira = service.atualizarPrivado(pedidoComDocumento("98765432100"));
+    assertThat(tenant.getDocument()).isEqualTo("98765432100");
+    assertThat(primeira.documentChangesRemaining).isEqualTo(1);
+
+    SalonDtos.SalonProfile segunda = service.atualizarPrivado(pedidoComDocumento("11222333000181"));
+    assertThat(tenant.getDocument()).isEqualTo("11222333000181");
+    assertThat(segunda.documentChangesRemaining).isZero();
+  }
+
+  @Test
+  void aTerceiraTrocaERecusadaENadaMuda() {
+    Tenant tenant = tenantComDocumento(UUID.randomUUID(), "11222333000181", 2);
+    SalonDtos.SalonProfile pedido = pedidoComDocumento("98765432100");
+    pedido.salonName = "Outro Nome";
+
+    assertThatThrownBy(() -> service.atualizarPrivado(pedido))
+        .isInstanceOfSatisfying(
+            ApiClientErrorException.class,
+            erro -> {
+              assertThat(erro.getStatus()).isEqualTo(409);
+              assertThat(erro.getMessage()).contains("2 vezes").contains("suporte");
+            });
+
+    assertThat(tenant.getDocument()).isEqualTo("11222333000181");
+    assertThat(tenant.getName()).isEqualTo("Salao QA");
+    assertThat(tenant.getDocumentChangeCount()).isEqualTo(2);
+  }
+
+  @Test
+  void noLimiteAindaPodeGravarOutrosCamposComODocumentoIgual() {
+    Tenant tenant = tenantComDocumento(UUID.randomUUID(), "11222333000181", 2);
+    SalonDtos.SalonProfile pedido = pedidoComDocumento("11.222.333/0001-81");
+    pedido.salonName = "Novo Nome";
+
+    SalonDtos.SalonProfile result = service.atualizarPrivado(pedido);
+
+    assertThat(tenant.getName()).isEqualTo("Novo Nome");
+    assertThat(result.documentChangesRemaining).isZero();
   }
 
   @Test
@@ -260,5 +358,122 @@ class ServicoSalonProfileTest {
     SalonDtos.SalonProfile profile = service.obterPrivado();
 
     assertThat(profile.logoUrl).isNull();
+  }
+
+  // ---- SEG-006: endereco de agendamento (slug) validado ---------------------------------------------
+
+  private Tenant salaoComSlug(String slugAtual) {
+    Tenant tenant = tenantComDocumento(UUID.randomUUID(), "12345678909", 0);
+    tenant.setSlug(slugAtual);
+    return tenant;
+  }
+
+  private SalonDtos.SalonProfile pedidoComSlug(String slug) {
+    SalonDtos.SalonProfile request = pedidoComDocumento("12345678909");
+    request.salonSlug = slug;
+    return request;
+  }
+
+  @Test
+  void slugValidoENaoUsadoPorOutroSalaoEGravado() {
+    Tenant tenant = salaoComSlug("studio-bella-a1b2c3");
+    when(tenantRepository.findBySlug("studio-bella")).thenReturn(Optional.empty());
+
+    service.atualizarPrivado(pedidoComSlug("studio-bella"));
+
+    assertThat(tenant.getSlug()).isEqualTo("studio-bella");
+  }
+
+  @Test
+  void slugEmMaiusculaEComEspacosNasPontasEhNormalizado() {
+    Tenant tenant = salaoComSlug("antigo");
+    when(tenantRepository.findBySlug("studio-bella")).thenReturn(Optional.empty());
+
+    service.atualizarPrivado(pedidoComSlug("  Studio-Bella "));
+
+    assertThat(tenant.getSlug()).isEqualTo("studio-bella");
+  }
+
+  @Test
+  void slugForaDoFormatoEhRecusadoESalaoFicaComOAntigo() {
+    String[] ruins = {
+      "ab", "a".repeat(81), "com espaco", "acentuaçao", "-comeca", "termina-", "duplo--hifen",
+      "com_underline", "pon.to", "barra/x", "<script>", "../admin"
+    };
+    for (String ruim : ruins) {
+      Tenant tenant = salaoComSlug("antigo");
+
+      assertThatThrownBy(() -> service.atualizarPrivado(pedidoComSlug(ruim)))
+          .as(ruim)
+          .isInstanceOf(ApiClientErrorException.class)
+          .hasMessageContaining("Endereço de agendamento inválido");
+      assertThat(tenant.getSlug()).as(ruim).isEqualTo("antigo");
+    }
+    verify(tenantRepository, never()).save(any());
+  }
+
+  @Test
+  void slugJaUsadoPorOutroSalaoDa409ComMensagemClara() {
+    salaoComSlug("antigo");
+    Tenant outro = new Tenant();
+    outro.setId(UUID.randomUUID());
+    outro.setSlug("studio-bella");
+    when(tenantRepository.findBySlug("studio-bella")).thenReturn(Optional.of(outro));
+
+    assertThatThrownBy(() -> service.atualizarPrivado(pedidoComSlug("studio-bella")))
+        .isInstanceOf(ApiClientErrorException.class)
+        .hasMessageContaining("já esta em uso por outro salão");
+  }
+
+  /** A tela reenvia o perfil inteiro a cada gravacao: o proprio slug nao e "outro salao". */
+  @Test
+  void reenviarOProprioSlugNaoEConflito() {
+    Tenant tenant = salaoComSlug("studio-bella");
+    when(tenantRepository.findBySlug("studio-bella")).thenReturn(Optional.of(tenant));
+
+    service.atualizarPrivado(pedidoComSlug("studio-bella"));
+
+    assertThat(tenant.getSlug()).isEqualTo("studio-bella");
+  }
+
+  /** Salao antigo com slug fora do formato novo continua podendo salvar o resto do perfil. */
+  @Test
+  void slugLegadoForaDoFormatoNaoTravaOSalvamento() {
+    Tenant tenant = salaoComSlug("Salao_Antigo.2020");
+
+    service.atualizarPrivado(pedidoComSlug("Salao_Antigo.2020"));
+
+    assertThat(tenant.getSlug()).isEqualTo("Salao_Antigo.2020");
+  }
+
+  @Test
+  void slugVazioNaoAlteraOEnderecoAtual() {
+    Tenant tenant = salaoComSlug("studio-bella");
+
+    service.atualizarPrivado(pedidoComSlug(null));
+    service.atualizarPrivado(pedidoComSlug("  "));
+
+    assertThat(tenant.getSlug()).isEqualTo("studio-bella");
+  }
+
+  // ---- SEG-006: a alteracao do perfil deixa trilha --------------------------------------------------
+
+  @Test
+  void alterarOPerfilRegistraAuditoriaSemOValorDoDocumento() {
+    Tenant tenant = salaoComSlug("antigo");
+    tenant.setDocument("98765432100");
+    when(tenantRepository.findBySlug("novo-endereco")).thenReturn(Optional.empty());
+
+    service.atualizarPrivado(pedidoComSlug("novo-endereco"));
+
+    ArgumentCaptor<AuditEventCommand> comando = ArgumentCaptor.forClass(AuditEventCommand.class);
+    verify(auditService).recordSuccess(comando.capture());
+    assertThat(comando.getValue().action).isEqualTo("SALON_PROFILE_UPDATED");
+    assertThat(comando.getValue().before.toString()).contains("antigo");
+    assertThat(comando.getValue().after.toString()).contains("novo-endereco");
+    assertThat(comando.getValue().metadata.toString()).contains("documentChanged=true");
+    // O documento (dado pessoal/fiscal) nunca vai para a trilha: so se ele mudou.
+    String tudo = comando.getValue().before + "|" + comando.getValue().after + "|" + comando.getValue().metadata;
+    assertThat(tudo).doesNotContain("98765432100").doesNotContain("12345678909");
   }
 }

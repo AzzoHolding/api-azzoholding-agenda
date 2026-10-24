@@ -27,6 +27,10 @@ public class ServicoService {
   private final ServiceCategoryRepository serviceCategoryRepository;
   private final ContextoTenant contextoTenant;
 
+  /** O que prende o servico e impede de exclui-lo (analise de 2026-09-16, A6). */
+  @org.springframework.beans.factory.annotation.Autowired
+  private VinculosDeExclusao vinculosDeExclusao;
+
   public ServicoService(
       ServicoRepository servicoRepository,
       ProfissionalRepository profissionalRepository,
@@ -57,7 +61,7 @@ public class ServicoService {
   public ServicoResponse atualizar(UUID id, ServicoRequest req) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Servico s = servicoRepository.findByIdAndTenantId(id, tenantId)
-        .orElseThrow(() -> new IllegalArgumentException("Servico nao encontrado"));
+        .orElseThrow(() -> new IllegalArgumentException("Serviço não encontrado"));
     aplicar(req, s, tenantId);
     return toResponse(servicoRepository.save(s));
   }
@@ -66,14 +70,23 @@ public class ServicoService {
   public void deletar(UUID id) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Servico servico = servicoRepository.findByIdAndTenantId(id, tenantId)
-        .orElseThrow(() -> new IllegalArgumentException("Servico nao encontrado"));
+        .orElseThrow(() -> new IllegalArgumentException("Serviço não encontrado"));
+    // Servico que ja foi usado nao se apaga: o banco levava junto o SALDO de sessoes que os
+    // clientes pagaram em pacote e assinatura, e tirava o servico dos pacotes a venda. O caminho e
+    // DESATIVAR — some das listas de marcar e vender, e o historico fica (analise de 2026-09-16, A6).
+    List<String> vinculos = vinculosDeExclusao.doServico(tenantId, id);
+    if (!vinculos.isEmpty()) {
+      throw new IllegalArgumentException(
+          "O serviço \"" + servico.getName() + "\" esta em " + String.join(", ", vinculos)
+              + " e não pode ser excluído. Desative o serviço.");
+    }
     servicoRepository.delete(servico);
   }
 
   @Transactional
   public int deletarSelecionados(List<UUID> ids) {
     if (ids == null || ids.isEmpty()) {
-      throw new IllegalArgumentException("Nenhum servico selecionado para remocao");
+      throw new IllegalArgumentException("Nenhum serviço selecionado para remoção");
     }
     int removedCount = 0;
     for (UUID id : ids) {
@@ -116,13 +129,13 @@ public class ServicoService {
       return;
     }
     if (req.depositType == null || req.depositType.isBlank()) {
-      throw new IllegalArgumentException("Tipo de sinal e obrigatorio quando o servico exige sinal.");
+      throw new IllegalArgumentException("Tipo de sinal é obrigatório quando o serviço exige sinal.");
     }
     if (req.depositValue == null) {
-      throw new IllegalArgumentException("Valor do sinal e obrigatorio quando o servico exige sinal.");
+      throw new IllegalArgumentException("Valor do sinal é obrigatório quando o serviço exige sinal.");
     }
     if ("PERCENTUAL".equals(req.depositType) && req.depositValue.compareTo(new BigDecimal("100")) > 0) {
-      throw new IllegalArgumentException("Percentual do sinal nao pode ser maior que 100.");
+      throw new IllegalArgumentException("Percentual do sinal não pode ser maior que 100.");
     }
     s.setDepositType(req.depositType);
     s.setDepositValue(req.depositValue);

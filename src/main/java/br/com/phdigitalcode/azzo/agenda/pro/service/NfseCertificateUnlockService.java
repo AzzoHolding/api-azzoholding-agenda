@@ -132,6 +132,7 @@ public class NfseCertificateUnlockService {
     if (session == null) return false;
     if (session.getExpiresAt() == null || !session.getExpiresAt().isAfter(Instant.now())) {
       session.setStatus("EXPIRED");
+      session.setPasswordEnc(null);
       return false;
     }
     return "ACTIVE".equalsIgnoreCase(session.getStatus());

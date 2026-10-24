@@ -26,6 +26,8 @@ public final class ChatDtos {
     public String updatedAt;
     public String manualModeUntil;
     public boolean manualModeEnabled;
+    /** O cliente pediu uma pessoa e ninguem da equipe respondeu ainda. */
+    public boolean humanRequested;
   }
 
   public static class ConversationListResponse {

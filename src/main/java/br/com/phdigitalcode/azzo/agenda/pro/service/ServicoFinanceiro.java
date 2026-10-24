@@ -80,6 +80,7 @@ public class ServicoFinanceiro {
   private final AuthenticatedUser authenticatedUser;
   private final AuditService auditService;
   private final CommissionService commissionService;
+  private final TravaFinanceira travaFinanceira;
 
   public ServicoFinanceiro(
       TransacaoRepository transacaoRepository,
@@ -91,7 +92,8 @@ public class ServicoFinanceiro {
       ContextoTenant contextoTenant,
       AuthenticatedUser authenticatedUser,
       AuditService auditService,
-      CommissionService commissionService) {
+      CommissionService commissionService,
+      TravaFinanceira travaFinanceira) {
     this.transacaoRepository = transacaoRepository;
     this.transacaoQueryRepository = transacaoQueryRepository;
     this.transactionCategoryRepository = transactionCategoryRepository;
@@ -102,6 +104,7 @@ public class ServicoFinanceiro {
     this.authenticatedUser = authenticatedUser;
     this.auditService = auditService;
     this.commissionService = commissionService;
+    this.travaFinanceira = travaFinanceira;
   }
 
   // ─── LISTAGEM COM PAGINACAO E FILTROS (F0.3) ─────────────────────────────
@@ -182,6 +185,8 @@ public class ServicoFinanceiro {
     CategoriaResponse r = new CategoriaResponse();
     r.id = cat.getId().toString();
     r.name = cat.getName();
+    registrarAuditoriaFinanceiro(
+        tenantId, "FINANCE_CATEGORY_CREATE", "CATEGORY", null, Map.of("name", cat.getName()), r.id);
     return r;
   }
 
@@ -192,19 +197,27 @@ public class ServicoFinanceiro {
     TransactionCategory cat =
         transactionCategoryRepository
             .findByIdAndTenantId(id, tenantId)
-            .orElseThrow(() -> new ApiClientErrorException("Categoria nao encontrada", 404));
+            .orElseThrow(() -> new ApiClientErrorException("Categoria não encontrada", 404));
 
     String normalized = normalizeNullable(novoNome);
-    if (normalized == null) throw new IllegalArgumentException("Nome da categoria e obrigatorio");
+    if (normalized == null) throw new IllegalArgumentException("Nome da categoria é obrigatório");
 
     // Unicidade dentro do tenant (ignorando case)
     TransactionCategory existente =
         transactionCategoryRepository.findByTenantAndName(tenantId, normalized).orElse(null);
     if (existente != null && !existente.getId().equals(id)) {
-      throw new IllegalArgumentException("Ja existe uma categoria com este nome");
+      throw new IllegalArgumentException("Já existe uma categoria com este nome");
     }
 
+    String nomeAnterior = cat.getName();
     cat.setName(normalized);
+    registrarAuditoriaFinanceiro(
+        tenantId,
+        "FINANCE_CATEGORY_RENAME",
+        "CATEGORY",
+        Map.of("name", nomeAnterior),
+        Map.of("name", normalized),
+        id.toString());
     CategoriaResponse r = new CategoriaResponse();
     r.id = cat.getId().toString();
     r.name = cat.getName();
@@ -219,14 +232,21 @@ public class ServicoFinanceiro {
     TransactionCategory cat =
         transactionCategoryRepository
             .findByIdAndTenantId(id, tenantId)
-            .orElseThrow(() -> new ApiClientErrorException("Categoria nao encontrada", 404));
+            .orElseThrow(() -> new ApiClientErrorException("Categoria não encontrada", 404));
 
     long vinculadas = countTransactionsByCategory(tenantId, id);
     if (vinculadas > 0) {
       throw new IllegalStateException(
-          "Nao e possivel excluir: existem " + vinculadas + " lancamento(s) vinculado(s) a esta categoria");
+          "Não é possível excluir: existem " + vinculadas + " lancamento(s) vinculado(s) a esta categoria");
     }
 
+    registrarAuditoriaFinanceiro(
+        tenantId,
+        "FINANCE_CATEGORY_DELETE",
+        "CATEGORY",
+        Map.of("name", cat.getName()),
+        null,
+        id.toString());
     transactionCategoryRepository.delete(cat);
   }
 
@@ -236,6 +256,7 @@ public class ServicoFinanceiro {
   public TransacaoResponse criar(TransacaoRequest req) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
 
+    exigirVinculosDoSalao(tenantId, req);
     Transacao t = new Transacao();
     t.setTenantId(tenantId);
     t.setAppointmentId(parseUuidNullable(req.appointmentId));
@@ -253,6 +274,13 @@ public class ServicoFinanceiro {
     t.setAmount(resolveAmount(req));
     t.setPaymentMethod(resolveMetodoPagamento(req.paymentMethod));
     t.setDate(DataUtil.parseInstantISO(req.date));
+
+    // Data fora de hoje so o dono, nunca mais de um ano a frente, e nunca num dia com caixa
+    // fechado — ver TravaFinanceira.
+    travaFinanceira.exigirDataDeLancamentoManual(
+        tenantId, t.getDate(), "FINANCE_TRANSACTION_CREATE", null, buildAuditPayload(req));
+    travaFinanceira.exigirDiaAberto(
+        tenantId, t.getDate(), "FINANCE_TRANSACTION_CREATE", "TRANSACTION", null, buildAuditPayload(req));
 
     transacaoRepository.save(t);
     String resolvedProductCategory =
@@ -272,11 +300,12 @@ public class ServicoFinanceiro {
           t.getDate(),
           t.getDescription());
     }
+    // O evento guarda o que FOI gravado (categoria e forma resolvidas), e nao o pedido cru.
     registrarAuditoriaFinanceiro(
         tenantId,
         "FINANCE_TRANSACTION_CREATE",
         null,
-        buildAuditPayload(req),
+        buildAuditPayloadFromTransacao(t),
         t.getId() != null ? t.getId().toString() : null);
     return toResponse(t);
   }
@@ -288,11 +317,24 @@ public class ServicoFinanceiro {
     Transacao t =
         transacaoRepository
             .findAtivaByIdAndTenant(id, tenantId)
-            .orElseThrow(() -> new ApiClientErrorException("Transacao nao encontrada", 404));
+            .orElseThrow(() -> new ApiClientErrorException("Transação não encontrada", 404));
 
     // Snapshot para auditoria e deteccao de mudancas que afetam a comissao.
     Map<String, Object> before = buildAuditPayloadFromTransacao(t);
 
+    exigirLancamentoManual(tenantId, t, "FINANCE_TRANSACTION_UPDATE", buildAuditPayload(req));
+    // O dia de ORIGEM e o de DESTINO: tirar dinheiro de um dia fechado e tao grave quanto por.
+    travaFinanceira.exigirDiaAberto(
+        tenantId, t.getDate(), "FINANCE_TRANSACTION_UPDATE", "TRANSACTION", id.toString(),
+        buildAuditPayload(req));
+    Instant novaData = DataUtil.parseInstantISO(req.date);
+    travaFinanceira.exigirDataDeLancamentoManual(
+        tenantId, novaData, "FINANCE_TRANSACTION_UPDATE", id.toString(), buildAuditPayload(req));
+    travaFinanceira.exigirDiaAberto(
+        tenantId, novaData, "FINANCE_TRANSACTION_UPDATE", "TRANSACTION", id.toString(),
+        buildAuditPayload(req));
+
+    exigirVinculosDoSalao(tenantId, req);
     UUID newProfessionalId = parseUuidNullable(req.professionalId);
     UUID newStockItemId = parseUuidNullable(req.productId);
     BigDecimal newAmount = resolveAmount(req);
@@ -344,7 +386,7 @@ public class ServicoFinanceiro {
     }
 
     registrarAuditoriaFinanceiro(
-        tenantId, "FINANCE_TRANSACTION_UPDATE", before, buildAuditPayload(req), id.toString());
+        tenantId, "FINANCE_TRANSACTION_UPDATE", before, buildAuditPayloadFromTransacao(t), id.toString());
     return toResponse(t);
   }
 
@@ -354,9 +396,13 @@ public class ServicoFinanceiro {
     Transacao t =
         transacaoRepository
             .findAtivaByIdAndTenant(id, tenantId)
-            .orElseThrow(() -> new ApiClientErrorException("Transacao nao encontrada", 404));
+            .orElseThrow(() -> new ApiClientErrorException("Transação não encontrada", 404));
 
     Map<String, Object> before = buildAuditPayloadFromTransacao(t);
+
+    exigirLancamentoManual(tenantId, t, "FINANCE_TRANSACTION_DELETE", null);
+    travaFinanceira.exigirDiaAberto(
+        tenantId, t.getDate(), "FINANCE_TRANSACTION_DELETE", "TRANSACTION", id.toString(), null);
 
     // Soft delete (F2.3)
     t.setDeletedAt(Instant.now());
@@ -378,10 +424,17 @@ public class ServicoFinanceiro {
     Transacao t =
         transacaoRepository
             .findAtivaByIdAndTenant(id, tenantId)
-            .orElseThrow(() -> new ApiClientErrorException("Transacao nao encontrada", 404));
+            .orElseThrow(() -> new ApiClientErrorException("Transação não encontrada", 404));
 
-    t.setReconciled(!t.isReconciled());
+    boolean antes = t.isReconciled();
+    t.setReconciled(!antes);
     t.setReconciledAt(t.isReconciled() ? Instant.now() : null);
+    registrarAuditoriaFinanceiro(
+        tenantId,
+        "FINANCE_TRANSACTION_RECONCILE",
+        Map.of("reconciled", antes),
+        Map.of("reconciled", t.isReconciled()),
+        id.toString());
     return toResponse(t);
   }
 
@@ -456,7 +509,7 @@ public class ServicoFinanceiro {
 
   private String escapeCsv(String value) {
     if (value == null) return "";
-    String v = value.replace("\"", "\"\"");
+    String v = br.com.phdigitalcode.azzo.agenda.pro.util.CelulaCsv.semFormula(value).replace("\"", "\"\"");
     if (v.contains(";") || v.contains("\"") || v.contains("\n")) {
       return "\"" + v + "\"";
     }
@@ -547,7 +600,15 @@ public class ServicoFinanceiro {
     rt.setDayOfMonth(req.dayOfMonth != null ? req.dayOfMonth.shortValue() : null);
     rt.setDayOfWeek(req.dayOfWeek != null ? req.dayOfWeek.shortValue() : null);
     recurringTransactionRepository.save(rt);
-    return toRecurringResponse(rt);
+    RecurringTransactionResponse criada = toRecurringResponse(rt);
+    registrarAuditoriaFinanceiro(
+        tenantId,
+        "FINANCE_RECURRING_CREATE",
+        "RECURRING_TRANSACTION",
+        null,
+        criada,
+        rt.getId() != null ? rt.getId().toString() : null);
+    return criada;
   }
 
   @Transactional
@@ -557,8 +618,16 @@ public class ServicoFinanceiro {
         recurringTransactionRepository
             .findByIdAndTenantId(id, tenantId)
             .filter(RecurringTransaction::isActive)
-            .orElseThrow(() -> new ApiClientErrorException("Recorrencia nao encontrada", 404));
+            .orElseThrow(() -> new ApiClientErrorException("Recorrencia não encontrada", 404));
+    RecurringTransactionResponse antes = toRecurringResponse(rt);
     rt.setActive(false);
+    registrarAuditoriaFinanceiro(
+        tenantId,
+        "FINANCE_RECURRING_DEACTIVATE",
+        "RECURRING_TRANSACTION",
+        antes,
+        toRecurringResponse(rt),
+        id.toString());
   }
 
   /**
@@ -634,14 +703,46 @@ public class ServicoFinanceiro {
 
   // ─── UTILITARIOS PRIVADOS ────────────────────────────────────────────────
 
+  /**
+   * So o lancamento feito A MAO se edita ou exclui.
+   *
+   * <p>O que nasceu de uma venda (comanda) ou de um atendimento e a receita que o caixa confere:
+   * mudar a data dele para 2031, ou exclui-lo, tirava o valor do dia e fazia o caixa bater com o
+   * dinheiro fora da gaveta. A correcao desses passa pelo ESTORNO da comanda, que e so do dono e
+   * desfaz tudo junto (receita, estoque, comissao, fidelidade).
+   */
+  private void exigirLancamentoManual(
+      UUID tenantId, Transacao t, String acao, Object tentativa) {
+    if (t.getComandaId() == null && t.getAppointmentId() == null) return;
+    String motivo =
+        t.getComandaId() != null
+            ? "Este lancamento veio de uma comanda e nao pode ser alterado nem excluido. Para"
+                + " desfazer a venda, o dono estorna a comanda."
+            : "Este lancamento veio de um atendimento e nao pode ser alterado nem excluido.";
+    travaFinanceira.registrarTentativaBloqueada(
+        tenantId, acao, "TRANSACTION", t.getId() != null ? t.getId().toString() : null,
+        tentativa, motivo);
+    throw new IllegalArgumentException(motivo);
+  }
+
   private void registrarAuditoriaFinanceiro(
       UUID tenantId, String action, Object before, Object after, String entityId) {
+    registrarAuditoriaFinanceiro(tenantId, action, "TRANSACTION", before, after, entityId);
+  }
+
+  private void registrarAuditoriaFinanceiro(
+      UUID tenantId,
+      String action,
+      String entityType,
+      Object before,
+      Object after,
+      String entityId) {
     try {
       AuditEventCommand command = new AuditEventCommand();
       command.tenantId = tenantId;
       command.module = AuditConstants.Module.FINANCE;
       command.action = action;
-      command.entityType = "TRANSACTION";
+      command.entityType = entityType;
       command.entityId = entityId;
       command.sourceChannel = AuditConstants.SourceChannel.API;
       command.before = before;
@@ -657,6 +758,7 @@ public class ServicoFinanceiro {
     r.id = t.getId().toString();
     r.tenantId = t.getTenantId().toString();
     r.appointmentId = t.getAppointmentId() != null ? t.getAppointmentId().toString() : null;
+    r.comandaId = t.getComandaId() != null ? t.getComandaId().toString() : null;
     r.professionalId = t.getProfessionalId() != null ? t.getProfessionalId().toString() : null;
     r.productId = t.getStockItemId() != null ? t.getStockItemId().toString() : null;
     r.productCategory = t.getProductCategoryRef() != null ? t.getProductCategoryRef().getName() : null;
@@ -689,21 +791,21 @@ public class ServicoFinanceiro {
 
   private TipoTransacao resolveTipoTransacao(String value) {
     String normalized = normalizeNullable(value);
-    if (normalized == null) throw new IllegalArgumentException("type e obrigatorio");
+    if (normalized == null) throw new IllegalArgumentException("type é obrigatório");
     try {
       return TipoTransacao.valueOf(normalized.toUpperCase());
     } catch (IllegalArgumentException ex) {
-      throw new IllegalArgumentException("type invalido");
+      throw new IllegalArgumentException("type inválido");
     }
   }
 
   private MetodoPagamento resolveMetodoPagamento(String value) {
     String normalized = normalizeNullable(value);
-    if (normalized == null) throw new IllegalArgumentException("paymentMethod e obrigatorio");
+    if (normalized == null) throw new IllegalArgumentException("paymentMethod é obrigatório");
     try {
       return MetodoPagamento.valueOf(normalized.toUpperCase());
     } catch (IllegalArgumentException ex) {
-      throw new IllegalArgumentException("paymentMethod invalido");
+      throw new IllegalArgumentException("paymentMethod inválido");
     }
   }
 
@@ -714,7 +816,7 @@ public class ServicoFinanceiro {
 
   private TransactionCategory resolveTransactionCategory(UUID tenantId, String categoryName) {
     String normalized = normalizeNullable(categoryName);
-    if (normalized == null) throw new IllegalArgumentException("Categoria da transacao obrigatoria");
+    if (normalized == null) throw new IllegalArgumentException("Categoria da transação obrigatória");
     return transactionCategoryRepository
         .findByTenantAndName(tenantId, normalized)
         .orElseGet(
@@ -745,6 +847,37 @@ public class ServicoFinanceiro {
    * <b>sem</b> filtro de soft delete, ao contrario do {@code mapTransactionCountByCategoryId}.
    * Comportamento preservado como esta (a assimetria existe no original).
    */
+  /**
+   * Pentest 14/10/2026 (FIN-009): o lancamento manual aceitava profissional, produto e agendamento de
+   * QUALQUER salao — a comissao de produto era gerada para um profissional de outro tenant e o
+   * lancamento ficava amarrado a dados alheios. Agora cada id informado tem de ser deste salao (404
+   * igual a "nao existe", para nao confirmar id de outro salao). A comissao do lancamento manual com
+   * produto continua: e o fluxo legitimo de venda avulsa de produto, e a receita entra junto.
+   */
+  private void exigirVinculosDoSalao(UUID tenantId, TransacaoRequest req) {
+    UUID profissional = parseUuidNullable(req.professionalId);
+    if (profissional != null
+        && profissionalRepository.findByIdAndTenantId(profissional, tenantId).isEmpty()) {
+      throw new ApiClientErrorException("Profissional não encontrado", 404);
+    }
+    exigirDoSalao("ItemEstoque", parseUuidNullable(req.productId), tenantId, "Produto nao encontrado");
+    exigirDoSalao(
+        "Agendamento", parseUuidNullable(req.appointmentId), tenantId, "Agendamento nao encontrado");
+  }
+
+  private void exigirDoSalao(String entidade, UUID id, UUID tenantId, String mensagem) {
+    if (id == null) return;
+    Object count =
+        entityManager
+            .createQuery("select count(e) from " + entidade + " e where e.id = :id and e.tenantId = :tenantId")
+            .setParameter("id", id)
+            .setParameter("tenantId", tenantId)
+            .getSingleResult();
+    if (!(count instanceof Number n) || n.longValue() == 0) {
+      throw new ApiClientErrorException(mensagem, 404);
+    }
+  }
+
   private long countTransactionsByCategory(UUID tenantId, UUID categoryId) {
     Object count =
         entityManager
@@ -792,6 +925,12 @@ public class ServicoFinanceiro {
     payload.put("amount", t.getAmount());
     payload.put("paymentMethod", t.getPaymentMethod() != null ? t.getPaymentMethod().name() : null);
     payload.put("date", t.getDate() != null ? t.getDate().toString() : null);
+    payload.put(
+        "origin",
+        t.getComandaId() != null ? "COMANDA" : t.getAppointmentId() != null ? "APPOINTMENT" : "MANUAL");
+    if (t.getComandaId() != null) payload.put("comandaId", t.getComandaId().toString());
+    if (t.getAppointmentId() != null) payload.put("appointmentId", t.getAppointmentId().toString());
+    payload.put("reconciled", t.isReconciled());
     if (t.getProfessionalId() != null) payload.put("professionalId", t.getProfessionalId().toString());
     if (t.getStockItemId() != null) payload.put("productId", t.getStockItemId().toString());
     if (t.getProductCategoryRef() != null) {

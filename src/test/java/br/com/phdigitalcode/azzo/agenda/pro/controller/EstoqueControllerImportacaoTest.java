@@ -29,6 +29,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.dto.EstoqueDtos.ImportacaoResultadoA
 import br.com.phdigitalcode.azzo.agenda.pro.exception.ApiClientErrorException;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.MinioStorageService;
 import br.com.phdigitalcode.azzo.agenda.pro.security.ContextoTenant;
+import br.com.phdigitalcode.azzo.agenda.pro.security.PermissionService;
 import br.com.phdigitalcode.azzo.agenda.pro.service.ServicoEstoque;
 
 /**
@@ -50,6 +51,7 @@ class EstoqueControllerImportacaoTest {
   private ServicoEstoque servicoEstoque;
   private MinioStorageService minioStorageService;
   private ContextoTenant contextoTenant;
+  private PermissionService permissionService;
   private EstoqueController controller;
 
   @BeforeEach
@@ -57,7 +59,8 @@ class EstoqueControllerImportacaoTest {
     servicoEstoque = mock(ServicoEstoque.class);
     minioStorageService = mock(MinioStorageService.class);
     contextoTenant = mock(ContextoTenant.class);
-    controller = new EstoqueController(servicoEstoque, minioStorageService, contextoTenant);
+    permissionService = mock(PermissionService.class);
+    controller = new EstoqueController(servicoEstoque, minioStorageService, contextoTenant, permissionService);
   }
 
   private MockMultipartFile arquivo(String nome, byte[] conteudo) {
@@ -121,7 +124,7 @@ class EstoqueControllerImportacaoTest {
   void arquivoAusenteEQuatrocentosSemTocarNoStorage() {
     assertThatThrownBy(() -> controller.criarImportacao(null, "ITENS", null))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("Arquivo de importacao obrigatorio.")
+        .hasMessage("Arquivo de importação obrigatório.")
         .extracting(e -> ((ApiClientErrorException) e).getStatus())
         .isEqualTo(400);
 
@@ -133,7 +136,7 @@ class EstoqueControllerImportacaoTest {
     assertThatThrownBy(
             () -> controller.criarImportacao(arquivo("   ", new byte[] {1}), "ITENS", null))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("Arquivo de importacao obrigatorio.");
+        .hasMessage("Arquivo de importação obrigatório.");
 
     verify(servicoEstoque, never()).criarImportacao(any(), any(), any(), any());
   }
@@ -143,7 +146,7 @@ class EstoqueControllerImportacaoTest {
     assertThatThrownBy(
             () -> controller.criarImportacao(arquivo(null, new byte[] {1}), "ITENS", null))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("Arquivo de importacao obrigatorio.");
+        .hasMessage("Arquivo de importação obrigatório.");
   }
 
   @Test
@@ -154,7 +157,7 @@ class EstoqueControllerImportacaoTest {
 
     assertThatThrownBy(() -> controller.criarImportacao(ilegivel, "ENTRADAS", null))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("Falha ao processar arquivo de importacao.")
+        .hasMessage("Falha ao processar arquivo de importação.")
         .extracting(e -> ((ApiClientErrorException) e).getStatus())
         .isEqualTo(400);
 
@@ -170,7 +173,7 @@ class EstoqueControllerImportacaoTest {
     assertThatThrownBy(
             () -> controller.criarImportacao(arquivo("x.xlsx", new byte[] {1}), "ITENS", null))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("Storage de importacao indisponivel.")
+        .hasMessage("Storage de importação indisponível.")
         .extracting(e -> ((ApiClientErrorException) e).getStatus())
         .isEqualTo(503);
 

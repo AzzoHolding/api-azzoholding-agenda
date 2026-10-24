@@ -39,6 +39,37 @@ public interface ServicoInsumoRepository extends JpaRepository<ServicoInsumo, UU
 
   Optional<ServicoInsumo> findByIdAndTenantId(UUID id, UUID tenantId);
 
+  /** Todos os insumos ativos do tenant — base do custo teorico da margem por servico. */
+  List<ServicoInsumo> findByTenantIdAndAtivoTrue(UUID tenantId);
+
+  /**
+   * Execucoes e receita, no periodo, dos servicos que consomem estoque: {@code [serviceId,
+   * execucoes, receitaEmCentavos]}.
+   *
+   * <p>Mesma base do relatorio de vendas (agendamento {@code Concluido}, itens do agendamento), e
+   * so dos servicos com ao menos um insumo ativo — margem de servico sem insumo seria a propria
+   * receita e nao diria nada sobre estoque.
+   */
+  @Query(
+      value =
+          """
+          SELECT ai.service_id::text, COALESCE(SUM(ai.quantity), 0), COALESCE(SUM(ai.total_price), 0)
+          FROM appointments a
+          JOIN appointment_items ai ON ai.appointment_id = a.id AND ai.tenant_id = a.tenant_id
+          WHERE a.tenant_id = :tenantId
+            AND a.status = 'Concluido'
+            AND a.date BETWEEN :inicio AND :fim
+            AND EXISTS (
+              SELECT 1 FROM servico_insumo si
+              WHERE si.tenant_id = a.tenant_id AND si.service_id = ai.service_id AND si.ativo = true)
+          GROUP BY ai.service_id
+          """,
+      nativeQuery = true)
+  List<Object[]> somarExecucoesDosServicosComInsumo(
+      @Param("tenantId") UUID tenantId,
+      @Param("inicio") java.time.LocalDate inicio,
+      @Param("fim") java.time.LocalDate fim);
+
   /** Equivalente ao {@code firstResult()} do original: sem match devolve vazio, nao erro. */
   default Optional<ServicoInsumo> findByTenantServiceAndItem(
       UUID tenantId, UUID serviceId, UUID itemEstoqueId) {

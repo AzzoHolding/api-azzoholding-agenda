@@ -7,6 +7,7 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.HexFormat;
 import java.util.Set;
+import java.util.UUID;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -96,9 +97,9 @@ public class ServicoTenantPaymentWebhook {
     TenantPaymentSettings config =
         tenantPaymentSettingsRepository
             .findByWebhookToken(webhookToken)
-            .orElseThrow(() -> new ApiClientErrorException("Token de webhook invalido", 401));
+            .orElseThrow(() -> new ApiClientErrorException("Token de webhook inválido", 401));
     if (payload == null || payload.event == null || payload.event.isBlank()) {
-      throw new ApiClientErrorException("Payload de webhook invalido", 400);
+      throw new ApiClientErrorException("Payload de webhook inválido", 400);
     }
 
     String payloadJson = safeJson(payload);
@@ -134,11 +135,12 @@ public class ServicoTenantPaymentWebhook {
             "idempotencyKey", idempotencyKey));
 
     if (PAYMENT_CONFIRMED_EVENTS.contains(payload.event) && payload.payment != null) {
-      confirmarSinalSePagamentoCorresponder(payload.payment.id);
-      confirmarPagamentoComandaSeCorresponder(payload.payment.id);
-      renovarAssinaturaSeCorresponder(resolveSubscriptionId(payload));
+      UUID tenantId = config.getTenantId();
+      confirmarSinalSePagamentoCorresponder(tenantId, payload.payment.id);
+      confirmarPagamentoComandaSeCorresponder(tenantId, payload.payment.id);
+      renovarAssinaturaSeCorresponder(tenantId, resolveSubscriptionId(payload));
     } else if (PAYMENT_OVERDUE_EVENT.equals(payload.event)) {
-      marcarAssinaturaInadimplenteSeCorresponder(resolveSubscriptionId(payload));
+      marcarAssinaturaInadimplenteSeCorresponder(config.getTenantId(), resolveSubscriptionId(payload));
     }
     persistido.setProcessed(true);
   }
@@ -149,10 +151,27 @@ public class ServicoTenantPaymentWebhook {
     return payload.payment != null ? payload.payment.subscription : null;
   }
 
-  private void confirmarSinalSePagamentoCorresponder(String asaasPaymentId) {
+  /**
+   * Pentest 14/10/2026 (INT-005): o token da URL identifica o salao, mas a busca era so pelo id do
+   * Asaas — o dono de UM salao, com o proprio token, confirmava sinal, Pix ou assinatura de OUTRO
+   * salao mandando o id dele. Registro de outro salao agora e ignorado (e logado).
+   */
+  private boolean doSalao(UUID tenantEsperado, UUID tenantDoRegistro, String tipo, String idExterno) {
+    if (tenantEsperado != null && tenantEsperado.equals(tenantDoRegistro)) return true;
+    LOG.warn(
+        CorrelatedLogging.context(
+            "Webhook Asaas (tenant) ignorado: registro de outro salao",
+            "tenantDoToken", tenantEsperado,
+            "tipo", tipo,
+            "idExterno", idExterno));
+    return false;
+  }
+
+  private void confirmarSinalSePagamentoCorresponder(UUID tenantId, String asaasPaymentId) {
     AppointmentDeposit deposit =
         appointmentDepositRepository.findByAsaasPaymentIdSeguro(asaasPaymentId).orElse(null);
     if (deposit == null) return;
+    if (!doSalao(tenantId, deposit.getTenantId(), "sinal", asaasPaymentId)) return;
     if (!AppointmentDeposit.STATUS_PENDING.equals(deposit.getStatus())) return;
 
     deposit.setStatus(AppointmentDeposit.STATUS_PAID);
@@ -172,10 +191,11 @@ public class ServicoTenantPaymentWebhook {
             "asaasPaymentId", asaasPaymentId));
   }
 
-  private void confirmarPagamentoComandaSeCorresponder(String asaasPaymentId) {
+  private void confirmarPagamentoComandaSeCorresponder(UUID tenantId, String asaasPaymentId) {
     ComandaPagamento pagamento =
         comandaPagamentoRepository.findByAsaasPaymentId(asaasPaymentId).orElse(null);
     if (pagamento == null) return;
+    if (!doSalao(tenantId, pagamento.getTenantId(), "pix-comanda", asaasPaymentId)) return;
     if (!ComandaPagamento.STATUS_PENDENTE.equals(pagamento.getStatus())) return;
 
     pagamento.setStatus(ComandaPagamento.STATUS_CONFIRMADO);
@@ -194,10 +214,11 @@ public class ServicoTenantPaymentWebhook {
    * nao e cumulativo, reseta o saldo usado; se e cumulativo, soma mais uma cota de beneficio ao
    * total disponivel (a sobra do periodo anterior carrega).
    */
-  private void renovarAssinaturaSeCorresponder(String asaasSubscriptionId) {
+  private void renovarAssinaturaSeCorresponder(UUID tenantId, String asaasSubscriptionId) {
     ClientMembership membership =
         clientMembershipRepository.findByAsaasSubscriptionId(asaasSubscriptionId).orElse(null);
     if (membership == null) return;
+    if (!doSalao(tenantId, membership.getTenantId(), "assinatura", asaasSubscriptionId)) return;
     if (ClientMembership.STATUS_CANCELADA.equals(membership.getStatus())) return;
 
     membership.setStatus(ClientMembership.STATUS_ATIVA);
@@ -229,10 +250,11 @@ public class ServicoTenantPaymentWebhook {
             "asaasSubscriptionId", asaasSubscriptionId));
   }
 
-  private void marcarAssinaturaInadimplenteSeCorresponder(String asaasSubscriptionId) {
+  private void marcarAssinaturaInadimplenteSeCorresponder(UUID tenantId, String asaasSubscriptionId) {
     ClientMembership membership =
         clientMembershipRepository.findByAsaasSubscriptionId(asaasSubscriptionId).orElse(null);
     if (membership == null) return;
+    if (!doSalao(tenantId, membership.getTenantId(), "assinatura", asaasSubscriptionId)) return;
     if (!ClientMembership.STATUS_ATIVA.equals(membership.getStatus())) return;
 
     membership.setStatus(ClientMembership.STATUS_INADIMPLENTE);
@@ -259,7 +281,7 @@ public class ServicoTenantPaymentWebhook {
       byte[] bytes = digest.digest(payload.getBytes(StandardCharsets.UTF_8));
       return HexFormat.of().formatHex(bytes);
     } catch (NoSuchAlgorithmException e) {
-      throw new IllegalStateException("SHA-256 nao disponivel", e);
+      throw new IllegalStateException("SHA-256 não disponível", e);
     }
   }
 }

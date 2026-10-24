@@ -1,8 +1,12 @@
 package br.com.phdigitalcode.azzo.agenda.pro.service;
 
+import java.math.BigDecimal;
 import java.security.SecureRandom;
 import java.time.Instant;
 import java.time.LocalTime;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -34,12 +38,14 @@ import br.com.phdigitalcode.azzo.agenda.pro.entity.Servico;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.Specialty;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.Usuario;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.PapelUsuario;
+import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.StatusAgendamento;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.id.RbacUserRoleId;
 import br.com.phdigitalcode.azzo.agenda.pro.exception.ApiClientErrorException;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditConstants;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditEventCommand;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditService;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.CredentialsEmailService;
+import br.com.phdigitalcode.azzo.agenda.pro.repository.AgendamentoRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.PlanLimitsRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.ProfissionalRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.ProfissionalWorkingHourRepository;
@@ -66,6 +72,8 @@ public class ProfissionalService {
 
   private static final String PASSWORD_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789@#$%";
   private static final Random RANDOM = new SecureRandom();
+  private static final ZoneId ZONA_DO_SALAO = ZoneId.of("America/Sao_Paulo");
+  private static final DateTimeFormatter HORA = DateTimeFormatter.ofPattern("HH:mm");
 
   private final ProfissionalRepository profissionalRepository;
   private final ProfissionalWorkingHourRepository profissionalWorkingHourRepository;
@@ -81,6 +89,14 @@ public class ProfissionalService {
   private final ContextoTenant contextoTenant;
   private final AuditService auditService;
   private final PasswordPolicyValidator passwordPolicyValidator;
+  private final AgendamentoRepository agendamentoRepository;
+
+  /**
+   * Derruba as sessoes de quem e desativado. Campo, e nao construtor: sem ele (teste) o
+   * login e a renovacao continuam barrando; so a sessao ja aberta dura ate o token vencer.
+   */
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  private br.com.phdigitalcode.azzo.agenda.pro.security.RefreshTokenService refreshTokenService;
 
   public ProfissionalService(
       ProfissionalRepository profissionalRepository,
@@ -96,7 +112,8 @@ public class ProfissionalService {
       AfterCommitExecutor afterCommitExecutor,
       ContextoTenant contextoTenant,
       AuditService auditService,
-      PasswordPolicyValidator passwordPolicyValidator) {
+      PasswordPolicyValidator passwordPolicyValidator,
+      AgendamentoRepository agendamentoRepository) {
     this.profissionalRepository = profissionalRepository;
     this.profissionalWorkingHourRepository = profissionalWorkingHourRepository;
     this.usuarioRepository = usuarioRepository;
@@ -111,31 +128,64 @@ public class ProfissionalService {
     this.contextoTenant = contextoTenant;
     this.auditService = auditService;
     this.passwordPolicyValidator = passwordPolicyValidator;
+    this.agendamentoRepository = agendamentoRepository;
   }
 
+  /** A equipe: todos os ativos, inclusive quem nao recebe agendamento. */
   @Transactional(readOnly = true)
   public List<ProfissionalResponse> listar(String serviceId) {
+    return listar(serviceId, false);
+  }
+
+  /**
+   * {@code somenteQuemAgenda}: so quem aceita agendamento — para as listas de MARCAR horario (o
+   * assistente). A tela de equipe usa a outra: quem nao agenda continua sendo da equipe.
+   */
+  @Transactional(readOnly = true)
+  public List<ProfissionalResponse> listar(String serviceId, boolean somenteQuemAgenda) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    List<Profissional> encontrados;
     if (serviceId == null || serviceId.isBlank()) {
-      return profissionalRepository.findByTenantIdAndIsActiveTrue(tenantId).stream().map(this::toResponse).toList();
+      encontrados = profissionalRepository.findByTenantIdAndIsActiveTrue(tenantId);
+    } else {
+      UUID serviceUuid = UUID.fromString(serviceId);
+      Servico servico = servicoRepository.findByIdAndTenantId(serviceUuid, tenantId)
+          .filter(Servico::isActive)
+          .orElseThrow(() -> new IllegalArgumentException("Serviço não encontrado"));
+      encontrados = servico.getProfissionais() == null || servico.getProfissionais().isEmpty()
+          ? profissionalRepository.findByTenantIdAndIsActiveTrue(tenantId)
+          : servico.getProfissionais().stream().filter(Profissional::isActive).toList();
     }
+    return encontrados.stream()
+        .filter(p -> !somenteQuemAgenda || p.isAcceptsAppointments())
+        .map(this::toResponse)
+        .toList();
+  }
 
-    UUID serviceUuid = UUID.fromString(serviceId);
-    Servico servico = servicoRepository.findByIdAndTenantId(serviceUuid, tenantId)
-        .filter(Servico::isActive)
-        .orElseThrow(() -> new IllegalArgumentException("Servico nao encontrado"));
-
-    if (servico.getProfissionais() == null || servico.getProfissionais().isEmpty()) {
-      return profissionalRepository.findByTenantIdAndIsActiveTrue(tenantId).stream().map(this::toResponse).toList();
-    }
-    return servico.getProfissionais().stream().filter(Profissional::isActive).map(this::toResponse).toList();
+  /**
+   * Quantos atendimentos por vir (pendentes e confirmados, de agora em diante) estao com o
+   * profissional. E o numero que a tela mostra ao desligar "aceita agendamento": os ja marcados
+   * continuam — nada e cancelado —, e o dono precisa saber quantos sao.
+   */
+  @Transactional(readOnly = true)
+  public long contarAgendamentosFuturos(UUID id) {
+    UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    profissionalRepository.findByIdAndTenantId(id, tenantId)
+        .orElseThrow(() -> new IllegalArgumentException("Profissional não encontrado"));
+    ZonedDateTime agora = ZonedDateTime.now(ZONA_DO_SALAO);
+    return agendamentoRepository.countFutureActiveForProfessional(
+        tenantId,
+        id,
+        List.of(StatusAgendamento.PENDING, StatusAgendamento.CONFIRMED),
+        agora.toLocalDate(),
+        agora.toLocalTime().format(HORA));
   }
 
   @Transactional(readOnly = true)
   public ProfissionalResponse obterPorId(UUID id) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Profissional profissional = profissionalRepository.findByIdAndTenantId(id, tenantId)
-        .orElseThrow(() -> new IllegalArgumentException("Profissional nao encontrado"));
+        .orElseThrow(() -> new IllegalArgumentException("Profissional não encontrado"));
     return toResponse(profissional);
   }
 
@@ -143,7 +193,7 @@ public class ProfissionalService {
   public void validarAcessoProprio(UUID profissionalId, UUID userId) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Profissional profissional = profissionalRepository.findByIdAndTenantId(profissionalId, tenantId)
-        .orElseThrow(() -> new IllegalArgumentException("Profissional nao encontrado"));
+        .orElseThrow(() -> new IllegalArgumentException("Profissional não encontrado"));
     if (!userId.equals(profissional.getUserId())) {
       throw new ApiClientErrorException("Acesso negado", 403);
     }
@@ -185,16 +235,20 @@ public class ProfissionalService {
   public ProfissionalResponse atualizar(UUID id, ProfissionalRequest req) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Profissional p = profissionalRepository.findByIdAndTenantId(id, tenantId)
-        .orElseThrow(() -> new IllegalArgumentException("Profissional nao encontrado"));
+        .orElseThrow(() -> new IllegalArgumentException("Profissional não encontrado"));
 
     ProfissionalResponse before = toResponse(p);
     // Fidelidade ao original: email/telefone do profissional NAO sao alterados no update
     // (ServicoProfissionais.atualizar sobrescreve req.email/req.phone com os valores atuais).
     req.email = p.getEmail();
     req.phone = p.getPhone();
+    boolean estavaAtivo = p.isActive();
+    exigirSemAgendamentosFuturosAoDesativar(estavaAtivo, req.isActive, p.getId());
+    if (!estavaAtivo && req.isActive) validarLimiteProfissionaisPlano(tenantId);
     syncLinkedUserOnUpdate(tenantId, p, req);
     aplicar(req, p, tenantId);
     p = profissionalRepository.save(p);
+    encerrarSessoesSeFoiDesativado(estavaAtivo, p);
     replaceWorkingHours(p, tenantId, req.workingHours);
 
     ProfissionalResponse after = toResponse(p);
@@ -206,14 +260,58 @@ public class ProfissionalService {
   public ProfissionalResponse toggleStatus(UUID id, boolean isActive) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Profissional p = profissionalRepository.findByIdAndTenantId(id, tenantId)
-        .orElseThrow(() -> new IllegalArgumentException("Profissional nao encontrado"));
+        .orElseThrow(() -> new IllegalArgumentException("Profissional não encontrado"));
 
     ProfissionalResponse before = toResponse(p);
+    boolean estavaAtivo = p.isActive();
+    exigirSemAgendamentosFuturosAoDesativar(estavaAtivo, isActive, p.getId());
+    if (!estavaAtivo && isActive) validarLimiteProfissionaisPlano(tenantId);
     p.setActive(isActive);
     p = profissionalRepository.save(p);
+    encerrarSessoesSeFoiDesativado(estavaAtivo, p);
     ProfissionalResponse after = toResponse(p);
     registrarAuditoriaProfissional(tenantId, "PROFESSIONAL_UPDATE", before, after, p.getId().toString());
     return after;
+  }
+
+  /**
+   * Quem acabou de ser desativado sai do sistema AGORA.
+   *
+   * <p>Barrar so o login deixava a sessao aberta viva: o access token vale 15 minutos e o refresh,
+   * 30 dias. {@code revokeAllForUser} revoga os refresh tokens e marca {@code tokensRevokedBefore},
+   * que o filtro do JWT ja confere a cada requisicao. O dono nunca e desconectado por aqui.
+   */
+  private void encerrarSessoesSeFoiDesativado(boolean estavaAtivo, Profissional profissional) {
+    if (!estavaAtivo || profissional.isActive() || profissional.getUserId() == null) return;
+    if (refreshTokenService == null) return;
+    boolean ehDono =
+        usuarioRepository
+            .findById(profissional.getUserId())
+            .map(
+                usuario ->
+                    usuario.getRole() == br.com.phdigitalcode.azzo.agenda.pro.entity.enums.PapelUsuario.OWNER
+                        || usuario.getRole()
+                            == br.com.phdigitalcode.azzo.agenda.pro.entity.enums.PapelUsuario.ADMIN)
+            .orElse(false);
+    if (ehDono) return;
+    refreshTokenService.revokeAllForUser(profissional.getUserId());
+  }
+
+  /**
+   * Desativar quem tem atendimento marcado deixava os clientes com um profissional que nao trabalha
+   * mais ali — e ninguem avisado (analise de 2026-09-16, M9). Agora recusa, dizendo quantos sao: o
+   * salao realoca (ou cancela) antes.
+   */
+  private void exigirSemAgendamentosFuturosAoDesativar(
+      boolean estavaAtivo, boolean ficaAtivo, UUID profissionalId) {
+    if (!estavaAtivo || ficaAtivo) return;
+    long futuros = contarAgendamentosFuturos(profissionalId);
+    if (futuros <= 0) return;
+    throw new IllegalArgumentException(
+        "Este profissional tem "
+            + futuros
+            + (futuros == 1 ? " agendamento marcado" : " agendamentos marcados")
+            + ". Realoque ou cancele antes de desativar.");
   }
 
   /** Soft delete: marca {@code isActive=false}, igual ao original (nunca apaga a linha). */
@@ -221,18 +319,21 @@ public class ProfissionalService {
   public void deletar(UUID id) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Profissional profissional = profissionalRepository.findByIdAndTenantId(id, tenantId)
-        .orElseThrow(() -> new IllegalArgumentException("Profissional nao encontrado"));
+        .orElseThrow(() -> new IllegalArgumentException("Profissional não encontrado"));
     ProfissionalResponse before = toResponse(profissional);
 
     UUID usuarioAutenticadoId = obterUsuarioAutenticadoId();
     if (usuarioAutenticadoId != null
         && profissional.getUserId() != null
         && profissional.getUserId().equals(usuarioAutenticadoId)) {
-      throw new IllegalArgumentException("Nao e permitido remover o proprio usuario");
+      throw new IllegalArgumentException("Não é permitido remover o próprio usuário");
     }
 
+    boolean estavaAtivo = profissional.isActive();
+    exigirSemAgendamentosFuturosAoDesativar(estavaAtivo, false, profissional.getId());
     profissional.setActive(false);
     profissionalRepository.save(profissional);
+    encerrarSessoesSeFoiDesativado(estavaAtivo, profissional);
     registrarAuditoriaProfissional(tenantId, "PROFESSIONAL_DELETE", before, null, profissional.getId().toString());
   }
 
@@ -240,21 +341,27 @@ public class ProfissionalService {
   public ProfissionalResponse.PasswordResetResponse resetarSenha(UUID id) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Profissional p = profissionalRepository.findByIdAndTenantId(id, tenantId)
-        .orElseThrow(() -> new IllegalArgumentException("Profissional nao encontrado"));
+        .orElseThrow(() -> new IllegalArgumentException("Profissional não encontrado"));
     if (p.getUserId() == null) {
-      throw new IllegalArgumentException("Profissional nao possui usuario de acesso vinculado");
+      throw new IllegalArgumentException("Profissional não possui usuário de acesso vinculado");
     }
 
     Usuario user = usuarioRepository.findById(p.getUserId())
         .filter(item -> tenantId.equals(item.getTenantId()))
-        .orElseThrow(() -> new IllegalArgumentException("Usuario vinculado ao profissional nao encontrado"));
+        .orElseThrow(() -> new IllegalArgumentException("Usuário vinculado ao profissional não encontrado"));
+    exigirQuePodeTrocarSenhaDe(user);
     if (user.getEmail() == null || user.getEmail().isBlank()) {
-      throw new IllegalArgumentException("Usuario do profissional nao possui email configurado");
+      throw new IllegalArgumentException("Usuário do profissional não possui email configurado");
     }
 
     String temporaryPassword = generatePassword(12);
     user.setPasswordHash(BCrypt.withDefaults().hashToString(12, temporaryPassword.toCharArray()));
     usuarioRepository.save(user);
+    // Pentest 14/10/2026 (AGD-031): a senha mudou por decisao de OUTRA pessoa — quem estava logado
+    // com a senha antiga (inclusive quem a vazou) nao pode continuar com a sessao aberta.
+    if (refreshTokenService != null && !isCurrentAuthenticatedUser(user.getId())) {
+      refreshTokenService.revokeAllForUser(user.getId());
+    }
     String userEmail = user.getEmail();
     String userName = user.getName();
     afterCommitExecutor.run(
@@ -302,11 +409,31 @@ public class ProfissionalService {
   private void aplicar(ProfissionalRequest req, Profissional p, UUID tenantId) {
     p.setName(req.name);
     p.setEmail(req.email != null ? req.email.trim().toLowerCase(Locale.ROOT) : null);
-    p.setPhone(req.phone);
+    p.setPhone(br.com.phdigitalcode.azzo.agenda.pro.util.TelefoneBr.normalizarSeMudou(req.phone, p.getPhone()));
     p.setAvatar(req.avatar);
-    p.setSpecialties(resolveSpecialties(tenantId, req.specialties));
-    p.setCommissionRate(req.commissionRate);
+    // A colecao e do Hibernate: troca-la por outra (Set.of() era imutavel) quebrava o merge com
+    // UnsupportedOperationException e toda edicao de profissional sem especialidade dava 500
+    // (teste ponta a ponta de 23/10/2026). Atualiza no lugar.
+    Set<Specialty> especialidades = resolveSpecialties(tenantId, req.specialties);
+    if (p.getSpecialties() == null) {
+      p.setSpecialties(new LinkedHashSet<>(especialidades));
+    } else {
+      p.getSpecialties().clear();
+      p.getSpecialties().addAll(especialidades);
+    }
+    // A coluna `commission_rate` e NOT NULL (como no original Quarkus): "sem comissao" se
+    // grava como ZERO, nao como ausente. Cliente que manda `null` — a tela manda quando o campo
+    // fica em branco — derrubava o cadastro com 400 generico ("null value in column
+    // commission_rate", producao 2026-09-16). Ausente na edicao MANTEM o que ja estava.
+    if (req.commissionRate != null) {
+      p.setCommissionRate(req.commissionRate);
+    } else if (p.getCommissionRate() == null) {
+      p.setCommissionRate(BigDecimal.ZERO);
+    }
     p.setActive(req.isActive);
+    // Ausente mantem o que ja estava (e o cadastro nasce com o padrao da entidade, TRUE): um
+    // cliente antigo que nao conhece o campo nao pode tirar ninguem da agenda.
+    if (req.acceptsAppointments != null) p.setAcceptsAppointments(req.acceptsAppointments);
   }
 
   private void replaceWorkingHours(Profissional profissional, UUID tenantId, List<WorkingHoursDto> requestedHours) {
@@ -349,14 +476,14 @@ public class ProfissionalService {
     if (req.userId != null && !req.userId.isBlank()) {
       Usuario user = usuarioRepository.findById(UUID.fromString(req.userId))
           .filter(item -> tenantId.equals(item.getTenantId()))
-          .orElseThrow(() -> new IllegalArgumentException("Usuario informado nao encontrado no tenant"));
+          .orElseThrow(() -> new IllegalArgumentException("Usuário informado não encontrado no tenant"));
       return prepareLinkedUser(tenantId, user, req, null);
     }
 
     if (!Boolean.TRUE.equals(req.createUser)) return null;
 
     if (req.email == null || req.email.isBlank()) {
-      throw new IllegalArgumentException("Email obrigatorio para criar usuario de acesso do profissional");
+      throw new IllegalArgumentException("Email obrigatório para criar usuário de acesso do profissional");
     }
     String effectivePassword = req.accessPassword;
     boolean generatedPassword = false;
@@ -374,7 +501,7 @@ public class ProfissionalService {
           && isCurrentAuthenticatedUser(existentGlobal.getId())) {
         return prepareLinkedUser(tenantId, existentGlobal, req, null);
       }
-      throw new IllegalArgumentException("Ja existe usuario com este email");
+      throw new IllegalArgumentException("Já existe usuário com este email");
     }
 
     Usuario user = new Usuario();
@@ -402,9 +529,15 @@ public class ProfissionalService {
   private void syncLinkedUserOnUpdate(UUID tenantId, Profissional p, ProfissionalRequest req) {
     Usuario user = null;
     if (req.userId != null && !req.userId.isBlank()) {
-      user = usuarioRepository.findById(UUID.fromString(req.userId))
+      UUID novoUserId = UUID.fromString(req.userId);
+      // Ligar um login (o do dono, por exemplo) so vale para quem ainda nao tem: trocar deixaria o
+      // login anterior sem cadastro, com acesso e sem ninguem saber de quem e.
+      if (p.getUserId() != null && !p.getUserId().equals(novoUserId)) {
+        throw new IllegalArgumentException("Este profissional já tem login próprio");
+      }
+      user = usuarioRepository.findById(novoUserId)
           .filter(item -> tenantId.equals(item.getTenantId()))
-          .orElseThrow(() -> new IllegalArgumentException("Usuario informado nao encontrado no tenant"));
+          .orElseThrow(() -> new IllegalArgumentException("Usuário informado não encontrado no tenant"));
       p.setUserId(user.getId());
     } else if (p.getUserId() != null) {
       user = usuarioRepository.findById(p.getUserId()).filter(item -> tenantId.equals(item.getTenantId())).orElse(null);
@@ -428,7 +561,7 @@ public class ProfissionalService {
     if (req.email != null && !req.email.isBlank()) {
       Usuario existentGlobal = usuarioRepository.findByEmail(req.email.trim()).orElse(null);
       if (existentGlobal != null && !existentGlobal.getId().equals(user.getId())) {
-        throw new IllegalArgumentException("Ja existe usuario com este email");
+        throw new IllegalArgumentException("Já existe usuário com este email");
       }
       if (!preservePrimaryRole) {
         user.setEmail(req.email.trim().toLowerCase(Locale.ROOT));
@@ -447,8 +580,26 @@ public class ProfissionalService {
       validarCriacaoUsuarioPorRole(user.getRole());
     }
     if (newPassword != null && !newPassword.isBlank()) {
+      exigirQuePodeTrocarSenhaDe(user);
       passwordPolicyValidator.validateOrThrow(newPassword);
       user.setPasswordHash(BCrypt.withDefaults().hashToString(12, newPassword.toCharArray()));
+      // AGD-031: senha definida por outra pessoa encerra as sessoes abertas com a anterior.
+      if (refreshTokenService != null && user.getId() != null && !isCurrentAuthenticatedUser(user.getId())) {
+        refreshTokenService.revokeAllForUser(user.getId());
+      }
+    }
+  }
+
+  /**
+   * A senha de OWNER/ADMIN so e trocada por ele mesmo por este cadastro (achado SEG-005, auditoria
+   * de 2026-10-06). Antes, quem tinha {@code professional:write} (liberavel a STAFF por perfil) ligava
+   * o login do dono a um profissional e definia a senha dele, ou a redefinia pelo reset, e assumia a
+   * conta. {@code preservePrimaryRole} so protegia papel, nome e e-mail.
+   */
+  private void exigirQuePodeTrocarSenhaDe(Usuario user) {
+    if (isPrivilegedUser(user) && !isCurrentAuthenticatedUser(user.getId())) {
+      throw new ApiClientErrorException(
+          "A senha do dono da conta só pode ser trocada por ele mesmo.", 403);
     }
   }
 
@@ -457,7 +608,7 @@ public class ProfissionalService {
     Profissional linked = profissionalRepository.findByTenantIdAndUserId(tenantId, userId).orElse(null);
     if (linked == null) return;
     if (currentProfessionalId != null && linked.getId() != null && linked.getId().equals(currentProfessionalId)) return;
-    throw new IllegalArgumentException("Usuario ja vinculado a outro profissional");
+    throw new IllegalArgumentException("Usuário já vinculado a outro profissional");
   }
 
   private boolean isPrivilegedUser(Usuario user) {
@@ -478,7 +629,7 @@ public class ProfissionalService {
             .map(GrantedAuthority::getAuthority)
             .anyMatch("ROLE_ADMIN"::equals);
     if (!isAdminActor) {
-      throw new ApiClientErrorException("Somente ADMIN pode criar usuario com role ADMIN", 403);
+      throw new ApiClientErrorException("Somente ADMIN pode criar usuário com role ADMIN", 403);
     }
   }
 
@@ -504,7 +655,7 @@ public class ProfissionalService {
   }
 
   private Set<Specialty> resolveSpecialties(UUID tenantId, List<String> requestedSpecialties) {
-    if (requestedSpecialties == null || requestedSpecialties.isEmpty()) return Set.of();
+    if (requestedSpecialties == null || requestedSpecialties.isEmpty()) return new LinkedHashSet<>();
 
     Map<String, String> normalizedByLower = new LinkedHashMap<>();
     for (String raw : requestedSpecialties) {
@@ -540,7 +691,15 @@ public class ProfissionalService {
     return "Azzo@12345";
   }
 
+  /**
+   * O limite vale para profissionais ATIVOS, em qualquer caminho que aumente esse numero: cadastrar
+   * ({@code criar}) e reativar ({@code toggleStatus} e {@code atualizar} com {@code isActive} de
+   * false para true). Antes so o cadastro conferia, e num plano de 3 dava para ter 4 ativos: criar
+   * 3, desativar um, criar outro, reativar o primeiro (achado AGD-015, auditoria de 2026-10-06).
+   * A conferencia e serializada por salao (ver {@code travarLimiteDeProfissionais}).
+   */
   private void validarLimiteProfissionaisPlano(UUID tenantId) {
+    planLimitsRepository.travarLimiteDeProfissionais(tenantId);
     int maxProfessionals = obterLimiteProfissionaisDoPlanoObrigatorio(tenantId);
     long current = profissionalRepository.countByTenantIdAndIsActiveTrue(tenantId);
     if (current >= maxProfessionals) {
@@ -550,9 +709,9 @@ public class ProfissionalService {
 
   private int obterLimiteProfissionaisDoPlanoObrigatorio(UUID tenantId) {
     UUID productId = planLimitsRepository.findActivePlanProductId(tenantId, Instant.now())
-        .orElseThrow(() -> new IllegalArgumentException("Nao existe plano ativo para o tenant"));
+        .orElseThrow(() -> new IllegalArgumentException("Não existe plano ativo para o tenant"));
     return planLimitsRepository.findMaxProfessionals(productId)
-        .orElseThrow(() -> new IllegalArgumentException("Plano sem configuracao de limite de profissionais"));
+        .orElseThrow(() -> new IllegalArgumentException("Plano sem configuração de limite de profissionais"));
   }
 
   private UUID obterUsuarioAutenticadoId() {
@@ -589,6 +748,7 @@ public class ProfissionalService {
             .map(this::toWorkingHoursDto)
             .toList());
     r.isActive = p.isActive();
+    r.acceptsAppointments = p.isAcceptsAppointments();
     r.createdAt = p.getCreatedAt() != null ? p.getCreatedAt().toString() : null;
     return r;
   }

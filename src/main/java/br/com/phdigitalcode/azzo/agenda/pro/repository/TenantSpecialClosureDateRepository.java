@@ -43,6 +43,9 @@ public interface TenantSpecialClosureDateRepository
 
   boolean existsByTenantIdAndClosureDate(UUID tenantId, LocalDate closureDate);
 
+  /** Fechamentos de parte do dia (com inicio e fim) numa data, do salao e de profissionais. */
+  List<TenantSpecialClosureDate> findByTenantIdAndClosureDateAndAllDayFalse(UUID tenantId, LocalDate closureDate);
+
   boolean existsByTenantIdAndClosureDateAndAllDayTrueAndProfessionalIdIsNull(
       UUID tenantId, LocalDate closureDate);
 

@@ -21,6 +21,25 @@ import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.StatusNotification;
 public interface NotificationRepository
     extends JpaRepository<Notification, UUID>, JpaSpecificationExecutor<Notification> {
 
+  /**
+   * Apaga o contato e o texto das notificacoes enviadas ao titular anonimizado.
+   *
+   * Nao ha {@code client_id} aqui: chega-se pelo agendamento. O destino e o telefone ou o e-mail
+   * dele, e o texto traz o nome — anonimizar sem passar por aqui deixava o contato guardado.
+   * {@code destination} nao aceita nulo, entao recebe o marcador.
+   */
+  @Modifying
+  @Transactional
+  @Query(
+      value =
+          "UPDATE notifications SET destination = '[ANONIMIZADO]', message = NULL, "
+              + "error_message = NULL "
+              + "WHERE tenant_id = :tenantId AND appointment_id IN "
+              + "(SELECT a.id FROM appointments a WHERE a.tenant_id = :tenantId "
+              + "AND a.client_id = :clientId)",
+      nativeQuery = true)
+  int anonimizarPorClienteRaw(@Param("tenantId") UUID tenantId, @Param("clientId") UUID clientId);
+
   Optional<Notification> findByIdAndTenantId(UUID id, UUID tenantId);
 
   long deleteByIdAndTenantId(UUID id, UUID tenantId);
@@ -76,4 +95,20 @@ public interface NotificationRepository
       "update Notification n set n.viewedAt = :viewedAt "
           + "where n.tenantId = :tenantId and n.viewedAt is null")
   long markAllViewedByTenant(@Param("tenantId") UUID tenantId, @Param("viewedAt") Instant viewedAt);
+
+  /**
+   * Notificacoes para o MESMO numero que nao estao ligadas a agendamento do cliente (erro de
+   * entrega, alerta). {@code telefone} e DDD + numero; compara pelo fim, com ou sem 55 e mascara.
+   */
+  @Modifying
+  @Transactional
+  @Query(
+      value =
+          "UPDATE notifications SET destination = '[ANONIMIZADO]', message = NULL, error_message = NULL "
+              + "WHERE tenant_id = :tenantId AND destination <> '[ANONIMIZADO]' "
+              + "AND length(regexp_replace(destination, '[^0-9]', '', 'g')) >= :tamanho "
+              + "AND right(regexp_replace(destination, '[^0-9]', '', 'g'), :tamanho) = :telefone",
+      nativeQuery = true)
+  int anonimizarPorTelefoneRaw(
+      @Param("tenantId") UUID tenantId, @Param("telefone") String telefone, @Param("tamanho") int tamanho);
 }

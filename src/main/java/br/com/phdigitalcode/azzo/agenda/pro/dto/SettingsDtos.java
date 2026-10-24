@@ -45,7 +45,7 @@ public final class SettingsDtos {
   // --- Business Hours (tabela relacional) ---
 
   public static class BusinessHoursItemRequest {
-    @NotBlank(message = "Dia da semana e obrigatorio")
+    @NotBlank(message = "Dia da semana é obrigatório")
     public String dayOfWeek;
 
     @Pattern(
@@ -128,6 +128,17 @@ public final class SettingsDtos {
     public boolean cancellationPolicyEnabled;
     public int cancellationMinHoursBefore;
     public int cancellationFeePercent;
+  }
+
+  // --- Teto de desconto do PDV (V131) ---
+
+  public static class DiscountPolicyRequest {
+    /** 0 a 100. 100 significa sem teto. */
+    public Integer maxDiscountPercent;
+  }
+
+  public static class DiscountPolicyResponse {
+    public int maxDiscountPercent;
   }
 
   // --- Regua de lembretes (F03 — V120) ---

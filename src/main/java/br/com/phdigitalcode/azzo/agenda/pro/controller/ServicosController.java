@@ -31,7 +31,7 @@ import jakarta.validation.Valid;
  */
 @RestController
 @RequestMapping("/api/v1/services")
-@PreAuthorize("hasAnyRole('OWNER', 'PROFESSIONAL')")
+@PreAuthorize("hasAnyRole('OWNER', 'PROFESSIONAL', 'STAFF')")
 public class ServicosController {
 
   private final ServicoService servicoService;

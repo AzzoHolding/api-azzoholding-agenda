@@ -31,13 +31,17 @@ public class AssistantApiClient {
   @Autowired
   public AssistantApiClient(
       @Value("${app.integration.assistant-api.base-url:http://localhost:8081}") String baseUrl,
-      @Value("${app.internal.api-key:changeme-dev}") String internalApiKey,
+      @Value("${app.internal.api-key:changeme-dev}") String chaveLegada,
+      @Value("${app.internal.chaves.assistant:}") String chaveDoAssistant,
       @Value("${app.integration.assistant-api.connect-timeout-ms:5000}") long connectTimeoutMs,
       @Value("${app.integration.assistant-api.read-timeout-ms:15000}") long readTimeoutMs) {
     SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
     requestFactory.setConnectTimeout(Duration.ofMillis(connectTimeoutMs));
     requestFactory.setReadTimeout(Duration.ofMillis(readTimeoutMs));
     RestClient.Builder builder = RestClient.builder().baseUrl(baseUrl).requestFactory(requestFactory);
+    // SEG-018: com a chave propria do par agenda<->assistant configurada, ela substitui a unica.
+    String internalApiKey =
+        chaveDoAssistant != null && !chaveDoAssistant.isBlank() ? chaveDoAssistant : chaveLegada;
     if (internalApiKey != null && !internalApiKey.isBlank()) {
       builder.defaultHeader("X-Internal-Api-Key", internalApiKey);
     }
@@ -84,6 +88,17 @@ public class AssistantApiClient {
             .queryParam("userIdentifier", userIdentifier)
             .queryParam("appointmentId", appointmentId)
             .queryParam("customerName", customerName)
+            .build())
+        .retrieve()
+        .toBodilessEntity();
+  }
+
+  /** Anonimizacao do titular: o assistente apaga o estado da conversa dele (LGPD). */
+  public void esquecerConversa(String tenantId, String userIdentifier) {
+    restClient.delete()
+        .uri(uriBuilder -> uriBuilder.path("/api/v1/assistant/admin/conversation")
+            .queryParam("tenantId", tenantId)
+            .queryParam("userIdentifier", userIdentifier)
             .build())
         .retrieve()
         .toBodilessEntity();

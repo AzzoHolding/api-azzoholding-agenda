@@ -25,7 +25,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.service.ServicoDashboard;
  */
 @RestController
 @RequestMapping("/api/v1/dashboard")
-@PreAuthorize("hasAnyRole('OWNER', 'PROFESSIONAL')")
+@PreAuthorize("hasAnyRole('OWNER', 'PROFESSIONAL', 'STAFF')")
 public class DashboardController {
 
   private final ServicoDashboard servicoDashboard;

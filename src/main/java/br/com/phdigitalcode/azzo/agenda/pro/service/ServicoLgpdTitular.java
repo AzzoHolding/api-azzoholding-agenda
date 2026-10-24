@@ -99,7 +99,7 @@ public class ServicoLgpdTitular {
   public LgpdRequestDtos.DetailResponse detalhar(UUID id) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     LgpdDataSubjectRequest entity = requestRepository.findByTenantAndId(tenantId, id)
-        .orElseThrow(() -> new IllegalArgumentException("Solicitacao LGPD nao encontrada"));
+        .orElseThrow(() -> new IllegalArgumentException("Solicitação LGPD não encontrada"));
 
     LgpdRequestDtos.DetailResponse response = new LgpdRequestDtos.DetailResponse();
     response.request = toItemResponse(entity);
@@ -112,7 +112,7 @@ public class ServicoLgpdTitular {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     String normalizedProtocol = required(protocolCode, "protocolCode obrigatorio").toUpperCase(Locale.ROOT);
     LgpdDataSubjectRequest entity = requestRepository.findByTenantAndProtocol(tenantId, normalizedProtocol)
-        .orElseThrow(() -> new IllegalArgumentException("Solicitacao LGPD nao encontrada"));
+        .orElseThrow(() -> new IllegalArgumentException("Solicitação LGPD não encontrada"));
 
     LgpdRequestDtos.DetailResponse response = new LgpdRequestDtos.DetailResponse();
     response.request = toItemResponse(entity);
@@ -155,7 +155,7 @@ public class ServicoLgpdTitular {
     UUID actorUserId = obterUsuarioAutenticadoId();
 
     LgpdDataSubjectRequest entity = requestRepository.findByTenantAndId(tenantId, id)
-        .orElseThrow(() -> new IllegalArgumentException("Solicitacao LGPD nao encontrada"));
+        .orElseThrow(() -> new IllegalArgumentException("Solicitação LGPD não encontrada"));
 
     String previousStatus = entity.getStatus() != null ? entity.getStatus().toUpperCase(Locale.ROOT) : STATUS_ABERTO;
     String newStatus = normalizeStatus(request.status);
@@ -180,7 +180,7 @@ public class ServicoLgpdTitular {
   private void validarTransicao(String previousStatus, String newStatus) {
     if (previousStatus.equals(newStatus)) return;
     if (STATUS_ENCERRADO.equals(previousStatus)) {
-      throw new IllegalArgumentException("Solicitacao encerrada nao pode mudar de status");
+      throw new IllegalArgumentException("Solicitação encerrada não pode mudar de status");
     }
     if (STATUS_ABERTO.equals(previousStatus)
         && (STATUS_EM_VALIDACAO.equals(newStatus)
@@ -195,7 +195,7 @@ public class ServicoLgpdTitular {
     if (STATUS_RESPONDIDO.equals(previousStatus) && STATUS_ENCERRADO.equals(newStatus)) {
       return;
     }
-    throw new IllegalArgumentException("Transicao de status LGPD invalida");
+    throw new IllegalArgumentException("Transicao de status LGPD inválida");
   }
 
   private void registrarEvento(
@@ -253,7 +253,7 @@ public class ServicoLgpdTitular {
   private String normalizeStatus(String status) {
     String value = required(status, "status obrigatorio").toUpperCase(Locale.ROOT);
     if (!STATUSES.contains(value)) {
-      throw new IllegalArgumentException("Status LGPD invalido");
+      throw new IllegalArgumentException("Status LGPD inválido");
     }
     return value;
   }
@@ -263,7 +263,7 @@ public class ServicoLgpdTitular {
     try {
       return UUID.fromString(value.trim());
     } catch (Exception e) {
-      throw new IllegalArgumentException("assignedToUserId invalido");
+      throw new IllegalArgumentException("assignedToUserId inválido");
     }
   }
 

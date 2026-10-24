@@ -36,6 +36,13 @@ public final class ComandaDtos {
 
     /** Obrigatorio para PRODUTO; para SERVICO usa o preco de tabela se omitido. */
     public BigDecimal precoUnitario;
+
+    /**
+     * "Sim, e de proposito": lancar de novo um item que a comanda ja tem e RECUSADO ate alguem
+     * confirmar. O caso legitimo existe (dois cortes na mesma conta), o acidente tambem — e o
+     * acidente cobra o cliente duas vezes.
+     */
+    public Boolean confirmarDuplicado;
   }
 
   public static class AplicarDescontoRequest {
@@ -86,6 +93,38 @@ public final class ComandaDtos {
     public BigDecimal quantidade;
     public BigDecimal precoUnitario;
     public BigDecimal total;
+
+    /** AGENDAMENTO ou MANUAL (V132): a tela mostra de onde a linha veio. */
+    public String origem;
+
+    /** PACOTE ou ASSINATURA quando o servico saiu do saldo do cliente (V134). */
+    public String coberturaTipo;
+
+    public String coberturaSaldoId;
+
+    /** Valor da sessao dentro do que o cliente pagou: a base da comissao do item coberto. */
+    public BigDecimal valorCobertura;
+  }
+
+  /** A recepcao escolhe de onde o servico sai (V134). */
+  public static class AplicarCoberturaRequest {
+    @NotBlank
+    @Pattern(regexp = "PACOTE|ASSINATURA")
+    public String tipo;
+
+    @NotBlank public String saldoId;
+  }
+
+  /** Um saldo do cliente que pode cobrir o servico do item. */
+  public static class OpcaoDeCoberturaResponse {
+    public String tipo;
+    public String saldoId;
+    /** Nome do pacote ou do plano. */
+    public String nome;
+    /** Quantas sessoes ainda restam nesse saldo. */
+    public int disponiveis;
+    /** Valor de cada sessao dentro do que foi pago — base da comissao. */
+    public BigDecimal valorDaSessao;
   }
 
   public static class ComandaPagamentoResponse {

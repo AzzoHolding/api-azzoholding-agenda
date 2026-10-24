@@ -1,11 +1,17 @@
 package br.com.phdigitalcode.azzo.agenda.pro.repository;
 
+import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 import br.com.phdigitalcode.azzo.agenda.pro.entity.WhatsAppMessageLogEntity;
 
@@ -18,4 +24,72 @@ public interface WhatsAppMessageLogRepository extends JpaRepository<WhatsAppMess
    * original.
    */
   List<WhatsAppMessageLogEntity> findByTenantIdOrderBySentAtDesc(UUID tenantId, Pageable pageable);
+
+  /**
+   * O log com filtro de situacao e periodo.
+   *
+   * <p><b>{@code de}/{@code ate} nunca chegam nulos aqui</b> — quem chama (
+   * {@code ServicoTenantWhatsapp.listarMensagens}) resolve a ausencia de filtro para os limites
+   * praticos ({@code Instant.EPOCH}/{@code agora + 100 anos}) antes de invocar esta consulta.
+   * {@code :status is null or ...} continua seguro (String, Hibernate infere o tipo sem ajuda),
+   * mas o mesmo padrao com {@code :de}/{@code :ate} (Instant) gerava
+   * {@code PSQLException: could not determine data type of parameter} em produ&ccedil;&atilde;o —
+   * mesma familia do achado de 2026-09-20 na auditoria, mas em JPQL, nao em consulta nativa; o
+   * comentario anterior ("em JPQL funciona") estava errado para parametro temporal nulo. Sem
+   * "is null" no lado do parametro, o Postgres nao precisa adivinhar tipo nenhum.
+   */
+  @Query(
+      "select m from WhatsAppMessageLogEntity m where m.tenantId = :tenantId "
+          + "and (:status is null or m.status = :status) "
+          + "and m.sentAt >= :de "
+          + "and m.sentAt <= :ate "
+          + "order by m.sentAt desc")
+  List<WhatsAppMessageLogEntity> filtrar(
+      @Param("tenantId") UUID tenantId,
+      @Param("status") String status,
+      @Param("de") Instant de,
+      @Param("ate") Instant ate,
+      Pageable pageable);
+
+  /**
+   * A linha do log que corresponde a um {@code wamid}.
+   *
+   * <p>E o que liga o status que a Meta manda pelo webhook a mensagem que aparece na tela: sem
+   * isso, "Aceita" nunca virava "Entregue" nem "Falhou", e o motivo da nao-entrega existia so na
+   * resposta da Meta que ninguem lia.
+   */
+  Optional<WhatsAppMessageLogEntity> findByTenantIdAndProviderMessageId(
+      UUID tenantId, String providerMessageId);
+
+  /**
+   * Apaga numero e texto das mensagens enviadas ao titular anonimizado.
+   *
+   * Mesmo caso das notificacoes: o vinculo e pelo agendamento, e {@code destination_phone} nao
+   * aceita nulo.
+   */
+  @Modifying
+  @Transactional
+  @Query(
+      value =
+          "UPDATE whatsapp_message_log SET destination_phone = '[ANONIMIZADO]', "
+              + "message_text = NULL, error_message = NULL "
+              + "WHERE tenant_id = :tenantId AND appointment_id IN "
+              + "(SELECT a.id FROM appointments a WHERE a.tenant_id = :tenantId "
+              + "AND a.client_id = :clientId)",
+      nativeQuery = true)
+  int anonimizarPorClienteRaw(@Param("tenantId") UUID tenantId, @Param("clientId") UUID clientId);
+
+  /** Mesmo criterio de {@code NotificationRepository#anonimizarPorTelefoneRaw}. */
+  @Modifying
+  @Transactional
+  @Query(
+      value =
+          "UPDATE whatsapp_message_log SET destination_phone = '[ANONIMIZADO]', "
+              + "message_text = NULL, error_message = NULL "
+              + "WHERE tenant_id = :tenantId AND destination_phone <> '[ANONIMIZADO]' "
+              + "AND length(regexp_replace(destination_phone, '[^0-9]', '', 'g')) >= :tamanho "
+              + "AND right(regexp_replace(destination_phone, '[^0-9]', '', 'g'), :tamanho) = :telefone",
+      nativeQuery = true)
+  int anonimizarPorTelefoneRaw(
+      @Param("tenantId") UUID tenantId, @Param("telefone") String telefone, @Param("tamanho") int tamanho);
 }

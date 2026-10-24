@@ -55,7 +55,7 @@ class NotificationControllerTest {
   void classeMantemRolesPermitidasDoOriginal() {
     PreAuthorize preAuthorize = NotificationController.class.getAnnotation(PreAuthorize.class);
     assertThat(preAuthorize).isNotNull();
-    assertThat(preAuthorize.value()).isEqualTo("hasAnyRole('OWNER', 'PROFESSIONAL')");
+    assertThat(preAuthorize.value()).isEqualTo("hasAnyRole('OWNER', 'PROFESSIONAL', 'STAFF')");
   }
 
   @Test

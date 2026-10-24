@@ -66,6 +66,27 @@ public interface TransacaoRepository extends JpaRepository<Transacao, UUID> {
       @Param("categoryName") String categoryName);
 
   /**
+   * Receita ATIVA lancada pela conclusao do agendamento — para estornar com soft delete (M2), em vez
+   * da remocao fisica do metodo abaixo.
+   */
+  @Query("""
+      select t from Transacao t
+      where t.tenantId = :tenantId
+        and t.appointmentId = :appointmentId
+        and t.type = :type
+        and t.deletedAt is null
+        and t.categoryId in (
+          select c.id from TransactionCategory c
+          where c.tenantId = :tenantId and c.name = :categoryName
+        )
+      """)
+  java.util.List<Transacao> listarAtivasDoAgendamentoPorCategoria(
+      @Param("tenantId") UUID tenantId,
+      @Param("appointmentId") UUID appointmentId,
+      @Param("type") TipoTransacao type,
+      @Param("categoryName") String categoryName);
+
+  /**
    * Estorno de receita/comissao de agendamento — o original usa
    * {@code delete("... and categoryRef.name = ?4")}, remocao fisica (nao soft delete).
    */

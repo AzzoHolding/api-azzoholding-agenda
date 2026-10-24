@@ -3,6 +3,7 @@ package br.com.phdigitalcode.azzo.agenda.pro.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
@@ -60,6 +61,8 @@ import br.com.phdigitalcode.azzo.agenda.pro.service.channel.CommunicationChannel
  */
 class ReminderProcessingServiceTest {
 
+  private final RegistroDeEnvioDoWhatsapp registroDeEnvio = org.mockito.Mockito.mock(RegistroDeEnvioDoWhatsapp.class);
+
   private static final ZoneId ZONE_BR = ZoneId.of("America/Sao_Paulo");
 
   private AgendamentoRepository agendamentoRepository;
@@ -73,6 +76,8 @@ class ReminderProcessingServiceTest {
   private CommunicationChannelDispatcher communicationChannelDispatcher;
   private CustomerCommunicationChannelResolver customerCommunicationChannelResolver;
   private AssistantApiClient assistantApiClient;
+  private ServicoTemplatesDoWhatsapp servicoTemplates;
+  private ChatService chatService;
   private ReminderProcessingService service;
 
   @BeforeEach
@@ -88,8 +93,22 @@ class ReminderProcessingServiceTest {
     communicationChannelDispatcher = mock(CommunicationChannelDispatcher.class);
     customerCommunicationChannelResolver = mock(CustomerCommunicationChannelResolver.class);
     assistantApiClient = mock(AssistantApiClient.class);
+    servicoTemplates = mock(ServicoTemplatesDoWhatsapp.class);
+    chatService = mock(ChatService.class);
+    // Sem template aprovado o servico cai no texto livre, que e o comportamento que estes testes
+    // ja cobriam — manter isso preserva o que eles verificam.
+    when(servicoTemplates.enviar(any(), anyString(), any(), anyString(), any(), anyString()))
+        .thenAnswer(
+            invocacao ->
+                communicationChannelDispatcher.sendText(
+                    new br.com.phdigitalcode.azzo.agenda.pro.service.channel.ChannelSendCommand(
+                        invocacao.getArgument(0),
+                        invocacao.getArgument(2),
+                        invocacao.getArgument(3),
+                        invocacao.getArgument(5))));
     service =
         new ReminderProcessingService(
+            servicoTemplates,
             agendamentoRepository,
             tenantRepository,
             tenantWhatsAppConfigRepository,
@@ -101,7 +120,9 @@ class ReminderProcessingServiceTest {
             communicationChannelDispatcher,
             customerCommunicationChannelResolver,
             assistantApiClient,
-            mock(PlatformTransactionManager.class));
+            chatService,
+            mock(PlatformTransactionManager.class),
+            registroDeEnvio);
   }
 
   // ============================================================
@@ -332,6 +353,50 @@ class ReminderProcessingServiceTest {
     verify(assistantApiClient)
         .seedReminderContext(
             appointment.getTenantId().toString(), client.getPhone(), appointment.getId().toString(), client.getName());
+    // O lembrete entra no chat da conversa do cliente.
+    verify(chatService)
+        .registrarMensagemAutomatica(
+            eq(appointment.getTenantId()), eq(client), eq(ChatChannel.WHATSAPP), eq(client.getPhone()), anyString(),
+            eq("msg-1"));
+    // E em "Mensagens enviadas", com o wamid, para o status de entrega da Meta achar a linha.
+    verify(registroDeEnvio)
+        .registrar(
+            eq(appointment.getTenantId()), eq(appointment.getId()), eq(RegistroDeEnvioDoWhatsapp.LEMBRETE),
+            eq(client.getPhone()), anyString(), any());
+  }
+
+  @Test
+  void falhaAoRegistrarNoChatNaoDesfazOEnvio() {
+    Agendamento appointment = agendamentoAmanha();
+    TenantOperationalSettings settings = settings(appointment.getTenantId());
+    settings.setD1ReminderEnabled(true);
+    settings.setD1ReminderHora("00:00");
+    stubGateD1(appointment, settings);
+
+    Cliente client = clienteComTelefone(appointment.getClientId(), appointment.getTenantId());
+    when(clienteRepository.findByIdAndTenantId(appointment.getClientId(), appointment.getTenantId()))
+        .thenReturn(Optional.of(client));
+    when(customerCommunicationChannelResolver.resolve(eq(appointment.getTenantId()), eq(client), any(String[].class)))
+        .thenReturn(new ResolvedChannel(ChatChannel.WHATSAPP, client.getPhone(), null));
+    when(tenantWhatsAppConfigRepository.findByTenantIdOrCreate(appointment.getTenantId()))
+        .thenReturn(enabledWhatsAppConfig());
+    when(communicationChannelDispatcher.sendText(any())).thenReturn(ChannelSendResult.sent("msg-1"));
+    org.mockito.Mockito.doThrow(new IllegalStateException("banco fora"))
+        .when(chatService)
+        .registrarMensagemAutomatica(any(), any(), any(), any(), any(), any());
+
+    assertThat(service.processAppointment(appointment.getId())).isEqualTo(1);
+
+    verify(notificationPublisher)
+        .publish(
+            eq(appointment.getTenantId()),
+            eq(appointment.getId()),
+            eq("WHATSAPP_REMINDER"),
+            eq(client.getPhone()),
+            any(),
+            eq(StatusNotification.SENT),
+            eq((String) null),
+            any());
   }
 
   @Test
@@ -409,8 +474,12 @@ class ReminderProcessingServiceTest {
     verifyNoInteractions(communicationChannelDispatcher, notificationPublisher);
   }
 
+  /**
+   * Opt-out vale em qualquer canal. Ate 2026-10-13 este teste fixava o contrario ("irrelevante para"
+   * Telegram"): quem tinha pedido para parar continuava recebendo lembrete pelo Telegram."
+   */
   @Test
-  void telegramNaoConsultaOptOutDeWhatsApp() {
+  void optOutTambemValeNoTelegram() {
     Agendamento appointment = agendamentoAmanha();
     TenantOperationalSettings settings = settings(appointment.getTenantId());
     settings.setD1ReminderEnabled(true);
@@ -418,7 +487,7 @@ class ReminderProcessingServiceTest {
     stubGateD1(appointment, settings);
 
     Cliente client = clienteComTelefone(appointment.getClientId(), appointment.getTenantId());
-    client.setWhatsappOptOut(true); // irrelevante para Telegram
+    client.setWhatsappOptOut(true);
     when(clienteRepository.findByIdAndTenantId(appointment.getClientId(), appointment.getTenantId()))
         .thenReturn(Optional.of(client));
     when(customerCommunicationChannelResolver.resolve(eq(appointment.getTenantId()), eq(client), any(String[].class)))
@@ -426,20 +495,9 @@ class ReminderProcessingServiceTest {
     TenantTelegramConfig telegramConfig = new TenantTelegramConfig();
     telegramConfig.setTelegramEnabled(true);
     when(tenantTelegramConfigRepository.findByTenantId(appointment.getTenantId())).thenReturn(telegramConfig);
-    when(communicationChannelDispatcher.sendText(any())).thenReturn(ChannelSendResult.sent("tg-1"));
 
-    assertThat(service.processAppointment(appointment.getId())).isEqualTo(1);
-
-    verify(notificationPublisher)
-        .publish(
-            eq(appointment.getTenantId()),
-            eq(appointment.getId()),
-            eq("TELEGRAM_REMINDER"),
-            eq("999888777"),
-            any(),
-            eq(StatusNotification.SENT),
-            eq((String) null),
-            any());
+    assertThat(service.processAppointment(appointment.getId())).isZero();
+    verifyNoInteractions(communicationChannelDispatcher, notificationPublisher);
   }
 
   // ============================================================

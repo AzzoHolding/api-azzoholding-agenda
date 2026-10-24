@@ -201,7 +201,7 @@ class MenuOverrideServiceTest {
 
     assertThatThrownBy(() -> service.aplicarOverridesEmLote(request))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Lista de overrides obrigatoria");
+        .hasMessage("Lista de overrides obrigatória");
   }
 
   @Test
@@ -217,7 +217,7 @@ class MenuOverrideServiceTest {
 
     assertThatThrownBy(() -> service.aplicarOverride(request))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("Tenant nao encontrado")
+        .hasMessage("Tenant não encontrado")
         .extracting(ex -> ((ApiClientErrorException) ex).getStatus())
         .isEqualTo(404);
   }
@@ -232,14 +232,14 @@ class MenuOverrideServiceTest {
 
     assertThatThrownBy(() -> service.aplicarOverride(request))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("tenantId invalido");
+        .hasMessage("tenantId inválido");
   }
 
   @Test
   void listarRotasPorRoleExigeRole() {
     assertThatThrownBy(() -> service.listarRotasPorRole(null, "TENANT", null))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Role obrigatoria");
+        .hasMessage("Role obrigatória");
   }
 
   @Test

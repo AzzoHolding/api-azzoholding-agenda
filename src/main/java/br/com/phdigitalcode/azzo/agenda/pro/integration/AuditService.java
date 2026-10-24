@@ -15,6 +15,10 @@ import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -25,6 +29,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import br.com.phdigitalcode.azzo.agenda.pro.entity.AuditEvent;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.AuditEventRepository;
+import br.com.phdigitalcode.azzo.agenda.pro.security.JwtPrincipal;
 import br.com.phdigitalcode.azzo.agenda.pro.security.RequestAuditContext;
 import br.com.phdigitalcode.azzo.agenda.pro.util.LogSanitizer;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -114,12 +119,106 @@ public class AuditService {
     return persist(command, AuditConstants.Status.DENIED);
   }
 
+  /**
+   * Tentativa barrada, gravada numa transacao PROPRIA.
+   *
+   * <p>Quem barra uma operacao lanca excecao, e a transacao dela faz rollback. Com o
+   * {@code recordDenied} comum o evento entraria na mesma transacao e sumiria junto — justamente a
+   * prova de que alguem tentou. {@code REQUIRES_NEW} faz o registro sobreviver.
+   */
+  @Transactional(propagation = Propagation.REQUIRES_NEW)
+  public AuditEvent recordDeniedIsolated(AuditEventCommand command) {
+    return persist(command, AuditConstants.Status.DENIED);
+  }
+
+  /**
+   * Sucesso "melhor esforco" de uma acao SEM tenant (admin de plataforma: planos, templates de
+   * e-mail), gravado numa transacao PROPRIA.
+   *
+   * <p>{@code audit_events.tenant_id} e {@code NOT NULL} (a tabela e por design um livro de
+   * tenant) e {@link #persist} recusa {@code tenantId == null} com {@link IllegalArgumentException}
+   * — inevitavel para uma acao de plataforma, que nao tem tenant. Os chamadores (ver
+   * {@code SystemAdminService.recordPlanAudit}) sempre envolveram essa chamada num
+   * {@code catch (Exception ignored)} com a intencao explicita de "auditoria nao deve quebrar o
+   * fluxo administrativo" — mas com {@code recordSuccess} comum (propagation REQUIRES, mesma
+   * transacao) essa excecao marcava a transacao INTEIRA como rollback-only antes de ser engolida:
+   * o {@code createPlan}/{@code saveEmailTemplate} retornava normalmente, mas o commit final
+   * lancava {@code UnexpectedRollbackException} e nada era persistido — silenciosamente, sem
+   * nenhuma mensagem util para quem chamou a API (achado em producao em 27/09/2026, ver
+   * {@code SystemAdminServiceCreatePlanIntegrationTest}). {@code REQUIRES_NEW} isola essa falha
+   * (que continua acontecendo — o evento em si nunca e gravado, por falta de tenant) na PROPRIA
+   * transacao, exatamente como {@link #recordDeniedIsolated} ja fazia para o caso de acesso
+   * negado, e deixa a acao administrativa de verdade seguir e comitar.
+   */
+  @Transactional(propagation = Propagation.REQUIRES_NEW)
+  public AuditEvent recordSuccessIsolated(AuditEventCommand command) {
+    return persist(command, AuditConstants.Status.SUCCESS);
+  }
+
+  /**
+   * As chaves que, num evento de {@code CLIENT}, sao dado pessoal do titular. A auditoria guarda o
+   * retrato do cliente a cada criacao/edicao/exclusao; quando ele e anonimizado, o valor dessas
+   * chaves sai de TODOS os eventos dele.
+   */
+  public static final Set<String> CHAVES_PESSOAIS_DO_CLIENTE =
+      Set.of(
+          "name", "email", "phone", "avatar", "birthDate", "notes", "zipCode", "street", "number",
+          "complement", "neighborhood", "city", "state", "cpfCnpj");
+
+  private static final String REDIGIDO = "[REDIGIDO]";
+
+  /**
+   * Redige o dado pessoal de TODOS os eventos de auditoria do cliente (troca o valor por
+   * {@code [REDIGIDO]}, mantem a chave) e marca {@code redacted_at}. Idempotente: so olha o que ainda
+   * nao foi redigido.
+   *
+   * <p>O evento fica (quem, quando, o que); so some o VALOR pessoal. O {@code event_hash} nao e
+   * recalculado — ver {@link AuditEvent#getRedactedAt()}. A excecao do gatilho append-only e ligada
+   * so nesta transacao. JSON invalido LANCA: engolir deixaria o dado pessoal no lugar e a
+   * anonimizacao diria que terminou.
+   *
+   * @return quantos eventos foram redigidos
+   */
+  @Transactional
+  public int redigirDadosPessoaisDoCliente(UUID tenantId, UUID clientId) {
+    if (tenantId == null || clientId == null) return 0;
+    List<AuditEvent> eventos =
+        auditEventRepository.findNaoRedigidosDaEntidade(tenantId, "CLIENT", clientId.toString());
+    if (eventos.isEmpty()) return 0;
+
+    auditEventRepository.habilitarRedacaoNestaTransacao();
+    Instant agora = Instant.now();
+    for (AuditEvent evento : eventos) {
+      evento.setBeforeJson(redigirChaves(evento.getBeforeJson()));
+      evento.setAfterJson(redigirChaves(evento.getAfterJson()));
+      evento.setMetadataJson(redigirChaves(evento.getMetadataJson()));
+      evento.setRedactedAt(agora);
+    }
+    auditEventRepository.saveAll(eventos);
+    return eventos.size();
+  }
+
+  private String redigirChaves(String json) {
+    if (json == null || json.isBlank()) return json;
+    try {
+      JsonNode raiz = objectMapper.readTree(json);
+      if (!(raiz instanceof ObjectNode objeto)) return json;
+      for (String chave : CHAVES_PESSOAIS_DO_CLIENTE) {
+        JsonNode valor = objeto.get(chave);
+        if (valor != null && !valor.isNull()) objeto.put(chave, REDIGIDO);
+      }
+      return objectMapper.writeValueAsString(objeto);
+    } catch (Exception e) {
+      throw new IllegalStateException("Não foi possível redigir o evento de auditoria", e);
+    }
+  }
+
   private AuditEvent persist(AuditEventCommand command, String status) {
     Timer.Sample sample = meterRegistry != null ? Timer.start(meterRegistry) : null;
-    if (command == null) throw new IllegalArgumentException("AuditEventCommand obrigatorio");
-    if (command.tenantId == null) throw new IllegalArgumentException("tenantId obrigatorio");
-    if (command.action == null || command.action.isBlank()) throw new IllegalArgumentException("action obrigatoria");
-    if (command.module == null || command.module.isBlank()) throw new IllegalArgumentException("module obrigatorio");
+    if (command == null) throw new IllegalArgumentException("AuditEventCommand obrigatório");
+    if (command.tenantId == null) throw new IllegalArgumentException("tenantId obrigatório");
+    if (command.action == null || command.action.isBlank()) throw new IllegalArgumentException("action obrigatória");
+    if (command.module == null || command.module.isBlank()) throw new IllegalArgumentException("module obrigatório");
 
     enrichWithRequestContext(command);
     String requestId = requestIdOrGenerated(command.requestId);
@@ -361,6 +460,7 @@ public class AuditService {
   }
 
   private void enrichWithRequestContext(AuditEventCommand command) {
+    enrichWithAuthenticatedActor(command);
     if (requestAuditContext == null) return;
     RequestAuditContext context;
     try {
@@ -380,6 +480,37 @@ public class AuditService {
     }
     if ((command.userAgent == null || command.userAgent.isBlank()) && context.getUserAgent() != null) {
       command.userAgent = context.getUserAgent();
+    }
+  }
+
+  /**
+   * QUEM fez, quando o chamador nao disse.
+   *
+   * <p>Ate 2026-09-16 os eventos de comanda, lancamento financeiro e fechamento de caixa eram
+   * gravados SEM ator: nenhum desses pontos preenchia {@code actorUserId}, e a trilha dizia o que
+   * mudou no dinheiro mas nao quem mudou — o que tira dela o valor de prova. O usuario autenticado
+   * da requisicao passa a ser o ator sempre que o evento nao trouxer um. Fora de requisicao
+   * (scheduler, webhook) nao ha autenticacao, e o evento segue sem ator, como antes.
+   */
+  private void enrichWithAuthenticatedActor(AuditEventCommand command) {
+    try {
+      Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+      if (authentication == null) return;
+      if (command.actorUserId == null
+          && authentication.getPrincipal() instanceof JwtPrincipal principal) {
+        command.actorUserId = principal.userId();
+      }
+      if (command.actorRole == null || command.actorRole.isBlank()) {
+        command.actorRole =
+            authentication.getAuthorities().stream()
+                .map(GrantedAuthority::getAuthority)
+                .filter(authority -> authority.startsWith("ROLE_"))
+                .map(authority -> authority.substring("ROLE_".length()))
+                .findFirst()
+                .orElse(null);
+      }
+    } catch (Exception ignored) {
+      // Sem contexto de seguranca: o evento segue como veio.
     }
   }
 

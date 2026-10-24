@@ -4,9 +4,13 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -14,7 +18,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import br.com.phdigitalcode.azzo.agenda.pro.dto.ComandaDtos;
+import br.com.phdigitalcode.azzo.agenda.pro.entity.Agendamento;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.AppointmentDeposit;
+import br.com.phdigitalcode.azzo.agenda.pro.entity.ClientMembership;
+import br.com.phdigitalcode.azzo.agenda.pro.entity.ClientMembershipBalance;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.ClientPackageBalance;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.ClientPackagePurchase;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.Cliente;
@@ -22,6 +29,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.entity.Comanda;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.ComandaItem;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.ComandaPagamento;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.ItemEstoque;
+import br.com.phdigitalcode.azzo.agenda.pro.entity.Profissional;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.MovimentacaoEstoque;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.ServicePackage;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.ServicePackageItem;
@@ -34,8 +42,14 @@ import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.TipoMovimentacaoEstoque
 import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.TipoTransacao;
 import br.com.phdigitalcode.azzo.agenda.pro.exception.ApiClientErrorException;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.AsaasClient;
+import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditConstants;
+import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditEventCommand;
+import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditService;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.TenantAsaasChargeService;
+import br.com.phdigitalcode.azzo.agenda.pro.repository.AgendamentoRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.AppointmentDepositRepository;
+import br.com.phdigitalcode.azzo.agenda.pro.repository.ClientMembershipBalanceRepository;
+import br.com.phdigitalcode.azzo.agenda.pro.repository.ClientMembershipRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.ClientPackageBalanceRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.ClientPackagePurchaseRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.ClienteRepository;
@@ -49,6 +63,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.repository.ServicePackageItemReposit
 import br.com.phdigitalcode.azzo.agenda.pro.repository.ServicePackageRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.ServicoRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.TenantLoyaltySettingsRepository;
+import br.com.phdigitalcode.azzo.agenda.pro.repository.TenantOperationalSettingsRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.TransacaoRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.TransactionCategoryRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.security.AuthenticatedUser;
@@ -98,6 +113,13 @@ public class ServicoComanda {
   private final ClientPackageBalanceRepository clientPackageBalanceRepository;
   private final TenantLoyaltySettingsRepository tenantLoyaltySettingsRepository;
   private final MovimentacaoEstoqueRepository movimentacaoEstoqueRepository;
+  private final TenantOperationalSettingsRepository tenantOperationalSettingsRepository;
+  private final AgendamentoRepository agendamentoRepository;
+  private final TravaFinanceira travaFinanceira;
+  private final ClientMembershipRepository clientMembershipRepository;
+  private final ClientMembershipBalanceRepository clientMembershipBalanceRepository;
+
+  private final AuditService auditService;
 
   public ServicoComanda(
       ContextoTenant contextoTenant,
@@ -121,7 +143,13 @@ public class ServicoComanda {
       ClientPackagePurchaseRepository clientPackagePurchaseRepository,
       ClientPackageBalanceRepository clientPackageBalanceRepository,
       TenantLoyaltySettingsRepository tenantLoyaltySettingsRepository,
-      MovimentacaoEstoqueRepository movimentacaoEstoqueRepository) {
+      MovimentacaoEstoqueRepository movimentacaoEstoqueRepository,
+      TenantOperationalSettingsRepository tenantOperationalSettingsRepository,
+      AgendamentoRepository agendamentoRepository,
+      AuditService auditService,
+      TravaFinanceira travaFinanceira,
+      ClientMembershipRepository clientMembershipRepository,
+      ClientMembershipBalanceRepository clientMembershipBalanceRepository) {
     this.contextoTenant = contextoTenant;
     this.authenticatedUser = authenticatedUser;
     this.comandaRepository = comandaRepository;
@@ -144,20 +172,87 @@ public class ServicoComanda {
     this.clientPackageBalanceRepository = clientPackageBalanceRepository;
     this.tenantLoyaltySettingsRepository = tenantLoyaltySettingsRepository;
     this.movimentacaoEstoqueRepository = movimentacaoEstoqueRepository;
+    this.tenantOperationalSettingsRepository = tenantOperationalSettingsRepository;
+    this.agendamentoRepository = agendamentoRepository;
+    this.auditService = auditService;
+    this.travaFinanceira = travaFinanceira;
+    this.clientMembershipRepository = clientMembershipRepository;
+    this.clientMembershipBalanceRepository = clientMembershipBalanceRepository;
   }
 
   @Transactional
   public ComandaDtos.ComandaResponse abrir(ComandaDtos.AbrirComandaRequest request) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
 
+    UUID appointmentId = parseUuidOrNull(request != null ? request.appointmentId : null);
+    UUID clientId = parseUuidOrNull(request != null ? request.clientId : null);
+
+    // Agendamento e cliente precisam ser DESTE salao. Antes nada era conferido: outro salao abria
+    // uma comanda com o id de um agendamento daqui e, ao pagar com "credito de sinal", consumia o
+    // sinal que o nosso cliente pagou; ao fechar, creditava pontos de fidelidade no nosso cliente
+    // (teste de isolamento de 2026-09-18).
+    if (appointmentId != null) {
+      Agendamento agendamento =
+          agendamentoRepository
+              .findByIdAndTenantId(appointmentId, tenantId)
+              .orElseThrow(() -> new IllegalArgumentException("Agendamento não encontrado."));
+      if (clientId == null) {
+        clientId = agendamento.getClientId();
+      } else if (!clientId.equals(agendamento.getClientId())) {
+        throw new IllegalArgumentException(
+            "O cliente da comanda precisa ser o mesmo do agendamento.");
+      }
+      // Um atendimento, uma cobranca: a segunda comanda para o mesmo agendamento cobrava o
+      // cliente de novo. Depois de estornada ou cancelada, pode abrir outra.
+      for (Comanda existente :
+          comandaRepository.findByAppointmentIdAndTenantId(appointmentId, tenantId)) {
+        if (Comanda.STATUS_ABERTA.equals(existente.getStatus())) {
+          throw new IllegalArgumentException(
+              "Este agendamento já tem uma comanda aberta: continue nela.");
+        }
+        if (Comanda.STATUS_FECHADA.equals(existente.getStatus())) {
+          throw new IllegalArgumentException(
+              "Este agendamento já foi cobrado. Para cobrar de novo, o dono estorna a comanda.");
+        }
+      }
+    }
+    if (clientId != null && clienteRepository.findByIdAndTenantId(clientId, tenantId).isEmpty()) {
+      throw new IllegalArgumentException("Cliente não encontrado.");
+    }
+
     Comanda comanda = new Comanda();
     comanda.setTenantId(tenantId);
-    comanda.setAppointmentId(parseUuidOrNull(request != null ? request.appointmentId : null));
-    comanda.setClientId(parseUuidOrNull(request != null ? request.clientId : null));
+    comanda.setAppointmentId(appointmentId);
+    comanda.setClientId(clientId);
     comanda.setAbertaPor(obterUsuarioId());
-    comandaRepository.save(comanda);
+    try {
+      comandaRepository.save(comanda);
+      comandaRepository.flush();
+    } catch (DataIntegrityViolationException erro) {
+      // A checagem acima e feita em Java e duas requisicoes simultaneas passavam as duas (BNC-001).
+      // O indice unico da V144 e quem decide; aqui so se traduz a recusa dele.
+      if (violouIndice(erro, INDICE_COMANDA_ATIVA_UNICA)) {
+        throw new IllegalArgumentException(
+            "Este agendamento já tem uma comanda aberta ou cobrada: continue nela.");
+      }
+      throw erro;
+    }
 
     return toResponse(comanda, List.of(), List.of());
+  }
+
+  /** V144: no maximo uma comanda ABERTA ou FECHADA por agendamento. */
+  static final String INDICE_COMANDA_ATIVA_UNICA = "uq_comandas_agendamento_ativa";
+  /** V144: o mesmo sinal nao entra em dois pagamentos nao estornados. */
+  static final String INDICE_SINAL_UNICO = "uq_comanda_pagamentos_sinal";
+
+  /** A violacao e DESTE indice (e nao de outra constraint qualquer)? */
+  static boolean violouIndice(DataIntegrityViolationException erro, String indice) {
+    for (Throwable causa = erro; causa != null; causa = causa.getCause()) {
+      if (causa.getMessage() != null && causa.getMessage().contains(indice)) return true;
+      if (causa.getCause() == causa) break;
+    }
+    return false;
   }
 
   @Transactional(readOnly = true)
@@ -165,11 +260,23 @@ public class ServicoComanda {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     int pageSize = size > 0 ? size : 20;
     Pageable pageable = PageRequest.of(Math.max(page, 0), pageSize);
-    Page<Comanda> pagina =
-        (status != null && !status.isBlank())
-            ? comandaRepository.findByTenantIdAndStatusOrderByOpenedAtDesc(
-                tenantId, status, pageable)
-            : comandaRepository.findByTenantIdOrderByOpenedAtDesc(tenantId, pageable);
+    String statusFiltrado = (status != null && !status.isBlank()) ? status : null;
+    UUID profissionalId = profissionalDoUsuarioLogado(tenantId);
+
+    Page<Comanda> pagina;
+    if (profissionalId != null) {
+      // Profissional ve so as comandas dele — as que abriu, as com item dele e as do
+      // agendamento dele.
+      pagina =
+          comandaRepository.listarDoProfissional(
+              tenantId, statusFiltrado, obterUsuarioId(), profissionalId, pageable);
+    } else if (statusFiltrado != null) {
+      pagina =
+          comandaRepository.findByTenantIdAndStatusOrderByOpenedAtDesc(
+              tenantId, statusFiltrado, pageable);
+    } else {
+      pagina = comandaRepository.findByTenantIdOrderByOpenedAtDesc(tenantId, pageable);
+    }
 
     ComandaDtos.ComandaPageResponse response = new ComandaDtos.ComandaPageResponse();
     response.totalElements = pagina.getTotalElements();
@@ -192,6 +299,7 @@ public class ServicoComanda {
   public ComandaDtos.ComandaResponse obter(UUID id) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Comanda comanda = buscarOuFalhar(id, tenantId);
+    exigirComandaDoProfissional(tenantId, comanda);
     return toResponse(
         comanda,
         comandaItemRepository.findByComandaIdOrderByCreatedAt(comanda.getId()),
@@ -201,8 +309,28 @@ public class ServicoComanda {
   @Transactional
   public ComandaDtos.ComandaResponse adicionarItem(
       UUID id, ComandaDtos.AdicionarItemRequest request) {
+    return adicionarItem(id, request, false);
+  }
+
+  /**
+   * Lanca o item com o preco que vem no pedido, e nao o de tabela.
+   *
+   * <b>So para o fluxo interno</b> da comanda automatica do agendamento ({@code
+   * ServicoAgendamentos.criarComandaComItens}): ali o preco e o que foi ACORDADO com o cliente
+   * naquele atendimento, que pode ser anterior a uma mudanca de tabela. Nao existe rota HTTP para
+   * isto de proposito.
+   */
+  @Transactional
+  public ComandaDtos.ComandaResponse adicionarItemDoAgendamento(
+      UUID id, ComandaDtos.AdicionarItemRequest request) {
+    return adicionarItem(id, request, true);
+  }
+
+  private ComandaDtos.ComandaResponse adicionarItem(
+      UUID id, ComandaDtos.AdicionarItemRequest request, boolean precoDoAgendamento) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Comanda comanda = buscarOuFalhar(id, tenantId);
+    exigirComandaDoProfissional(tenantId, comanda);
     exigirAberta(comanda);
 
     if (ComandaItem.TIPO_PACOTE.equals(request.tipo) && comanda.getClientId() == null) {
@@ -214,34 +342,70 @@ public class ServicoComanda {
     UUID professionalId = parseUuidOrNull(request.professionalId);
     if (professionalId != null
         && profissionalRepository.findByIdAndTenantId(professionalId, tenantId).isEmpty()) {
-      throw new IllegalArgumentException("Profissional nao encontrado.");
+      throw new IllegalArgumentException("Profissional não encontrado.");
     }
+
+    exigirConfirmacaoDeDuplicado(comanda, request, referenciaId);
 
     ComandaItem item = new ComandaItem();
     item.setTenantId(tenantId);
     item.setComandaId(comanda.getId());
     item.setTipo(request.tipo);
     item.setReferenciaId(referenciaId);
+    item.setOrigem(
+        precoDoAgendamento ? ComandaItem.ORIGEM_AGENDAMENTO : ComandaItem.ORIGEM_MANUAL);
     item.setProfessionalId(professionalId);
     item.setQuantidade(request.quantidade != null ? request.quantidade : BigDecimal.ONE);
 
     if (ComandaItem.TIPO_SERVICO.equals(request.tipo)) {
+      // Servico e por atendimento: "1,5 corte" foi aceito no teste ponta a ponta de 21/10/2026
+      // (R$ 75,75). Mesma regra do pacote.
+      if (item.getQuantidade().compareTo(BigDecimal.ONE) < 0
+          || item.getQuantidade().stripTrailingZeros().scale() > 0) {
+        throw new IllegalArgumentException(
+            "A quantidade de um serviço precisa ser um número inteiro, de 1 em diante.");
+      }
       Servico servico =
           servicoRepository
               .findByIdAndTenantId(referenciaId, tenantId)
-              .orElseThrow(() -> new ApiClientErrorException("Servico nao encontrado.", 404));
+              .orElseThrow(() -> new ApiClientErrorException("Serviço não encontrado.", 404));
       item.setDescricao(servico.getName());
+      // ⚠️ O preco do SERVICO e o do CATALOGO. Aceitar `precoUnitario` de quem chama permitia
+      // lancar um servico de R$ 120 por R$ 1 — e isso NAO aparecia como desconto em relatorio
+      // nenhum (achado do teste de ponta a ponta de 2026-09-16). O preco do pedido so vale no
+      // fluxo interno do agendamento, onde ele e o valor acordado com o cliente.
       item.setPrecoUnitario(
-          request.precoUnitario != null ? request.precoUnitario : servico.getPrice());
+          precoDoAgendamento && request.precoUnitario != null
+              ? request.precoUnitario
+              : servico.getPrice());
     } else if (ComandaItem.TIPO_PRODUTO.equals(request.tipo)) {
       ItemEstoque produto =
           itemEstoqueRepository
               .findByIdAndTenantId(referenciaId, tenantId)
               .orElseThrow(
-                  () -> new ApiClientErrorException("Produto nao encontrado no estoque.", 404));
+                  () -> new ApiClientErrorException("Produto não encontrado no estoque.", 404));
       if (request.precoUnitario == null) {
         throw new IllegalArgumentException(
-            "Preco de venda e obrigatorio para item do tipo PRODUTO.");
+            "Preço de venda é obrigatório para item do tipo PRODUTO.");
+      }
+      // Produto por R$ 0,00 seria brinde sem registro de brinde: sai do estoque e nao entra no caixa.
+      if (NumericUtil.isZeroOrNegative(request.precoUnitario)) {
+        throw new IllegalArgumentException("Preço de venda do produto precisa ser maior que zero.");
+      }
+      // Sem estoque (com o bloqueio de saida ligado), recusa AGORA — e nao so ao fechar, depois de o
+      // cliente pagar (M5). Conta tambem o que a comanda ja tem desse produto.
+      BigDecimal quantidadeNaComanda =
+          comandaItemRepository.findByComandaIdOrderByCreatedAt(comanda.getId()).stream()
+              .filter(
+                  existente ->
+                      ComandaItem.TIPO_PRODUTO.equals(existente.getTipo())
+                          && referenciaId.equals(existente.getReferenciaId()))
+              .map(ComandaItem::getQuantidade)
+              .reduce(item.getQuantidade(), NumericUtil::add);
+      if (estoqueMovimentacaoService.faltaSaldoParaVender(tenantId, referenciaId, quantidadeNaComanda)) {
+        throw new IllegalArgumentException(
+            "Sem estoque de " + produto.getNome() + " para esta venda (saldo "
+                + NumericUtil.normalize(produto.getSaldoAtual()) + ").");
       }
       item.setDescricao(produto.getNome());
       item.setPrecoUnitario(request.precoUnitario);
@@ -249,10 +413,21 @@ public class ServicoComanda {
       ServicePackage pacote =
           servicePackageRepository
               .findByIdAndTenantId(referenciaId, tenantId)
-              .orElseThrow(() -> new ApiClientErrorException("Pacote nao encontrado.", 404));
+              .orElseThrow(() -> new ApiClientErrorException("Pacote não encontrado.", 404));
+      // Pacote vende por inteiro: 0,5 ou 0,001 pacote nao existe, e o saldo de sessoes sobe com
+      // CEILING (criarSaldoDePacoteVendido) — 0,001 pacote por centavos entregava o pacote todo.
+      if (item.getQuantidade().compareTo(BigDecimal.ONE) < 0
+          || item.getQuantidade().stripTrailingZeros().scale() > 0) {
+        throw new IllegalArgumentException(
+            "A quantidade de um pacote precisa ser um número inteiro, de 1 em diante.");
+      }
       item.setDescricao(pacote.getNome());
-      item.setPrecoUnitario(
-          request.precoUnitario != null ? request.precoUnitario : pacote.getPreco());
+      // ⚠️ O preco do PACOTE e o do CATALOGO, sempre (achado FIN-002, auditoria de 2026-10-06).
+      // Aceitar `precoUnitario` de quem chama permitia vender um pacote de 10 sessoes por R$ 0,01 e
+      // ainda assim receber o saldo inteiro — o mesmo furo que o SERVICO tinha (16/09). Diferente do
+      // SERVICO, nao ha "valor acordado do agendamento" para pacote, entao nem o fluxo interno aceita
+      // preco de fora. Desconto em pacote entra pelo desconto da comanda, que respeita o teto.
+      item.setPrecoUnitario(pacote.getPreco());
     }
 
     item.setTotal(
@@ -263,6 +438,7 @@ public class ServicoComanda {
     comandaItemRepository.flush();
 
     recalcular(comanda);
+    auditar(tenantId, "POS_ITEM_ADD", comanda, null, dadosDoItem(item));
     return obter(id);
   }
 
@@ -270,18 +446,424 @@ public class ServicoComanda {
   public ComandaDtos.ComandaResponse removerItem(UUID id, UUID itemId) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Comanda comanda = buscarOuFalhar(id, tenantId);
+    exigirComandaDoProfissional(tenantId, comanda);
     exigirAberta(comanda);
 
     ComandaItem item =
         comandaItemRepository
             .findByIdAndComandaId(itemId, comanda.getId())
             .orElseThrow(
-                () -> new ApiClientErrorException("Item nao encontrado na comanda.", 404));
+                () -> new ApiClientErrorException("Item não encontrado na comanda.", 404));
+    Map<String, Object> antes = dadosDoItem(item);
+    exigirQueRemoverNaoEstoureOTetoDeDesconto(tenantId, comanda, item);
     comandaItemRepository.delete(item);
     comandaItemRepository.flush();
 
     recalcular(comanda);
+    auditar(tenantId, "POS_ITEM_REMOVE", comanda, antes, null);
     return obter(id);
+  }
+
+  /**
+   * Tirar um item NAO pode furar o teto de desconto da equipe (achado FIN-001, auditoria de
+   * 2026-10-06).
+   *
+   * <p>O desconto e guardado em VALOR (o percentual so e conferido ao aplicar). Com teto de 10%, a
+   * equipe lancava um produto caro, aplicava 10% (um valor alto), tirava o produto, e o mesmo valor
+   * ficava contra uma conta bem menor: ate 100% de desconto, sem o dono.
+   *
+   * <p>Aqui se confere, ANTES de apagar, o percentual que o desconto ja dado passaria a ter: se
+   * fica acima do teto E acima do que era, recusa e registra a tentativa. O dono nao tem teto. O
+   * caminho de volta existe: zerar o desconto (0%), tirar o item e aplicar de novo — dentro do
+   * teto.
+   */
+  private void exigirQueRemoverNaoEstoureOTetoDeDesconto(
+      UUID tenantId, Comanda comanda, ComandaItem removido) {
+    BigDecimal desconto = comanda.getDesconto();
+    if (desconto == null || desconto.signum() <= 0) return;
+    if (authenticatedUser.temRole("OWNER")) return;
+
+    int teto = tenantOperationalSettingsRepository.findByTenantIdOrCreate(tenantId)
+        .getPosMaxDiscountPercent();
+    if (teto >= 100) return;
+
+    List<ComandaItem> itens = comandaItemRepository.findByComandaIdOrderByCreatedAt(comanda.getId());
+    BigDecimal subtotalAntes = somarItens(itens);
+    BigDecimal subtotalDepois =
+        somarItens(itens.stream().filter(i -> !Objects.equals(i.getId(), removido.getId())).toList());
+    // Sem itens, nao ha desconto que sobre: recalcular() o zera.
+    if (subtotalDepois.signum() <= 0 || subtotalAntes.signum() <= 0) return;
+
+    BigDecimal percentualAntes = percentualDoDesconto(desconto, subtotalAntes);
+    // recalcular() nunca deixa o desconto passar do subtotal.
+    BigDecimal percentualDepois = percentualDoDesconto(desconto.min(subtotalDepois), subtotalDepois);
+    if (percentualDepois.compareTo(new BigDecimal(teto)) <= 0
+        || percentualDepois.compareTo(percentualAntes) <= 0) {
+      return;
+    }
+
+    String mensagem =
+        "Tirar este item deixaria o desconto em " + percentualDepois.stripTrailingZeros().toPlainString()
+            + "% da conta, acima do maximo de " + teto + "% sem o dono. Zere o desconto, tire o item e"
+            + " aplique de novo (ate " + teto + "%), ou chame o dono.";
+    travaFinanceira.registrarTentativaBloqueada(
+        tenantId, "POS_ITEM_REMOVE", "COMANDA", comanda.getId().toString(),
+        Map.of("percentualDepois", percentualDepois, "teto", teto), mensagem);
+    throw new IllegalArgumentException(mensagem);
+  }
+
+  private static BigDecimal percentualDoDesconto(BigDecimal desconto, BigDecimal base) {
+    return desconto.multiply(new BigDecimal("100")).divide(base, 2, RoundingMode.HALF_UP);
+  }
+
+  // ─── Cobertura por pacote ou assinatura (V134) ────────────────────────────
+
+  /**
+   * Os saldos do cliente que podem cobrir o servico deste item.
+   *
+   * <p>Decisao do usuario (2026-09-17): a RECEPCAO escolhe se o servico sai do pacote ou da
+   * assinatura — o sistema nao abate sozinho. Antes disso, nenhum atendimento descontava sessao
+   * (analise de 2026-09-16, A5): pacote vendido e cobrado, saldo que nunca descia.
+   */
+  @Transactional(readOnly = true)
+  public List<ComandaDtos.OpcaoDeCoberturaResponse> opcoesDeCobertura(UUID id, UUID itemId) {
+    UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    Comanda comanda = buscarOuFalhar(id, tenantId);
+    exigirComandaDoProfissional(tenantId, comanda);
+    ComandaItem item = buscarItemOuFalhar(comanda, itemId);
+    if (!ComandaItem.TIPO_SERVICO.equals(item.getTipo()) || comanda.getClientId() == null) {
+      return List.of();
+    }
+
+    List<ComandaDtos.OpcaoDeCoberturaResponse> opcoes = new ArrayList<>();
+    for (ClientPackagePurchase compra :
+        clientPackagePurchaseRepository.findByTenantIdAndClientIdOrderByCreatedAtDesc(
+            tenantId, comanda.getClientId())) {
+      for (ClientPackageBalance saldo : clientPackageBalanceRepository.findByPurchaseId(compra.getId())) {
+        int disponiveis = saldo.getSessoesTotais() - saldo.getSessoesUsadas();
+        if (!item.getReferenciaId().equals(saldo.getServiceId()) || disponiveis <= 0) continue;
+        ComandaDtos.OpcaoDeCoberturaResponse opcao = new ComandaDtos.OpcaoDeCoberturaResponse();
+        opcao.tipo = ComandaItem.COBERTURA_PACOTE;
+        opcao.saldoId = saldo.getId().toString();
+        opcao.nome = compra.getPackageNome();
+        opcao.disponiveis = disponiveis;
+        opcao.valorDaSessao = valorDaSessaoDoPacote(compra);
+        opcoes.add(opcao);
+      }
+    }
+    for (ClientMembership assinatura :
+        clientMembershipRepository.findByTenantIdAndClientIdOrderByCreatedAtDesc(
+            tenantId, comanda.getClientId())) {
+      if (!assinaturaValeAgora(assinatura)) continue;
+      for (ClientMembershipBalance saldo :
+          clientMembershipBalanceRepository.findByMembershipId(assinatura.getId())) {
+        int disponiveis = saldo.getQuantidadeMensal() - saldo.getUsadasNoPeriodo();
+        if (!item.getReferenciaId().equals(saldo.getServiceId()) || disponiveis <= 0) continue;
+        ComandaDtos.OpcaoDeCoberturaResponse opcao = new ComandaDtos.OpcaoDeCoberturaResponse();
+        opcao.tipo = ComandaItem.COBERTURA_ASSINATURA;
+        opcao.saldoId = saldo.getId().toString();
+        opcao.nome = assinatura.getPlanNome();
+        opcao.disponiveis = disponiveis;
+        opcao.valorDaSessao = valorDaSessaoDaAssinatura(assinatura);
+        opcoes.add(opcao);
+      }
+    }
+    return opcoes;
+  }
+
+  /**
+   * Cobre o servico com o saldo escolhido: o item sai da conta (preco zero) e guarda de onde a
+   * sessao vai sair. A sessao so e DESCONTADA quando a comanda fechar.
+   */
+  @Transactional
+  public ComandaDtos.ComandaResponse aplicarCobertura(
+      UUID id, UUID itemId, ComandaDtos.AplicarCoberturaRequest request) {
+    UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    Comanda comanda = buscarOuFalhar(id, tenantId);
+    exigirComandaDoProfissional(tenantId, comanda);
+    exigirAberta(comanda);
+    ComandaItem item = buscarItemOuFalhar(comanda, itemId);
+    Map<String, Object> antes = dadosDoItem(item);
+
+    if (!ComandaItem.TIPO_SERVICO.equals(item.getTipo())) {
+      throw new IllegalArgumentException("So serviço pode sair de pacote ou assinatura.");
+    }
+    if (comanda.getClientId() == null) {
+      throw new IllegalArgumentException(
+          "Comanda sem cliente não usa pacote nem assinatura: identifique o cliente primeiro.");
+    }
+    if (item.getCoberturaTipo() != null) {
+      throw new IllegalArgumentException("Este serviço já esta coberto. Retire a cobertura antes.");
+    }
+
+    UUID saldoId = parseUuidOrThrow(request.saldoId, "saldoId invalido.");
+    item.setCoberturaTipo(request.tipo);
+    item.setCoberturaSaldoId(saldoId);
+    int sessoes = sessoesDoItem(item);
+    item.setValorCobertura(
+        valorDaSessaoDoSaldo(tenantId, comanda, item).multiply(BigDecimal.valueOf(sessoes)));
+    exigirSaldoDaCobertura(tenantId, comanda, item);
+
+    item.setPrecoAntesCobertura(item.getPrecoUnitario());
+    item.setPrecoUnitario(BigDecimal.ZERO);
+    item.setTotal(BigDecimal.ZERO);
+    comandaItemRepository.saveAndFlush(item);
+    recalcular(comanda);
+
+    auditar(tenantId, "POS_COVERAGE_APPLY", comanda, antes, dadosDoItem(item));
+    return obter(id);
+  }
+
+  @Transactional
+  public ComandaDtos.ComandaResponse removerCobertura(UUID id, UUID itemId) {
+    UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    Comanda comanda = buscarOuFalhar(id, tenantId);
+    exigirComandaDoProfissional(tenantId, comanda);
+    exigirAberta(comanda);
+    ComandaItem item = buscarItemOuFalhar(comanda, itemId);
+    if (item.getCoberturaTipo() == null) return obter(id);
+    Map<String, Object> antes = dadosDoItem(item);
+
+    BigDecimal preco =
+        item.getPrecoAntesCobertura() != null ? item.getPrecoAntesCobertura() : BigDecimal.ZERO;
+    item.setPrecoUnitario(preco);
+    item.setTotal(preco.multiply(item.getQuantidade()).setScale(2, RoundingMode.HALF_UP));
+    item.setCoberturaTipo(null);
+    item.setCoberturaSaldoId(null);
+    item.setValorCobertura(null);
+    item.setPrecoAntesCobertura(null);
+    comandaItemRepository.saveAndFlush(item);
+    recalcular(comanda);
+
+    auditar(tenantId, "POS_COVERAGE_REMOVE", comanda, antes, dadosDoItem(item));
+    return obter(id);
+  }
+
+  private ComandaItem buscarItemOuFalhar(Comanda comanda, UUID itemId) {
+    return comandaItemRepository
+        .findByIdAndComandaId(itemId, comanda.getId())
+        .orElseThrow(() -> new ApiClientErrorException("Item não encontrado na comanda.", 404));
+  }
+
+  /** Sessao e unidade inteira: 1,5 corte nao sai de pacote nenhum. */
+  private int sessoesDoItem(ComandaItem item) {
+    BigDecimal quantidade = item.getQuantidade() != null ? item.getQuantidade() : BigDecimal.ONE;
+    if (quantidade.signum() <= 0 || quantidade.stripTrailingZeros().scale() > 0) {
+      throw new IllegalArgumentException(
+          "So quantidade inteira de sessoes sai de pacote ou assinatura.");
+    }
+    return quantidade.intValueExact();
+  }
+
+  /**
+   * O saldo escolhido e do cliente da comanda, do mesmo servico, esta valendo e tem sessoes para o
+   * item? Usado ao escolher e de novo ao fechar.
+   */
+  private void exigirSaldoDaCobertura(UUID tenantId, Comanda comanda, ComandaItem item) {
+    int sessoes = sessoesDoItem(item);
+    if (ComandaItem.COBERTURA_PACOTE.equals(item.getCoberturaTipo())) {
+      ClientPackageBalance saldo = saldoDePacoteDoCliente(tenantId, comanda, item);
+      if (saldo.getSessoesTotais() - saldo.getSessoesUsadas() < sessoes) {
+        throw new IllegalArgumentException(
+            "O pacote não tem mais sessoes de " + saldo.getServiceNome() + " para este serviço.");
+      }
+    } else if (ComandaItem.COBERTURA_ASSINATURA.equals(item.getCoberturaTipo())) {
+      ClientMembershipBalance saldo = saldoDeAssinaturaDoCliente(tenantId, comanda, item);
+      if (saldo.getQuantidadeMensal() - saldo.getUsadasNoPeriodo() < sessoes) {
+        throw new IllegalArgumentException(
+            "A assinatura já usou todas as sessoes de " + saldo.getServiceNome() + " deste período.");
+      }
+    } else {
+      throw new IllegalArgumentException("Tipo de cobertura inválido.");
+    }
+  }
+
+  private ClientPackageBalance saldoDePacoteDoCliente(UUID tenantId, Comanda comanda, ComandaItem item) {
+    ClientPackageBalance saldo =
+        clientPackageBalanceRepository
+            .findById(item.getCoberturaSaldoId())
+            .filter(s -> tenantId.equals(s.getTenantId()))
+            .orElseThrow(() -> new IllegalArgumentException("Saldo de pacote não encontrado."));
+    ClientPackagePurchase compra =
+        clientPackagePurchaseRepository
+            .findById(saldo.getPurchaseId())
+            .orElseThrow(() -> new IllegalArgumentException("Saldo de pacote não encontrado."));
+    if (!comanda.getClientId().equals(compra.getClientId())
+        || !item.getReferenciaId().equals(saldo.getServiceId())) {
+      throw new IllegalArgumentException("Este pacote não é do cliente da comanda ou não cobre este serviço.");
+    }
+    return saldo;
+  }
+
+  private ClientMembershipBalance saldoDeAssinaturaDoCliente(
+      UUID tenantId, Comanda comanda, ComandaItem item) {
+    ClientMembershipBalance saldo =
+        clientMembershipBalanceRepository
+            .findById(item.getCoberturaSaldoId())
+            .filter(s -> tenantId.equals(s.getTenantId()))
+            .orElseThrow(() -> new IllegalArgumentException("Saldo de assinatura não encontrado."));
+    ClientMembership assinatura =
+        clientMembershipRepository
+            .findByIdAndTenantId(saldo.getMembershipId(), tenantId)
+            .orElseThrow(() -> new IllegalArgumentException("Saldo de assinatura não encontrado."));
+    if (!comanda.getClientId().equals(assinatura.getClientId())
+        || !item.getReferenciaId().equals(saldo.getServiceId())) {
+      throw new IllegalArgumentException(
+          "Esta assinatura não é do cliente da comanda ou não cobre este serviço.");
+    }
+    if (!assinaturaValeAgora(assinatura)) {
+      throw new IllegalArgumentException("A assinatura do cliente não esta valendo agora.");
+    }
+    return saldo;
+  }
+
+  /** So assinatura ATIVA e dentro do periodo pago cobre servico. */
+  private boolean assinaturaValeAgora(ClientMembership assinatura) {
+    if (!ClientMembership.STATUS_ATIVA.equals(assinatura.getStatus())) return false;
+    Instant agora = Instant.now();
+    if (assinatura.getPeriodStart() != null && agora.isBefore(assinatura.getPeriodStart())) return false;
+    return assinatura.getPeriodEnd() == null || !agora.isAfter(assinatura.getPeriodEnd());
+  }
+
+  private BigDecimal valorDaSessaoDoSaldo(UUID tenantId, Comanda comanda, ComandaItem item) {
+    if (ComandaItem.COBERTURA_PACOTE.equals(item.getCoberturaTipo())) {
+      ClientPackageBalance saldo = saldoDePacoteDoCliente(tenantId, comanda, item);
+      return clientPackagePurchaseRepository
+          .findById(saldo.getPurchaseId())
+          .map(this::valorDaSessaoDoPacote)
+          .orElse(BigDecimal.ZERO);
+    }
+    if (ComandaItem.COBERTURA_ASSINATURA.equals(item.getCoberturaTipo())) {
+      ClientMembershipBalance saldo = saldoDeAssinaturaDoCliente(tenantId, comanda, item);
+      return clientMembershipRepository
+          .findByIdAndTenantId(saldo.getMembershipId(), tenantId)
+          .map(this::valorDaSessaoDaAssinatura)
+          .orElse(BigDecimal.ZERO);
+    }
+    throw new IllegalArgumentException("Tipo de cobertura inválido.");
+  }
+
+  /** O que o cliente pagou pelo pacote dividido pelo total de sessoes dele. */
+  private BigDecimal valorDaSessaoDoPacote(ClientPackagePurchase compra) {
+    int sessoes =
+        clientPackageBalanceRepository.findByPurchaseId(compra.getId()).stream()
+            .mapToInt(ClientPackageBalance::getSessoesTotais)
+            .sum();
+    if (sessoes <= 0 || compra.getPrecoPago() == null) return BigDecimal.ZERO;
+    return compra.getPrecoPago().divide(BigDecimal.valueOf(sessoes), 2, RoundingMode.HALF_UP);
+  }
+
+  /** A mensalidade dividida pelas sessoes do mes que o plano da. */
+  private BigDecimal valorDaSessaoDaAssinatura(ClientMembership assinatura) {
+    int sessoes =
+        clientMembershipBalanceRepository.findByMembershipId(assinatura.getId()).stream()
+            .mapToInt(ClientMembershipBalance::getQuantidadeMensal)
+            .sum();
+    if (sessoes <= 0 || assinatura.getPrecoMensal() == null) return BigDecimal.ZERO;
+    return assinatura.getPrecoMensal().divide(BigDecimal.valueOf(sessoes), 2, RoundingMode.HALF_UP);
+  }
+
+  /**
+   * Desconta a sessao do saldo — so no fechamento, e pelo banco: se outra comanda levou a ultima
+   * sessao entre a conferencia e aqui, o fechamento inteiro volta atras.
+   */
+  private void consumirCobertura(UUID tenantId, ComandaItem item) {
+    int sessoes = sessoesDoItem(item);
+    int consumiu;
+    if (ComandaItem.COBERTURA_PACOTE.equals(item.getCoberturaTipo())) {
+      consumiu = clientPackageBalanceRepository.consumirSeHouverSaldo(item.getCoberturaSaldoId(), sessoes);
+    } else if (ComandaItem.COBERTURA_ASSINATURA.equals(item.getCoberturaTipo())) {
+      consumiu =
+          clientMembershipBalanceRepository.consumirSeHouverSaldo(item.getCoberturaSaldoId(), sessoes);
+    } else {
+      return;
+    }
+    if (consumiu == 0) {
+      throw new IllegalArgumentException(
+          "O saldo de " + item.getDescricao() + " acabou enquanto a comanda estava aberta:"
+              + " retire a cobertura e cobre o serviço.");
+    }
+  }
+
+  /**
+   * Estornar a venda de um pacote devolve o dinheiro inteiro e apaga o saldo: so vale enquanto o
+   * cliente nao usou nenhuma sessao. Depois disso o estorno total dava de graca as sessoes ja
+   * feitas (teste de 2026-09-18) — acerto parcial e decisao do dono, fora do estorno.
+   */
+  private void exigirPacotesVendidosSemUso(List<ClientPackagePurchase> compras) {
+    for (ClientPackagePurchase compra : compras) {
+      int usadas =
+          clientPackageBalanceRepository.findByPurchaseId(compra.getId()).stream()
+              .mapToInt(ClientPackageBalance::getSessoesUsadas)
+              .sum();
+      if (usadas > 0) {
+        throw new IllegalArgumentException(
+            "O cliente já usou "
+                + usadas
+                + (usadas == 1 ? " sessão" : " sessoes")
+                + " do pacote "
+                + compra.getPackageNome()
+                + ": o estorno devolveria o valor inteiro. Estorne antes os atendimentos"
+                + " feitos com o pacote.");
+      }
+    }
+  }
+
+  /** O estorno devolve a sessao ao saldo (nunca abaixo de zero). */
+  private void devolverCobertura(ComandaItem item) {
+    int sessoes = sessoesDoItem(item);
+    if (ComandaItem.COBERTURA_PACOTE.equals(item.getCoberturaTipo())) {
+      clientPackageBalanceRepository.devolver(item.getCoberturaSaldoId(), sessoes);
+    } else if (ComandaItem.COBERTURA_ASSINATURA.equals(item.getCoberturaTipo())) {
+      clientMembershipBalanceRepository.devolver(item.getCoberturaSaldoId(), sessoes);
+    }
+  }
+
+  // ─── Servico executado: comissao e insumo pelo que a comanda cobrou ──────
+
+  /**
+   * Comissao e insumo de um SERVICO, ao fechar a comanda.
+   *
+   * <p>Decisao do usuario (2026-09-17): a comissao sai do que a COMANDA cobrou. Antes, a comanda de
+   * um atendimento nao gerava nada, e a comissao saia dos itens do AGENDAMENTO na conclusao — o
+   * servico extra lancado na comanda ficava sem comissao e sem baixa de insumo, o desconto do PDV
+   * nao reduzia a base, a comissao saia mesmo com a conta nunca paga, e o estorno nao a revertia
+   * (analise de 2026-09-16, A1). Agora todo servico da comanda — avulsa ou de atendimento — gera
+   * comissao sobre o valor liquido cobrado (ou sobre o valor da sessao, se veio de pacote), no
+   * fechamento, e o estorno reverte pela mesma chave.
+   *
+   * <p>{@code jaRegistradoPeloAgendamento}: atendimento concluido pela regra ANTIGA (antes do
+   * deploy) ja tem comissao e insumo — a comanda dele nao gera de novo.
+   */
+  private void registrarServicoExecutado(
+      UUID tenantId,
+      Comanda comanda,
+      ComandaItem item,
+      BigDecimal baseDaComissao,
+      boolean jaRegistradoPeloAgendamento) {
+    if (jaRegistradoPeloAgendamento) return;
+    estoqueMovimentacaoService.consumirInsumosPorItemComanda(
+        tenantId, item.getId(), item.getReferenciaId());
+    if (item.getProfessionalId() != null) {
+      BigDecimal base = baseDaComissao != null ? baseDaComissao : BigDecimal.ZERO;
+      commissionService.registerServiceCommissionForComandaItemIfApplicable(
+          tenantId,
+          comanda.getId(),
+          item.getId(),
+          item.getProfessionalId(),
+          item.getReferenciaId(),
+          item.getCoberturaTipo() != null ? base : item.getTotal(),
+          base,
+          Instant.now());
+    }
+  }
+
+  /** O atendimento da comanda ja gerou comissao ou consumiu insumo pela regra antiga? */
+  private boolean servicosJaRegistradosPeloAgendamento(UUID tenantId, Comanda comanda) {
+    if (comanda.getAppointmentId() == null) return false;
+    return commissionService.possuiComissaoDeServicoDoAgendamento(tenantId, comanda.getAppointmentId())
+        || movimentacaoEstoqueRepository.existsByTenantIdAndAppointmentId(
+            tenantId, comanda.getAppointmentId());
   }
 
   @Transactional
@@ -289,19 +871,62 @@ public class ServicoComanda {
       UUID id, ComandaDtos.AplicarDescontoRequest request) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Comanda comanda = buscarOuFalhar(id, tenantId);
+    exigirComandaDoProfissional(tenantId, comanda);
     exigirAberta(comanda);
 
     if (request.percentual.compareTo(new BigDecimal("100")) > 0) {
-      throw new IllegalArgumentException("Desconto nao pode ser maior que 100%.");
+      throw new IllegalArgumentException("Desconto não pode ser maior que 100%.");
     }
+    exigirTetoDeDesconto(tenantId, request.percentual);
+    Map<String, Object> antesDoDesconto = dadosDoDesconto(comanda);
     List<ComandaItem> itens = comandaItemRepository.findByComandaIdOrderByCreatedAt(comanda.getId());
     BigDecimal subtotal = somarItens(itens);
-    comanda.setDesconto(NumericUtil.percentOf(subtotal, request.percentual.doubleValue()));
-    comanda.setDescontoMotivo(request.motivo.trim());
+    BigDecimal descontoPercentual = NumericUtil.percentOf(subtotal, request.percentual.doubleValue());
+    // FIN-007: o desconto percentual SOMA ao resgate de fidelidade (antes o sobrescrevia, e os pontos
+    // ja debitados sumiam). Se os dois juntos passam do subtotal, o resgate e desfeito e os pontos
+    // voltam ao cliente, em vez de serem gastos num desconto que nao cabe.
+    if (NumericUtil.add(descontoPercentual, comanda.getValorResgateFidelidade()).compareTo(subtotal) > 0) {
+      desfazerResgateDeFidelidade(tenantId, comanda, "desconto percentual nao deixa espaco para o resgate");
+    }
+    comanda.setDesconto(
+        subtotal.min(NumericUtil.add(descontoPercentual, comanda.getValorResgateFidelidade())));
+    comanda.setDescontoMotivo(
+        comanda.getPontosFidelidadeResgatados() > 0
+            ? concatenarMotivo(
+                request.motivo.trim(),
+                "Resgate de " + comanda.getPontosFidelidadeResgatados() + " pontos de fidelidade")
+            : request.motivo.trim());
     comanda.setTotal(NumericUtil.maxZero(NumericUtil.subtract(subtotal, comanda.getDesconto())));
 
+    auditar(tenantId, "POS_DISCOUNT_APPLY", comanda, antesDoDesconto, dadosDoDesconto(comanda));
     return toResponse(
         comanda, itens, comandaPagamentoRepository.findByComandaIdOrderByCreatedAt(comanda.getId()));
+  }
+
+  /**
+   * O teto de desconto da equipe (V131), configurado pelo dono em {@code /settings/discount-policy}.
+   *
+   * <p>Antes disso, qualquer papel zerava uma conta de R$ 500 com 100% de desconto e um motivo
+   * digitado a mao — era o caminho mais curto para atender de graca quem se quer agradar, ou para
+   * cobrar por fora (achado do teste de ponta a ponta de 2026-09-16). O DONO continua sem limite:
+   * o dinheiro e dele, e alguem precisa poder dar a cortesia de verdade.
+   *
+   * <p>Padrao 100 = sem teto, para nenhum salao perder o desconto que ja dava por causa do deploy.
+   */
+  private void exigirTetoDeDesconto(UUID tenantId, BigDecimal percentual) {
+    if (authenticatedUser.temRole("OWNER")) return;
+
+    int teto = tenantOperationalSettingsRepository.findByTenantIdOrCreate(tenantId)
+        .getPosMaxDiscountPercent();
+    if (teto >= 100) return;
+    if (percentual.compareTo(new BigDecimal(teto)) <= 0) return;
+
+    String mensagem =
+        "O desconto maximo sem o dono e de " + teto + "%. Chame o dono para dar mais que isso.";
+    travaFinanceira.registrarTentativaBloqueada(
+        tenantId, "POS_DISCOUNT_APPLY", "COMANDA", null,
+        Map.of("percentual", percentual, "teto", teto), mensagem);
+    throw new IllegalArgumentException(mensagem);
   }
 
   @Transactional
@@ -309,15 +934,20 @@ public class ServicoComanda {
       UUID id, ComandaDtos.RegistrarGorjetaRequest request) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Comanda comanda = buscarOuFalhar(id, tenantId);
+    exigirComandaDoProfissional(tenantId, comanda);
     exigirAberta(comanda);
 
     UUID professionalId = parseUuidOrThrow(request.professionalId, "professionalId invalido.");
     if (profissionalRepository.findByIdAndTenantId(professionalId, tenantId).isEmpty()) {
-      throw new IllegalArgumentException("Profissional nao encontrado.");
+      throw new IllegalArgumentException("Profissional não encontrado.");
     }
     comanda.setGorjeta(request.valor);
     comanda.setGorjetaProfessionalId(professionalId);
 
+    Map<String, Object> gorjeta = new HashMap<>();
+    gorjeta.put("valor", request.valor);
+    gorjeta.put("professionalId", professionalId.toString());
+    auditar(tenantId, "POS_TIP_SET", comanda, null, gorjeta);
     return toResponse(
         comanda,
         comandaItemRepository.findByComandaIdOrderByCreatedAt(comanda.getId()),
@@ -329,7 +959,9 @@ public class ServicoComanda {
       UUID id, ComandaDtos.RegistrarPagamentoRequest request) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Comanda comanda = buscarOuFalhar(id, tenantId);
+    exigirComandaDoProfissional(tenantId, comanda);
     exigirAberta(comanda);
+    exigirQueOPagamentoCabeNoSaldo(comanda, request);
 
     ComandaPagamento pagamento = new ComandaPagamento();
     pagamento.setTenantId(tenantId);
@@ -349,9 +981,59 @@ public class ServicoComanda {
       pagamento.setPaidAt(Instant.now());
     }
 
-    comandaPagamentoRepository.save(pagamento);
-    comandaPagamentoRepository.flush();
+    try {
+      comandaPagamentoRepository.save(pagamento);
+      comandaPagamentoRepository.flush();
+    } catch (DataIntegrityViolationException erro) {
+      // Rede de seguranca do banco (V144): com a trava do sinal isto nao deveria acontecer.
+      if (violouIndice(erro, INDICE_SINAL_UNICO)) {
+        throw new IllegalArgumentException("Este sinal já foi usado em outro pagamento.");
+      }
+      throw erro;
+    }
+
+    Map<String, Object> dados = new HashMap<>();
+    dados.put("meio", pagamento.getMeio());
+    dados.put("valor", pagamento.getValor());
+    dados.put("status", pagamento.getStatus());
+    auditar(tenantId, "POS_PAYMENT_ADD", comanda, null, dados);
     return obter(id);
+  }
+
+  /**
+   * Pagamento que nao cabe no que falta (achado FIN-003, auditoria de 2026-10-06).
+   *
+   * <p>Antes o backend aceitava qualquer valor e so {@code fechar} exigia igualdade exata: o cliente
+   * entregava R$ 100 numa conta de R$ 80, o caixa registrava, e a comanda travava (sem como remover o
+   * pagamento; so o dono cancelando e refazendo). Um duplo clique gerava dois pagamentos iguais e o
+   * mesmo bloqueio — e, no Pix, duas cobrancas.
+   *
+   * <p>Agora: comanda ja paga por inteiro nao recebe outro pagamento (a mesma regra que a tela ja
+   * aplicava), e so DINHEIRO pode passar do que falta — o resto e troco. Cartao e credito de sinal
+   * nao tem troco. So vale com total maior que zero.
+   */
+  private void exigirQueOPagamentoCabeNoSaldo(
+      Comanda comanda, ComandaDtos.RegistrarPagamentoRequest request) {
+    BigDecimal totalComGorjeta = NumericUtil.add(comanda.getTotal(), comanda.getGorjeta());
+    if (totalComGorjeta.signum() <= 0) return;
+
+    BigDecimal confirmado =
+        comandaPagamentoRepository.findByComandaIdOrderByCreatedAt(comanda.getId()).stream()
+            .filter(p -> ComandaPagamento.STATUS_CONFIRMADO.equals(p.getStatus()))
+            .map(ComandaPagamento::getValor)
+            .reduce(BigDecimal.ZERO, NumericUtil::add);
+    BigDecimal restante = NumericUtil.maxZero(NumericUtil.subtract(totalComGorjeta, confirmado));
+
+    if (restante.signum() == 0) {
+      throw new IllegalArgumentException("Esta comanda já esta paga por inteiro: feche a comanda.");
+    }
+    if (!ComandaPagamento.MEIO_DINHEIRO.equals(request.meio)
+        && request.valor.compareTo(restante) > 0) {
+      throw new IllegalArgumentException(
+          "O valor passa do que falta pagar ("
+              + String.format(java.util.Locale.of("pt", "BR"), "R$ %,.2f", restante)
+              + "). Só o pagamento em dinheiro tem troco.");
+    }
   }
 
   private void registrarPagamentoPix(UUID tenantId, Comanda comanda, ComandaPagamento pagamento) {
@@ -368,15 +1050,18 @@ public class ServicoComanda {
       UUID tenantId, Comanda comanda, ComandaPagamento pagamento) {
     if (comanda.getAppointmentId() == null) {
       throw new IllegalArgumentException(
-          "Credito de sinal exige comanda vinculada a um agendamento.");
+          "Crédito de sinal exige comanda vinculada a um agendamento.");
     }
     AppointmentDeposit deposit =
         appointmentDepositRepository
-            .findPaidUnusedByAppointmentId(comanda.getAppointmentId())
+            // TRAVADO: dois pagamentos simultaneos nao podem ler o mesmo sinal livre (BNC-002).
+            .findPaidUnusedByAppointmentIdParaConsumo(comanda.getAppointmentId())
+            // O sinal e do cliente DESTE salao: a busca e so por agendamento.
+            .filter(d -> tenantId.equals(d.getTenantId()))
             .orElseThrow(
                 () ->
                     new IllegalArgumentException(
-                        "Nao ha sinal pago disponivel para este agendamento."));
+                        "Não ha sinal pago disponível para este agendamento."));
     BigDecimal valorDisponivel = NumericUtil.fromCents(deposit.getAmountCents());
     if (pagamento.getValor().compareTo(valorDisponivel) > 0) {
       throw new IllegalArgumentException(
@@ -390,11 +1075,11 @@ public class ServicoComanda {
   private Cliente resolverClienteOuFalhar(UUID tenantId, Comanda comanda) {
     if (comanda.getClientId() == null) {
       throw new IllegalArgumentException(
-          "Comanda sem cliente identificado: obrigatorio para pagamento via Pix.");
+          "Comanda sem cliente identificado: obrigatório para pagamento via Pix.");
     }
     return clienteRepository
         .findByIdAndTenantId(comanda.getClientId(), tenantId)
-        .orElseThrow(() -> new ApiClientErrorException("Cliente nao encontrado.", 404));
+        .orElseThrow(() -> new ApiClientErrorException("Cliente não encontrado.", 404));
   }
 
   /**
@@ -421,12 +1106,18 @@ public class ServicoComanda {
     Comanda comanda =
         comandaRepository
             .findByIdAndTenantParaAtualizacao(id, tenantId)
-            .orElseThrow(() -> new ApiClientErrorException("Comanda nao encontrada.", 404));
+            .orElseThrow(() -> new ApiClientErrorException("Comanda não encontrada.", 404));
+    exigirComandaDoProfissional(tenantId, comanda);
     exigirAberta(comanda);
+    // A receita desta venda entra HOJE. Com o caixa de hoje ja fechado, ela ficaria fora do que foi
+    // contado — o dinheiro entra na gaveta depois da conferencia e ninguem confere.
+    travaFinanceira.exigirDiaAberto(
+        tenantId, Instant.now(), "POS_COMANDA_CLOSE", "COMANDA", comanda.getId().toString(),
+        dadosDaComanda(comanda));
 
     List<ComandaItem> itens = comandaItemRepository.findByComandaIdOrderByCreatedAt(comanda.getId());
     if (itens.isEmpty()) {
-      throw new IllegalArgumentException("Comanda sem itens nao pode ser fechada.");
+      throw new IllegalArgumentException("Comanda sem itens não pode ser fechada.");
     }
 
     List<ComandaPagamento> pagamentos =
@@ -439,13 +1130,32 @@ public class ServicoComanda {
     // O cliente paga servico + gorjeta juntos no caixa — a quitacao tem que cobrir os dois, mesmo
     // que a gorjeta nao componha o total (que segue sendo so a receita do salao).
     BigDecimal totalComGorjeta = NumericUtil.add(comanda.getTotal(), comanda.getGorjeta());
-    if (totalConfirmado.compareTo(totalComGorjeta) != 0) {
+    if (totalConfirmado.compareTo(totalComGorjeta) < 0) {
       throw new IllegalArgumentException(
-          "Comanda nao esta quitada: pago "
+          "Comanda não esta quitada: pago "
               + totalConfirmado
               + ", total com gorjeta "
               + totalComGorjeta
               + ".");
+    }
+    // Pago a MAIOR e troco (achado FIN-003) — mas so o que veio em dinheiro pode ser devolvido: nao se
+    // da troco de cartao. A receita nao muda: as transacoes sao criadas pelo valor LIQUIDO de cada
+    // item, consumindo os pagamentos so ate cobrir a venda.
+    BigDecimal excedente = totalConfirmado.subtract(totalComGorjeta);
+    if (excedente.signum() > 0) {
+      BigDecimal recebidoEmDinheiro =
+          pagamentos.stream()
+              .filter(
+                  p ->
+                      ComandaPagamento.STATUS_CONFIRMADO.equals(p.getStatus())
+                          && ComandaPagamento.MEIO_DINHEIRO.equals(p.getMeio()))
+              .map(ComandaPagamento::getValor)
+              .reduce(BigDecimal.ZERO, NumericUtil::add);
+      if (excedente.compareTo(recebidoEmDinheiro) > 0) {
+        throw new IllegalArgumentException(
+            "Os pagamentos passam do total em " + excedente + ", e só o dinheiro (recebido: "
+                + recebidoEmDinheiro + ") tem troco. Peca ao dono para cancelar a comanda e refazer.");
+      }
     }
 
     UUID categoriaVendasId = resolveTransactionCategoryId(tenantId, "VENDAS");
@@ -454,9 +1164,26 @@ public class ServicoComanda {
     List<BigDecimal> valoresLiquidosPorItem =
         ratearDesconto(itens, comanda.getSubtotal(), comanda.getTotal());
 
+    // A sessao so e descontada do pacote/assinatura AGORA: conferir de novo, porque outra comanda
+    // pode ter usado o saldo entre a escolha e o fechamento.
+    for (ComandaItem item : itens) {
+      if (item.getCoberturaTipo() != null) exigirSaldoDaCobertura(tenantId, comanda, item);
+    }
+    boolean servicosJaRegistradosPeloAgendamento = servicosJaRegistradosPeloAgendamento(tenantId, comanda);
+
     for (int i = 0; i < itens.size(); i++) {
       ComandaItem item = itens.get(i);
       BigDecimal valorLiquido = valoresLiquidosPorItem.get(i);
+
+      // Servico coberto por pacote/assinatura: a conta sai zerada (o cliente ja pagou), entao nao
+      // ha receita a lancar — mas a sessao e consumida, o insumo sai e o profissional recebe a
+      // comissao sobre o valor da sessao dentro do que foi pago.
+      if (ComandaItem.TIPO_SERVICO.equals(item.getTipo()) && item.getCoberturaTipo() != null) {
+        consumirCobertura(tenantId, item);
+        registrarServicoExecutado(
+            tenantId, comanda, item, item.getValorCobertura(), servicosJaRegistradosPeloAgendamento);
+        continue;
+      }
       if (NumericUtil.isZeroOrNegative(valorLiquido)) continue;
 
       // Rateia a receita do item pelos meios de pagamento reais da comanda (uma Transacao por
@@ -483,23 +1210,9 @@ public class ServicoComanda {
         }
       } else if (ComandaItem.TIPO_PACOTE.equals(item.getTipo())) {
         criarSaldoDePacoteVendido(tenantId, comanda, item, valorLiquido);
-      } else if (ComandaItem.TIPO_SERVICO.equals(item.getTipo())
-          && comanda.getAppointmentId() == null) {
-        // So para comanda AVULSA: quando ha agendamento vinculado, ServicoAgendamentos ja registra
-        // comissao de servico e consome insumo ao concluir — duplicar aqui lancaria em dobro.
-        estoqueMovimentacaoService.consumirInsumosPorItemComanda(
-            tenantId, item.getId(), item.getReferenciaId());
-        if (item.getProfessionalId() != null) {
-          commissionService.registerServiceCommissionForComandaItemIfApplicable(
-              tenantId,
-              comanda.getId(),
-              item.getId(),
-              item.getProfessionalId(),
-              item.getReferenciaId(),
-              item.getTotal(),
-              valorLiquido,
-              Instant.now());
-        }
+      } else if (ComandaItem.TIPO_SERVICO.equals(item.getTipo())) {
+        registrarServicoExecutado(
+            tenantId, comanda, item, valorLiquido, servicosJaRegistradosPeloAgendamento);
       }
     }
 
@@ -511,6 +1224,7 @@ public class ServicoComanda {
     comanda.setClosedAt(Instant.now());
     comanda.setFechadaPor(obterUsuarioId());
 
+    auditar(tenantId, "POS_COMANDA_CLOSE", comanda, null, dadosDaComanda(comanda));
     return toResponse(comanda, itens, pagamentos);
   }
 
@@ -550,7 +1264,8 @@ public class ServicoComanda {
             .intValue();
     if (pontos <= 0) return 0;
 
-    Cliente cliente = clienteRepository.findById(comanda.getClientId()).orElse(null);
+    Cliente cliente =
+        clienteRepository.findByIdAndTenantId(comanda.getClientId(), tenantId).orElse(null);
     if (cliente != null) {
       cliente.setLoyaltyPoints(cliente.getLoyaltyPoints() + pontos);
     }
@@ -780,6 +1495,7 @@ public class ServicoComanda {
       UUID id, ComandaDtos.CancelarComandaRequest request) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Comanda comanda = buscarOuFalhar(id, tenantId);
+    exigirComandaDoProfissional(tenantId, comanda);
     exigirAberta(comanda);
 
     List<ComandaPagamento> pagamentos =
@@ -799,10 +1515,13 @@ public class ServicoComanda {
       }
     }
 
+    devolverPontosResgatados(tenantId, comanda, "cancelamento da comanda");
+
     comanda.setStatus(Comanda.STATUS_CANCELADA);
     comanda.setCancelMotivo(request.motivo.trim());
     comanda.setClosedAt(Instant.now());
 
+    auditar(tenantId, "POS_COMANDA_CANCEL", comanda, null, dadosDaComanda(comanda));
     return toResponse(
         comanda,
         comandaItemRepository.findByComandaIdOrderByCreatedAt(comanda.getId()),
@@ -814,8 +1533,9 @@ public class ServicoComanda {
    * — mesmo padrao de {@code ServicoFinanceiro.deletar}, preserva o lancamento original para
    * auditoria), devolve estoque de itens PRODUTO e insumo consumido por itens SERVICO, reverte a
    * comissao gerada por cada item e o credito de fidelidade daquela venda (usa o numero exato de
-   * pontos guardado no fechamento, nao recalcula), e remove pacote/saldo vendido junto. Nao existe
-   * caminho de volta: uma comanda ESTORNADA fica assim para sempre.
+   * pontos guardado no fechamento, nao recalcula), solta o SINAL usado como credito (o deposito
+   * volta a valer para o agendamento) e remove pacote/saldo vendido junto. Nao existe caminho de
+   * volta: uma comanda ESTORNADA fica assim para sempre.
    */
   @Transactional
   public ComandaDtos.ComandaResponse estornar(
@@ -824,8 +1544,14 @@ public class ServicoComanda {
     Comanda comanda =
         comandaRepository
             .findByIdAndTenantParaAtualizacao(id, tenantId)
-            .orElseThrow(() -> new ApiClientErrorException("Comanda nao encontrada.", 404));
+            .orElseThrow(() -> new ApiClientErrorException("Comanda não encontrada.", 404));
     exigirFechada(comanda);
+    // O estorno apaga a receita do dia em que a venda FECHOU. Se esse caixa ja foi contado e
+    // fechado, estornar tiraria dinheiro de um dia assinado — fecha certinho hoje, estorna amanha e
+    // leva o dinheiro, e o caixa fechado nunca mais e revisitado (analise de 2026-09-16).
+    travaFinanceira.exigirDiaAberto(
+        tenantId, comanda.getClosedAt(), "POS_COMANDA_REVERSE", "COMANDA",
+        comanda.getId().toString(), Map.of("motivo", request.motivo == null ? "" : request.motivo));
     String motivo = request.motivo.trim();
 
     List<ComandaItem> itens = comandaItemRepository.findByComandaIdOrderByCreatedAt(comanda.getId());
@@ -847,9 +1573,24 @@ public class ServicoComanda {
       if (ComandaItem.TIPO_PRODUTO.equals(item.getTipo())) {
         devolverEstoqueProduto(item, motivo);
       } else if (ComandaItem.TIPO_SERVICO.equals(item.getTipo())) {
-        // Comissao de SERVICO avulso usa o proprio item como chave de origem (ver fechar()).
+        if (item.getCoberturaTipo() != null) devolverCobertura(item);
+        // Comissao de SERVICO usa o proprio item da comanda como chave de origem (ver fechar()).
         commissionService.reverseEntryForOrigin(tenantId, "SERVICE", item.getId(), motivo);
         reverterConsumoInsumoItem(tenantId, item, motivo);
+      }
+    }
+
+    // O SINAL volta a valer. O `cancelar` ja soltava o deposito; o estorno nao — e o cliente que
+    // pagou sinal e teve a comanda estornada ficava sem a venda E sem o credito, com o deposito
+    // preso numa comanda que nao existe mais (achado do roteiro de ponta a ponta de 2026-09-16).
+    for (ComandaPagamento pagamento :
+        comandaPagamentoRepository.findByComandaIdOrderByCreatedAt(comanda.getId())) {
+      if (ComandaPagamento.MEIO_CREDITO_SINAL.equals(pagamento.getMeio())
+          && pagamento.getAppointmentDepositId() != null) {
+        appointmentDepositRepository
+            .findById(pagamento.getAppointmentDepositId())
+            .filter(deposito -> comanda.getId().equals(deposito.getUsedInComandaId()))
+            .ifPresent(deposito -> deposito.setUsedInComandaId(null));
       }
     }
 
@@ -864,8 +1605,12 @@ public class ServicoComanda {
                           cliente.getLoyaltyPoints() - comanda.getPontosFidelidadeCreditados())));
     }
 
+    // FIN-007: o estorno revertia so os pontos CREDITADOS pela venda; os RESGATADOS nela se perdiam.
+    devolverPontosResgatados(tenantId, comanda, "estorno da comanda");
+
     List<ClientPackagePurchase> comprasPacote =
         clientPackagePurchaseRepository.findByTenantIdAndComandaId(tenantId, comanda.getId());
+    exigirPacotesVendidosSemUso(comprasPacote);
     for (ClientPackagePurchase compra : comprasPacote) {
       for (ClientPackageBalance saldo :
           clientPackageBalanceRepository.findByPurchaseId(compra.getId())) {
@@ -878,6 +1623,8 @@ public class ServicoComanda {
     comanda.setEstornadoPor(usuarioId);
     comanda.setEstornadoEm(agora);
     comanda.setEstornoMotivo(motivo);
+
+    auditar(tenantId, "POS_COMANDA_REVERSE", comanda, null, dadosDaComanda(comanda));
 
     return toResponse(
         comanda,
@@ -916,6 +1663,7 @@ public class ServicoComanda {
       UUID id, ComandaDtos.ResgatarFidelidadeRequest request) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Comanda comanda = buscarOuFalhar(id, tenantId);
+    exigirComandaDoProfissional(tenantId, comanda);
     exigirAberta(comanda);
 
     if (comanda.getClientId() == null) {
@@ -925,15 +1673,15 @@ public class ServicoComanda {
     TenantLoyaltySettings config =
         tenantLoyaltySettingsRepository.findByTenantId(tenantId).orElse(null);
     if (config == null || !config.isAtivo()) {
-      throw new IllegalArgumentException("Programa de fidelidade nao esta ativo.");
+      throw new IllegalArgumentException("Programa de fidelidade não esta ativo.");
     }
     Cliente cliente =
         clienteRepository
             .findByIdAndTenantId(comanda.getClientId(), tenantId)
-            .orElseThrow(() -> new ApiClientErrorException("Cliente nao encontrado.", 404));
+            .orElseThrow(() -> new ApiClientErrorException("Cliente não encontrado.", 404));
     if (cliente.getLoyaltyPoints() < request.pontos) {
       throw new IllegalArgumentException(
-          "Cliente nao possui pontos suficientes (saldo: " + cliente.getLoyaltyPoints() + ").");
+          "Cliente não possui pontos suficientes (saldo: " + cliente.getLoyaltyPoints() + ").");
     }
 
     BigDecimal valorResgate =
@@ -941,9 +1689,18 @@ public class ServicoComanda {
             .divide(config.getPontosPorResgateReal(), 2, RoundingMode.HALF_UP);
     List<ComandaItem> itens = comandaItemRepository.findByComandaIdOrderByCreatedAt(comanda.getId());
     BigDecimal subtotal = somarItens(itens);
-    comanda.setDesconto(
-        NumericUtil.maxZero(NumericUtil.add(comanda.getDesconto(), valorResgate)));
-    if (comanda.getDesconto().compareTo(subtotal) > 0) comanda.setDesconto(subtotal);
+    // FIN-007: o excedente acima do total era descartado e os pontos debitados mesmo assim.
+    BigDecimal restante = NumericUtil.maxZero(NumericUtil.subtract(subtotal, comanda.getDesconto()));
+    if (valorResgate.compareTo(restante) > 0) {
+      int maximo =
+          restante.multiply(config.getPontosPorResgateReal()).setScale(0, RoundingMode.DOWN).intValue();
+      throw new IllegalArgumentException(
+          "O resgate (R$ " + valorResgate + ") passa do que falta pagar na comanda (R$ " + restante
+              + "). Use no máximo " + maximo + " pontos.");
+    }
+    comanda.setDesconto(NumericUtil.add(comanda.getDesconto(), valorResgate));
+    comanda.setPontosFidelidadeResgatados(comanda.getPontosFidelidadeResgatados() + request.pontos);
+    comanda.setValorResgateFidelidade(NumericUtil.add(comanda.getValorResgateFidelidade(), valorResgate));
     comanda.setDescontoMotivo(
         concatenarMotivo(
             comanda.getDescontoMotivo(),
@@ -952,7 +1709,43 @@ public class ServicoComanda {
 
     cliente.setLoyaltyPoints(cliente.getLoyaltyPoints() - request.pontos);
 
+    Map<String, Object> resgate = new HashMap<>();
+    resgate.put("pontos", request.pontos);
+    resgate.put("valorResgate", valorResgate);
+    resgate.put("clientId", comanda.getClientId().toString());
+    auditar(tenantId, "POS_LOYALTY_REDEEM", comanda, null, resgate);
     return obter(id);
+  }
+
+  /**
+   * FIN-007: devolve ao cliente os pontos resgatados nesta comanda. Usado quando a comanda deixa de
+   * existir como venda (cancelamento e estorno sao estados finais, entao nao ha devolucao dupla).
+   */
+  private void devolverPontosResgatados(UUID tenantId, Comanda comanda, String motivo) {
+    int pontos = comanda.getPontosFidelidadeResgatados();
+    if (pontos <= 0 || comanda.getClientId() == null) return;
+    clienteRepository
+        .findByIdAndTenantId(comanda.getClientId(), tenantId)
+        .ifPresent(cliente -> cliente.setLoyaltyPoints(cliente.getLoyaltyPoints() + pontos));
+    Map<String, Object> devolucao = new HashMap<>();
+    devolucao.put("pontos", pontos);
+    devolucao.put("valorResgate", comanda.getValorResgateFidelidade());
+    devolucao.put("clientId", comanda.getClientId().toString());
+    devolucao.put("motivo", motivo);
+    auditar(tenantId, "POS_LOYALTY_REFUND", comanda, null, devolucao);
+  }
+
+  /**
+   * FIN-007: desfaz o resgate de uma comanda ainda aberta: pontos de volta ao cliente e o valor do
+   * resgate sai do desconto.
+   */
+  private void desfazerResgateDeFidelidade(UUID tenantId, Comanda comanda, String motivo) {
+    if (comanda.getPontosFidelidadeResgatados() <= 0) return;
+    devolverPontosResgatados(tenantId, comanda, motivo);
+    comanda.setDesconto(
+        NumericUtil.maxZero(NumericUtil.subtract(comanda.getDesconto(), comanda.getValorResgateFidelidade())));
+    comanda.setPontosFidelidadeResgatados(0);
+    comanda.setValorResgateFidelidade(BigDecimal.ZERO);
   }
 
   private String concatenarMotivo(String motivoAtual, String novoMotivo) {
@@ -963,18 +1756,106 @@ public class ServicoComanda {
   Comanda buscarOuFalhar(UUID id, UUID tenantId) {
     return comandaRepository
         .findByIdAndTenantId(id, tenantId)
-        .orElseThrow(() -> new ApiClientErrorException("Comanda nao encontrada.", 404));
+        .orElseThrow(() -> new ApiClientErrorException("Comanda não encontrada.", 404));
   }
 
   void exigirAberta(Comanda comanda) {
     if (!Comanda.STATUS_ABERTA.equals(comanda.getStatus())) {
-      throw new IllegalArgumentException("Comanda nao esta aberta.");
+      throw new IllegalArgumentException("Comanda não esta aberta.");
     }
+  }
+
+  /**
+   * O profissional do salao, quando quem chamou E um profissional e nada mais.
+   *
+   * <p>Devolve {@code null} para o dono, a recepcao (STAFF) e o ADMIN — eles veem o salao inteiro,
+   * que e o trabalho deles. Tambem devolve {@code null} quando o login nao esta ligado a nenhum
+   * cadastro de profissional: nesse caso nao existe "comanda dele" para delimitar, e o papel
+   * sozinho ja foi conferido no controller.
+   */
+  private UUID profissionalDoUsuarioLogado(UUID tenantId) {
+    if (!authenticatedUser.temRole("PROFESSIONAL")) return null;
+    if (authenticatedUser.temRole("OWNER")
+        || authenticatedUser.temRole("STAFF")
+        || authenticatedUser.temRole("ADMIN")) {
+      return null;
+    }
+    UUID usuarioId = obterUsuarioId();
+    if (usuarioId == null) return null;
+    return profissionalRepository
+        .findByTenantIdAndUserId(tenantId, usuarioId)
+        .map(Profissional::getId)
+        .orElse(null);
+  }
+
+  /**
+   * Um profissional so mexe na comanda DELE (achado do teste de ponta a ponta de 2026-09-16: ele
+   * lia, lancava item, dava desconto e recebia pagamento na comanda de qualquer colega — e podia
+   * mandar a comissao do item para quem quisesse).
+   *
+   * <p>"Dele" e: ele abriu, tem item dele, ou e do agendamento dele. Responde 404, e nao 403, pelo
+   * motivo de sempre: "existe, mas nao e sua" ja conta o que ele nao deveria saber.
+   */
+  private void exigirComandaDoProfissional(UUID tenantId, Comanda comanda) {
+    UUID profissionalId = profissionalDoUsuarioLogado(tenantId);
+    if (profissionalId == null) return;
+
+    if (comanda.getAbertaPor() != null && comanda.getAbertaPor().equals(obterUsuarioId())) return;
+    if (comandaItemRepository.findByComandaIdOrderByCreatedAt(comanda.getId()).stream()
+        .anyMatch(item -> profissionalId.equals(item.getProfessionalId()))) {
+      return;
+    }
+    if (comanda.getAppointmentId() != null
+        && agendamentoRepository
+            .findByIdAndTenantId(comanda.getAppointmentId(), tenantId)
+            .map(agendamento -> profissionalId.equals(agendamento.getProfessionalId()))
+            .orElse(false)) {
+      return;
+    }
+    travaFinanceira.registrarTentativaBloqueada(
+        tenantId, "POS_COMANDA_ACCESS", "COMANDA", comanda.getId().toString(),
+        Map.of("profissionalId", profissionalId.toString()),
+        "Profissional tentou acessar a comanda de outro profissional.");
+    throw new ApiClientErrorException("Comanda não encontrada.", 404);
+  }
+
+  /**
+   * Item repetido precisa de confirmacao (V132).
+   *
+   * <p>O agendamento ja lanca os servicos dele na comanda; lancar o mesmo servico de novo na tela
+   * cobrava o cliente duas vezes sem aviso nenhum. O caso legitimo existe (dois cortes na mesma
+   * conta), entao a segunda linha igual e recusada UMA vez, dizendo o que a comanda ja tem, e
+   * passa quando o pedido vem com {@code confirmarDuplicado}.
+   */
+  private void exigirConfirmacaoDeDuplicado(
+      Comanda comanda, ComandaDtos.AdicionarItemRequest request, UUID referenciaId) {
+    if (Boolean.TRUE.equals(request.confirmarDuplicado)) return;
+
+    ComandaItem repetido =
+        comandaItemRepository.findByComandaIdOrderByCreatedAt(comanda.getId()).stream()
+            .filter(
+                item ->
+                    request.tipo.equals(item.getTipo())
+                        && referenciaId.equals(item.getReferenciaId()))
+            .findFirst()
+            .orElse(null);
+    if (repetido == null) return;
+
+    String origem =
+        ComandaItem.ORIGEM_AGENDAMENTO.equals(repetido.getOrigem())
+            ? " (veio do agendamento)"
+            : "";
+    throw new IllegalArgumentException(
+        "Esta comanda já tem \""
+            + repetido.getDescricao()
+            + "\""
+            + origem
+            + ". Confirme se e para cobrar duas vezes.");
   }
 
   void exigirFechada(Comanda comanda) {
     if (!Comanda.STATUS_FECHADA.equals(comanda.getStatus())) {
-      throw new IllegalArgumentException("Comanda nao esta fechada.");
+      throw new IllegalArgumentException("Comanda não esta fechada.");
     }
   }
 
@@ -982,6 +1863,11 @@ public class ServicoComanda {
     List<ComandaItem> itens = comandaItemRepository.findByComandaIdOrderByCreatedAt(comanda.getId());
     BigDecimal subtotal = somarItens(itens);
     comanda.setSubtotal(subtotal);
+    // FIN-007: tirar itens ate o resgate passar do subtotal desfaz o resgate (pontos de volta), em
+    // vez de cortar o desconto e deixar os pontos gastos. O caixa pode resgatar de novo o que couber.
+    if (comanda.getValorResgateFidelidade().compareTo(subtotal) > 0) {
+      desfazerResgateDeFidelidade(comanda.getTenantId(), comanda, "itens retirados, resgate passou do total");
+    }
     // Reaplica o desconto ja registrado (em valor, nao percentual) sobre o novo subtotal, mas nunca
     // deixa o desconto exceder o subtotal apos a mudanca de itens.
     if (comanda.getDesconto().compareTo(subtotal) > 0) {
@@ -1036,6 +1922,10 @@ public class ServicoComanda {
     r.quantidade = item.getQuantidade();
     r.precoUnitario = item.getPrecoUnitario();
     r.total = item.getTotal();
+    r.origem = item.getOrigem();
+    r.coberturaTipo = item.getCoberturaTipo();
+    r.coberturaSaldoId = item.getCoberturaSaldoId() != null ? item.getCoberturaSaldoId().toString() : null;
+    r.valorCobertura = item.getValorCobertura();
     return r;
   }
 
@@ -1070,5 +1960,70 @@ public class ServicoComanda {
     } catch (Exception e) {
       throw new IllegalArgumentException(message);
     }
+  }
+
+  // ─── Auditoria do caixa aberto ──────────────────────────────────────────────
+
+  /**
+   * Registra quem mexeu no dinheiro desta comanda.
+   *
+   * O PDV era o unico lugar do sistema onde dinheiro mudava de mao SEM trilha: desconto, item
+   * removido, pagamento, fechamento, cancelamento e estorno nao deixavam registro de autor (achado
+   * do teste de ponta a ponta de 2026-09-16). Profissionais, agendamentos e fechamento de caixa
+   * sempre tiveram. Falha de auditoria nunca derruba a operacao — o caixa nao pode parar por isso.
+   */
+  private void auditar(
+      UUID tenantId, String action, Comanda comanda, Object antes, Object depois) {
+    try {
+      AuditEventCommand command = new AuditEventCommand();
+      command.tenantId = tenantId;
+      command.module = AuditConstants.Module.FINANCE;
+      command.action = action;
+      command.entityType = "COMANDA";
+      command.entityId = comanda.getId() != null ? comanda.getId().toString() : null;
+      command.sourceChannel = AuditConstants.SourceChannel.API;
+      command.before = antes;
+      command.after = depois;
+      auditService.recordSuccess(command);
+    } catch (Exception ignored) {
+      // Auditoria nao deve quebrar o fluxo principal.
+    }
+  }
+
+  private Map<String, Object> dadosDaComanda(Comanda comanda) {
+    Map<String, Object> dados = new HashMap<>();
+    dados.put("status", comanda.getStatus());
+    dados.put("subtotal", comanda.getSubtotal());
+    dados.put("desconto", comanda.getDesconto());
+    dados.put("descontoMotivo", comanda.getDescontoMotivo());
+    dados.put("gorjeta", comanda.getGorjeta());
+    dados.put("total", comanda.getTotal());
+    dados.put("clientId", comanda.getClientId() != null ? comanda.getClientId().toString() : null);
+    dados.put(
+        "appointmentId",
+        comanda.getAppointmentId() != null ? comanda.getAppointmentId().toString() : null);
+    return dados;
+  }
+
+  private Map<String, Object> dadosDoItem(ComandaItem item) {
+    Map<String, Object> dados = new HashMap<>();
+    dados.put("itemId", item.getId() != null ? item.getId().toString() : null);
+    dados.put("tipo", item.getTipo());
+    dados.put("descricao", item.getDescricao());
+    dados.put("quantidade", item.getQuantidade());
+    dados.put("precoUnitario", item.getPrecoUnitario());
+    dados.put("total", item.getTotal());
+    dados.put(
+        "professionalId",
+        item.getProfessionalId() != null ? item.getProfessionalId().toString() : null);
+    return dados;
+  }
+
+  private Map<String, Object> dadosDoDesconto(Comanda comanda) {
+    Map<String, Object> dados = new HashMap<>();
+    dados.put("desconto", comanda.getDesconto());
+    dados.put("descontoMotivo", comanda.getDescontoMotivo());
+    dados.put("total", comanda.getTotal());
+    return dados;
   }
 }

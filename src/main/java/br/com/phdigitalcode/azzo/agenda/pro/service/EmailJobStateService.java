@@ -3,6 +3,8 @@ package br.com.phdigitalcode.azzo.agenda.pro.service;
 import java.time.Instant;
 import java.util.UUID;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -11,6 +13,8 @@ import br.com.phdigitalcode.azzo.agenda.pro.entity.EmailJob;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.EmailJobStatus;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.EmailJobType;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.EmailJobRepository;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 
 /**
  * Espelha {@code modules/email/application/EmailJobStateService.java}.
@@ -25,10 +29,20 @@ import br.com.phdigitalcode.azzo.agenda.pro.repository.EmailJobRepository;
 @Service
 public class EmailJobStateService {
 
+  private static final Logger LOG = LoggerFactory.getLogger(EmailJobStateService.class);
+
   private final EmailJobRepository emailJobRepository;
 
-  public EmailJobStateService(EmailJobRepository emailJobRepository) {
+  /**
+   * Jobs que esgotaram as tentativas e viraram FAILED. Criado em 0 na subida de proposito: o
+   * {@code increase()} do Prometheus nao enxerga a PRIMEIRA amostra de uma serie que nasce ja com
+   * valor, e a regra {@code EmailDefinitivamenteFalhou} perderia justamente a primeira falha.
+   */
+  private final Counter falhasDefinitivas;
+
+  public EmailJobStateService(EmailJobRepository emailJobRepository, MeterRegistry meterRegistry) {
     this.emailJobRepository = emailJobRepository;
+    this.falhasDefinitivas = Counter.builder("email.jobs.failed").register(meterRegistry);
   }
 
   @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -53,9 +67,49 @@ public class EmailJobStateService {
     return emailJobRepository.markProcessed(jobId, providerStatus, fromEmail, Instant.now());
   }
 
+  /** Tentativas de envio antes de o job virar FAILED de vez. */
+  public static final int MAX_TENTATIVAS = 5;
+
+  /**
+   * Espera ate a proxima tentativa, depois da falha de numero {@code tentativa} (1, 2, ...):
+   * 2 min, 10 min, 30 min, 2 h. Nao ha espera depois da ultima.
+   */
+  static java.time.Duration esperaApos(int tentativa) {
+    return switch (tentativa) {
+      case 1 -> java.time.Duration.ofMinutes(2);
+      case 2 -> java.time.Duration.ofMinutes(10);
+      case 3 -> java.time.Duration.ofMinutes(30);
+      default -> java.time.Duration.ofHours(2);
+    };
+  }
+
+  /**
+   * Registra uma falha de envio. Com tentativas sobrando, o job continua NEW e e reagendado com
+   * espera crescente (erro passageiro de SMTP nao deixa o usuario sem e-mail); na ultima tentativa
+   * vira FAILED. Devolve se o job foi atualizado.
+   */
   @Transactional(propagation = Propagation.REQUIRES_NEW)
   public boolean markFailed(UUID jobId, String providerStatus, String errorMessage, String fromEmail) {
-    return emailJobRepository.markFailed(jobId, providerStatus, errorMessage, fromEmail, Instant.now());
+    Instant agora = Instant.now();
+    EmailJob job = emailJobRepository.findById(jobId).orElse(null);
+    int tentativa = (job == null ? 0 : job.getAttempts()) + 1;
+    if (job != null && job.getStatus() == EmailJobStatus.NEW && tentativa < MAX_TENTATIVAS) {
+      return emailJobRepository.reagendar(
+          jobId, tentativa, agora.plus(esperaApos(tentativa)), providerStatus, errorMessage, fromEmail);
+    }
+    boolean atualizado =
+        emailJobRepository.markFailed(jobId, providerStatus, errorMessage, fromEmail, agora);
+    if (atualizado) {
+      // Ninguem mais vai tentar: o usuario ficou sem o e-mail. O Prometheus avisa por e-mail.
+      falhasDefinitivas.increment();
+      LOG.error(
+          "email_job_failed_definitivamente jobId={} tipo={} tentativas={} erro={}",
+          jobId,
+          job == null ? null : job.getEmailType(),
+          tentativa,
+          errorMessage);
+    }
+    return atualizado;
   }
 
   public record EmailJobSnapshot(

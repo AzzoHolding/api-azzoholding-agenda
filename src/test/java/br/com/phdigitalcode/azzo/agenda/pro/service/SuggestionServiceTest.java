@@ -174,7 +174,7 @@ class SuggestionServiceTest {
 
     assertThatThrownBy(() -> service.create(request))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("Categoria invalida. Use BUG, MELHORIA, FUNCIONALIDADE, USABILIDADE ou OUTRO.");
+        .hasMessage("Categoria inválida. Use BUG, MELHORIA, FUNCIONALIDADE, USABILIDADE ou OUTRO.");
   }
 
   @Test

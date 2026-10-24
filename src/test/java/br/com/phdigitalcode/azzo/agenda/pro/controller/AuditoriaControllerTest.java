@@ -52,10 +52,13 @@ class AuditoriaControllerTest {
   }
 
   @Test
-  void classeExigeOwnerOuFinance() {
+  void classeExigeOwnerFinanceOuAPermissaoDoPerfil() {
     PreAuthorize preAuthorize = AuditoriaController.class.getAnnotation(PreAuthorize.class);
     assertThat(preAuthorize).isNotNull();
-    assertThat(preAuthorize.value()).contains("'OWNER'").contains("'FINANCE'");
+    assertThat(preAuthorize.value())
+        .contains("'OWNER'")
+        .contains("'FINANCE'")
+        .contains(" or @permissionService.possuiPermissao('audit:view')");
   }
 
   @Test
@@ -179,7 +182,7 @@ class AuditoriaControllerTest {
   void downloadExportDevolveConteudoComContentDisposition() {
     AuditQueryService.ExportDownload download =
         new AuditQueryService.ExportDownload("{}", "JSON", "application/json; charset=UTF-8");
-    when(auditQueryService.downloadExport("export-1")).thenReturn(download);
+    when(auditQueryService.downloadExport(tenantId, "export-1")).thenReturn(download);
 
     ResponseEntity<String> response = controller.downloadExport("export-1");
 
@@ -193,7 +196,7 @@ class AuditoriaControllerTest {
   void downloadExportUsaExtensaoCsvQuandoFormatoCsv() {
     AuditQueryService.ExportDownload download =
         new AuditQueryService.ExportDownload("a,b\n1,2", "CSV", "text/csv; charset=UTF-8");
-    when(auditQueryService.downloadExport("export-2")).thenReturn(download);
+    when(auditQueryService.downloadExport(tenantId, "export-2")).thenReturn(download);
 
     ResponseEntity<String> response = controller.downloadExport("export-2");
 

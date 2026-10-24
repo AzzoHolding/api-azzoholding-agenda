@@ -47,6 +47,13 @@ class SystemAdminControllerTest {
   }
 
   @Test
+  void whatsappOverviewDelegaAoService() {
+    SystemAdminDtos.WhatsAppOverviewResponse expected = new SystemAdminDtos.WhatsAppOverviewResponse();
+    when(systemAdminService.whatsappOverview()).thenReturn(expected);
+    assertThat(controller.whatsappOverview()).isSameAs(expected);
+  }
+
+  @Test
   void auditsDelegaAoServiceComTodosOsFiltros() {
     SystemAdminDtos.GlobalAuditListResponse expected = new SystemAdminDtos.GlobalAuditListResponse();
     when(systemAdminService.listGlobalAudits(

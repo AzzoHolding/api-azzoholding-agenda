@@ -20,6 +20,42 @@ import br.com.phdigitalcode.azzo.agenda.pro.entity.ChatMessageEntity;
 @Repository
 public interface ChatMessageRepository extends JpaRepository<ChatMessageEntity, UUID> {
 
+  /**
+   * Quando o cliente escreveu pela ultima vez neste salao pelo canal dado (achado INT-002). E o que
+   * abre a janela de atendimento de 24 h do WhatsApp: so dentro dela texto livre chega; fora, a Meta
+   * aceita, devolve um wamid e descarta.
+   */
+  @Query(
+      value =
+          "SELECT MAX(m.created_at) FROM chat_messages m "
+              + "JOIN chat_conversations c ON c.id = m.conversation_id "
+              + "WHERE m.tenant_id = :tenantId AND m.client_id = :clientId "
+              + "AND m.direction = 'INBOUND' AND c.channel = 'WHATSAPP'",
+      nativeQuery = true)
+  Object ultimaMensagemRecebidaNoWhatsAppRaw(
+      @Param("tenantId") UUID tenantId, @Param("clientId") UUID clientId);
+
+  /**
+   * Quando o cliente escreveu pela ultima vez neste salao pelo WhatsApp, ou vazio se nunca (achado
+   * INT-002). Abre a janela de atendimento de 24 h: so dentro dela texto livre chega; fora, a Meta
+   * aceita, devolve um wamid e descarta.
+   *
+   * <p>Consulta nativa de proposito: JPQL e validada na subida da aplicacao, e um erro nela
+   * derrubaria o servico inteiro; nativa so falha ao executar. {@code MAX(timestamptz)} volta como
+   * tipos diferentes conforme o driver/Hibernate, entao o resultado e convertido aqui.
+   */
+  default java.util.Optional<java.time.Instant> ultimaMensagemRecebidaNoWhatsApp(UUID tenantId, UUID clientId) {
+    Object bruto = ultimaMensagemRecebidaNoWhatsAppRaw(tenantId, clientId);
+    if (bruto == null) return java.util.Optional.empty();
+    if (bruto instanceof java.time.Instant instante) return java.util.Optional.of(instante);
+    if (bruto instanceof java.time.OffsetDateTime offset) return java.util.Optional.of(offset.toInstant());
+    if (bruto instanceof java.time.ZonedDateTime zoned) return java.util.Optional.of(zoned.toInstant());
+    if (bruto instanceof java.sql.Timestamp timestamp) return java.util.Optional.of(timestamp.toInstant());
+    if (bruto instanceof java.util.Date data) return java.util.Optional.of(data.toInstant());
+    throw new IllegalStateException(
+        "Tipo inesperado para MAX(created_at): " + bruto.getClass().getName());
+  }
+
   @Query(
       "from ChatMessageEntity m where m.tenantId = :tenantId and m.conversationId = :conversationId "
           + "order by m.createdAt asc, m.id asc")
@@ -57,6 +93,22 @@ public interface ChatMessageRepository extends JpaRepository<ChatMessageEntity, 
               + "WHERE expires_at < :threshold AND content IS NOT NULL",
       nativeQuery = true)
   int clearExpiredContentsRaw(@Param("threshold") Instant threshold);
+
+  /**
+   * Apaga o texto das mensagens do titular anonimizado.
+   *
+   * A conversa e onde o cliente escreve nome, endereco e telefone por extenso — apagar so a ficha
+   * dele deixava tudo isso guardado aqui. As linhas ficam (data, direcao, situacao) porque sao o
+   * registro de que houve atendimento; o conteudo, nao.
+   */
+  @Modifying
+  @Transactional
+  @Query(
+      value =
+          "UPDATE chat_messages SET content = NULL, updated_at = NOW() "
+              + "WHERE tenant_id = :tenantId AND client_id = :clientId AND content IS NOT NULL",
+      nativeQuery = true)
+  int anonimizarPorClienteRaw(@Param("tenantId") UUID tenantId, @Param("clientId") UUID clientId);
 
   @Modifying
   @Transactional
@@ -96,7 +148,10 @@ public interface ChatMessageRepository extends JpaRepository<ChatMessageEntity, 
     if (cursorId == null) {
       return listByConversationOrdered(tenantId, conversationId, pageable);
     }
-    Optional<ChatMessageEntity> cursor = findById(cursorId);
+    // Pentest 14/10/2026 (INT-033): o cursor era buscado so pelo id, sem tenant — a data de uma
+    // mensagem de outro salao virava limite da consulta (oraculo de existencia e ordem).
+    Optional<ChatMessageEntity> cursor = findById(cursorId)
+        .filter(m -> tenantId.equals(m.getTenantId()) && conversationId.equals(m.getConversationId()));
     if (cursor.isEmpty()) {
       return listByConversationOrdered(tenantId, conversationId, pageable);
     }

@@ -14,8 +14,10 @@ spring:
   datasource:
     driver-class-name: org.postgresql.Driver
     hikari:
-      minimum-idle: 2
-      maximum-pool-size: 10
+      minimum-idle: ${DB_POOL_MIN_IDLE:2}
+      # 10 saturava com 200 usuarios simultaneos (186 requisicoes na fila, teste de carga de
+      # 2026-09-19); o Postgres aceita 100 conexoes no total.
+      maximum-pool-size: ${DB_POOL_MAX_SIZE:20}
       max-lifetime: 240000
       idle-timeout: 120000
       connection-timeout: 10000
@@ -33,6 +35,9 @@ spring:
     properties:
       hibernate:
         default_schema: azzo_app
+        # Colecoes e associacoes carregadas em lote (IN com ate 64 ids), e nao uma consulta por
+        # registro: os itens da agenda do dia eram 1 consulta por agendamento (2026-09-19).
+        default_batch_fetch_size: 64
         jdbc:
           time_zone: UTC
         format_sql: false
@@ -64,6 +69,13 @@ app:
       domain: ${AUTH_COOKIE_DOMAIN:__unset__}
   internal:
     api-key: ${INTERNAL_API_KEY:changeme-dev}
+    # SEG-018: uma chave por servico, cada uma so vale nos caminhos dele. Vazias = desligadas.
+    # Com as duas configuradas (e o mesmo valor no INTERNAL_API_KEY do assistant e da Gestao),
+    # desligar a chave unica antiga com INTERNAL_API_KEY_LEGADA_ATIVA=false.
+    chaves:
+      assistant: ${INTERNAL_API_KEY_ASSISTANT:}
+      gerenciamento: ${INTERNAL_API_KEY_GERENCIAMENTO:}
+    aceitar-chave-legada: ${INTERNAL_API_KEY_LEGADA_ATIVA:true}
   public:
     booking:
       base-url: ${PUBLIC_BOOKING_BASE_URL:http://localhost:5173}
@@ -124,7 +136,7 @@ app:
   chat:
     retention:
       days:
-        completed: ${CHAT_RETENTION_DAYS_COMPLETED:1}
+        completed: ${CHAT_RETENTION_DAYS_COMPLETED:2}
         canceled: ${CHAT_RETENTION_DAYS_CANCELED:2}
         default: ${CHAT_RETENTION_DAYS_DEFAULT:5}
     reactivation:
@@ -217,9 +229,22 @@ app:
         query-protocol-param: ${NFSE_PROVIDER_SEFIN_NACIONAL_QUERY_PROTOCOL_PARAM:protocolo}
         query-include-protocol: ${NFSE_PROVIDER_SEFIN_NACIONAL_QUERY_INCLUDE_PROTOCOL:true}
         query-mtls-enabled: ${NFSE_PROVIDER_SEFIN_NACIONAL_QUERY_MTLS_ENABLED:false}
+  checkout:
+    # POST /checkout/intents + /confirm confirmam a compra com pagamento FALSO (stub) e liberam
+    # licenca paga sem cobrar. So para desenvolvimento; o pagamento de verdade e o
+    # POST /billing/subscriptions (Asaas). NUNCA ligar em producao.
+    stub-enabled: ${CHECKOUT_STUB_ENABLED:false}
   whatsapp:
     embedded-signup:
       enabled: ${WHATSAPP_EMBEDDED_SIGNUP_ENABLED:false}
+    # O teste manda TEMPLATE, e nao texto livre: texto livre so e entregue dentro de 24h da
+    # ultima mensagem do cliente, e o teste quase sempre e primeiro contato. `hello_world` e o
+    # template que a Meta ja deixa pronto em todo numero novo.
+    # Reserva: o envio usa o `teste_integracao` do PROPRIO salao quando ele ja existe. Isto vale
+    # enquanto a sincronizacao nao rodou, e para forcar outro template em diagnostico.
+    test-template:
+      name: ${WHATSAPP_TEST_TEMPLATE_NAME:teste_integracao}
+      language: ${WHATSAPP_TEST_TEMPLATE_LANGUAGE:pt_BR}
   agenda:
     debug: ${APP_AGENDA_DEBUG:false}
   cors:
@@ -248,6 +273,9 @@ app:
       connect-timeout-ms: ${TELEGRAM_CLIENT_CONNECT_TIMEOUT_MS:10000}
       read-timeout-ms: ${TELEGRAM_CLIENT_READ_TIMEOUT_MS:20000}
   rate-limit:
+    public-cnpj:
+      max-attempts: ${PUBLIC_CNPJ_RATE_LIMIT_MAX_ATTEMPTS:10}
+      window-minutes: ${PUBLIC_CNPJ_RATE_LIMIT_WINDOW_MINUTES:1}
     auth-login:
       max-attempts: ${LOGIN_RATE_LIMIT_MAX_ATTEMPTS:5}
       window-minutes: ${LOGIN_RATE_LIMIT_WINDOW_MINUTES:3}
@@ -280,6 +308,31 @@ management:
         # indicador so entra na sonda de readiness se listado neste grupo.
         readiness:
           include: readinessState,db,estoqueImportacaoReadiness
+  # Traces: toda requisicao (o volume e pequeno). O traceId vai para o MDC, para o log
+  # (logging.pattern.correlation) e para a resposta de erro (ErrorResponse.traceId) em QUALQUER
+  # ambiente. O ENVIO para o Tempo fica desligado aqui e so e ligado no perfil prod
+  # (application-prod.yml) — endpoint vazio derrubava a subida ("Invalid endpoint").
+  tracing:
+    sampling:
+      probability: ${TRACING_SAMPLING_PROBABILITY:1.0}
+    export:
+      enabled: ${TRACING_EXPORT_ENABLED:false}
+  # O starter do OpenTelemetry tambem liga o envio de METRICAS por OTLP (para localhost:4318, que
+  # nao existe) — as metricas ja saem pelo /actuator/prometheus. Desligado para nao encher o log.
+  otlp:
+    metrics:
+      export:
+        enabled: false
+
+# Consultas SQL no trace (datasource-micrometer). Entram a conexao (espera pelo pool) e a consulta;
+# a leitura linha a linha do resultado (FETCH) fica de fora, so faz ruido. Os VALORES dos parametros
+# NUNCA entram: teriam nome, telefone e CPF de cliente (LGPD) — o trace mostra `where phone = ?`.
+jdbc:
+  includes: connection,query
+  datasource-proxy:
+    include-parameter-values: false
+    query:
+      enable-logging: false
 
 springdoc:
   api-docs:
@@ -288,6 +341,9 @@ springdoc:
     path: /swagger-ui.html
 
 logging:
+  # "traceId=<32 hex>" em toda linha: e o que o Grafana (Loki) reconhece para abrir o trace.
+  pattern:
+    correlation: "[traceId=%X{traceId:-} spanId=%X{spanId:-}] "
   level:
     root: INFO
     br.com.phdigitalcode: INFO

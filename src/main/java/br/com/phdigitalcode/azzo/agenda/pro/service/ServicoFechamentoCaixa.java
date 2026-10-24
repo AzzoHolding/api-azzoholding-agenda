@@ -5,6 +5,7 @@ import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -22,6 +23,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.request.AberturaCaixaRequest;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.request.FechamentoCaixaRequest;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.response.FechamentoCaixaResponse;
+import br.com.phdigitalcode.azzo.agenda.pro.entity.Comanda;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.FechamentoCaixa;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.MetodoPagamento;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.StatusFechamentoCaixa;
@@ -29,6 +31,8 @@ import br.com.phdigitalcode.azzo.agenda.pro.exception.ApiClientErrorException;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditConstants;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditEventCommand;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditService;
+import br.com.phdigitalcode.azzo.agenda.pro.repository.ComandaItemRepository;
+import br.com.phdigitalcode.azzo.agenda.pro.repository.ComandaRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.FechamentoCaixaRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.TransacaoQueryRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.TransacaoRepository;
@@ -49,12 +53,16 @@ import jakarta.persistence.PersistenceContext;
 public class ServicoFechamentoCaixa {
 
   private static final ZoneId ZONA_BR = ZoneId.of("America/Sao_Paulo");
+  /** Data em portugues no aviso: quem le "2026-09-12" precisa traduzir; "12/09/2026", nao. */
+  private static final DateTimeFormatter DIA_BR = DateTimeFormatter.ofPattern("dd/MM/yyyy");
   private static final TypeReference<LinkedHashMap<String, BigDecimal>> TOTALS_TYPE =
       new TypeReference<>() {};
 
   @PersistenceContext private EntityManager entityManager;
 
   private final FechamentoCaixaRepository fechamentoCaixaRepository;
+  private final ComandaRepository comandaRepository;
+  private final ComandaItemRepository comandaItemRepository;
   private final TransacaoRepository transacaoRepository;
   private final TransacaoQueryRepository transacaoQueryRepository;
   private final ContextoTenant contextoTenant;
@@ -64,6 +72,8 @@ public class ServicoFechamentoCaixa {
 
   public ServicoFechamentoCaixa(
       FechamentoCaixaRepository fechamentoCaixaRepository,
+      ComandaRepository comandaRepository,
+      ComandaItemRepository comandaItemRepository,
       TransacaoRepository transacaoRepository,
       TransacaoQueryRepository transacaoQueryRepository,
       ContextoTenant contextoTenant,
@@ -71,6 +81,8 @@ public class ServicoFechamentoCaixa {
       AuditService auditService,
       ObjectMapper objectMapper) {
     this.fechamentoCaixaRepository = fechamentoCaixaRepository;
+    this.comandaRepository = comandaRepository;
+    this.comandaItemRepository = comandaItemRepository;
     this.transacaoRepository = transacaoRepository;
     this.transacaoQueryRepository = transacaoQueryRepository;
     this.contextoTenant = contextoTenant;
@@ -100,10 +112,14 @@ public class ServicoFechamentoCaixa {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     LocalDate businessDate = parseBusinessDateOrToday(request != null ? request.businessDate : null);
     if (businessDate.isAfter(LocalDate.now(ZONA_BR))) {
-      throw new IllegalArgumentException("Nao e possivel abrir caixa para uma data futura.");
+      registrarTentativa(
+          tenantId, "FINANCE_CASH_CLOSING_OPEN", null,
+          Map.of("businessDate", businessDate.toString()),
+          "Nao e possivel abrir caixa para uma data futura.");
+      throw new IllegalArgumentException("Não é possível abrir caixa para uma data futura.");
     }
     if (fechamentoCaixaRepository.findByTenantIdAndBusinessDate(tenantId, businessDate).isPresent()) {
-      throw new IllegalStateException("Ja existe fechamento de caixa para a data informada");
+      throw new IllegalStateException("Já existe fechamento de caixa para a data informada");
     }
 
     FechamentoCaixa fechamento = new FechamentoCaixa();
@@ -128,10 +144,10 @@ public class ServicoFechamentoCaixa {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     FechamentoCaixa fechamento = getOrFail(tenantId, id);
     if (fechamento.getStatus() != StatusFechamentoCaixa.OPEN) {
-      throw new IllegalStateException("Fechamento de caixa ja encerrado");
+      throw new IllegalStateException("Fechamento de caixa já encerrado");
     }
     if (request == null || request.countedTotals == null) {
-      throw new IllegalArgumentException("countedTotals e obrigatorio");
+      throw new IllegalArgumentException("countedTotals é obrigatório");
     }
 
     Map<MetodoPagamento, BigDecimal> expected =
@@ -139,12 +155,54 @@ public class ServicoFechamentoCaixa {
     Map<MetodoPagamento, BigDecimal> counted = normalizeCountedTotals(request.countedTotals);
     Map<MetodoPagamento, BigDecimal> difference = calculateDifference(expected, counted);
 
+    // Diferenca sem explicacao e exatamente a assinatura de dinheiro que sumiu: o fechamento fica
+    // gravado com quem contou, quanto faltou e POR QUE — e o "por que" nao pode ser opcional
+    // (achado do teste de ponta a ponta de 2026-09-16). Contagem que bate segue sem exigir nada.
+    String observacoes = normalizeNullable(request.notes);
+    boolean temDiferenca =
+        difference.values().stream().anyMatch(valor -> valor != null && valor.signum() != 0);
+    if (temDiferenca && observacoes == null) {
+      // Tentar fechar com falta e sem explicar e exatamente o que o dono quer ver na trilha.
+      Map<String, Object> tentativa = new LinkedHashMap<>();
+      tentativa.put("businessDate", String.valueOf(fechamento.getBusinessDate()));
+      tentativa.put("expectedTotals", writeAmountMapAsStrings(expected));
+      tentativa.put("countedTotals", writeAmountMapAsStrings(counted));
+      tentativa.put("differenceTotals", writeAmountMapAsStrings(difference));
+      registrarTentativa(
+          tenantId, "FINANCE_CASH_CLOSING_CLOSE", fechamento.getId(), tentativa,
+          "Explique a diferenca entre o esperado e o contado antes de fechar o caixa.");
+      throw new IllegalArgumentException(
+          "Explique a diferenca entre o esperado e o contado antes de fechar o caixa.");
+    }
+
+    // Fechar o caixa TRAVA o dia: `TravaFinanceira.exigirDiaAberto` passa a recusar
+    // POS_COMANDA_CLOSE, e a comanda que ficou aberta so fecha AMANHA — com a venda caindo no dia
+    // errado e o dinheiro fora da contagem que acabou de ser assinada. Antes disso o fechamento
+    // nem olhava para elas (pedido do usuario em 2026-09-21: "alerta para que nao esquecam
+    // comandas abertas").
+    //
+    // Recusa, e nao bloqueio: deixar uma comanda para amanha e legitimo quando o cliente volta
+    // amanha. O que nao pode e acontecer por esquecimento, entao a pessoa confirma.
+    List<Comanda> abertas =
+        comandaRepository.findByTenantIdAndStatusOrderByOpenedAtAsc(tenantId, Comanda.STATUS_ABERTA);
+    if (!abertas.isEmpty() && !request.confirmarComandasAbertas) {
+      Map<String, Object> tentativa = new LinkedHashMap<>();
+      tentativa.put("businessDate", String.valueOf(fechamento.getBusinessDate()));
+      tentativa.put("comandasAbertas", abertas.size());
+      tentativa.put(
+          "comandasAbertasIds", abertas.stream().map(c -> String.valueOf(c.getId())).toList());
+      registrarTentativa(
+          tenantId, "FINANCE_CASH_CLOSING_CLOSE", fechamento.getId(), tentativa,
+          "Ha comanda aberta ao fechar o caixa.");
+      throw new IllegalArgumentException(mensagemDeComandasAbertas(abertas));
+    }
+
     Map<String, Object> before = buildAuditPayload(fechamento);
 
     fechamento.setStatus(StatusFechamentoCaixa.CLOSED);
     fechamento.setClosedAt(Instant.now());
     fechamento.setClosedBy(authenticatedUser.idOuNulo());
-    fechamento.setClosingNotes(normalizeNullable(request.notes));
+    fechamento.setClosingNotes(observacoes);
     fechamento.setExpectedTotalsJson(writeTotals(expected));
     fechamento.setCountedTotalsJson(writeTotals(counted));
     fechamento.setDifferenceTotalsJson(writeTotals(difference));
@@ -165,14 +223,14 @@ public class ServicoFechamentoCaixa {
     FechamentoCaixa fechamento = getOrFail(tenantId, id);
 
     if (!fechamento.getBusinessDate().isAfter(LocalDate.now(ZONA_BR))) {
-      throw new IllegalArgumentException("So e possivel remover caixas de datas futuras.");
+      throw new IllegalArgumentException("Só é possível remover caixas de datas futuras.");
     }
 
     Instant from = fechamento.getBusinessDate().atStartOfDay(ZONA_BR).toInstant();
     Instant to =
         fechamento.getBusinessDate().plusDays(1).atStartOfDay(ZONA_BR).minusNanos(1).toInstant();
     if (transacaoRepository.existsInPeriod(tenantId, from, to)) {
-      throw new IllegalArgumentException("Este caixa ja tem movimento lancado e nao pode ser removido.");
+      throw new IllegalArgumentException("Este caixa já tem movimento lancado e não pode ser removido.");
     }
 
     Map<String, Object> before = buildAuditPayload(fechamento);
@@ -185,7 +243,55 @@ public class ServicoFechamentoCaixa {
   private FechamentoCaixa getOrFail(UUID tenantId, UUID id) {
     return fechamentoCaixaRepository
         .findByTenantIdAndId(tenantId, id)
-        .orElseThrow(() -> new ApiClientErrorException("Fechamento de caixa nao encontrado", 404));
+        .orElseThrow(() -> new ApiClientErrorException("Fechamento de caixa não encontrado", 404));
+  }
+
+  /**
+   * O aviso diz QUANTAS, QUANTO e desde QUANDO — e a consequencia.
+   *
+   * Sem o "so fecha amanha" a pessoa nao tem como saber o que perde ao confirmar: a trava do dia
+   * nao esta escrita em lugar nenhum da tela.
+   */
+  private String mensagemDeComandasAbertas(List<Comanda> abertas) {
+    BigDecimal soma =
+        abertas.stream()
+            .map(c -> c.getTotal() == null ? BigDecimal.ZERO : c.getTotal())
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
+    String quantas =
+        abertas.size() == 1 ? "1 comanda aberta" : abertas.size() + " comandas abertas";
+    LocalDate maisVelha =
+        abertas.get(0).getOpenedAt() == null
+            ? null
+            : abertas.get(0).getOpenedAt().atZone(ZONA_BR).toLocalDate();
+    String desde = maisVelha == null ? "" : ", a mais antiga de " + DIA_BR.format(maisVelha);
+    return "Ha "
+        + quantas
+        + desde
+        + ", somando "
+        + soma.setScale(2, RoundingMode.HALF_UP)
+        + ". Fechar o caixa trava o dia: elas so poderao ser fechadas amanha, e a venda vai cair no"
+        + " dia errado. Feche as comandas primeiro ou confirme que ficam para amanha.";
+  }
+
+  private List<FechamentoCaixaResponse.ComandaAbertaItem> listarComandasAbertas(UUID tenantId) {
+    return comandaRepository
+        .findByTenantIdAndStatusOrderByOpenedAtAsc(tenantId, Comanda.STATUS_ABERTA)
+        .stream()
+        .map(
+            comanda -> {
+              FechamentoCaixaResponse.ComandaAbertaItem item =
+                  new FechamentoCaixaResponse.ComandaAbertaItem();
+              item.id = comanda.getId() != null ? comanda.getId().toString() : null;
+              item.clientId = comanda.getClientId() != null ? comanda.getClientId().toString() : null;
+              item.total = comanda.getTotal();
+              item.openedAt = comanda.getOpenedAt() != null ? comanda.getOpenedAt().toString() : null;
+              item.itens =
+                  comanda.getId() == null
+                      ? 0
+                      : comandaItemRepository.findByComandaIdOrderByCreatedAt(comanda.getId()).size();
+              return item;
+            })
+        .toList();
   }
 
   private FechamentoCaixaResponse toResponse(FechamentoCaixa fechamento) {
@@ -217,6 +323,10 @@ public class ServicoFechamentoCaixa {
     if (fechamento.getTenantId() != null && fechamento.getBusinessDate() != null) {
       response.commissionSummary =
           calcularCommissionSummary(fechamento.getTenantId(), fechamento.getBusinessDate());
+    }
+    // So no caixa aberto: no historico a lista de hoje nao diz nada sobre um dia ja fechado.
+    if (fechamento.getStatus() == StatusFechamentoCaixa.OPEN && fechamento.getTenantId() != null) {
+      response.comandasAbertas = listarComandasAbertas(fechamento.getTenantId());
     }
     return response;
   }
@@ -287,13 +397,13 @@ public class ServicoFechamentoCaixa {
     }
     for (Map.Entry<String, BigDecimal> entry : rawTotals.entrySet()) {
       if (entry.getKey() == null || entry.getKey().isBlank()) {
-        throw new IllegalArgumentException("Metodo de pagamento invalido");
+        throw new IllegalArgumentException("Metodo de pagamento inválido");
       }
       MetodoPagamento method;
       try {
         method = MetodoPagamento.valueOf(entry.getKey().trim().toUpperCase(Locale.ROOT));
       } catch (Exception e) {
-        throw new IllegalArgumentException("Metodo de pagamento invalido: " + entry.getKey());
+        throw new IllegalArgumentException("Metodo de pagamento inválido: " + entry.getKey());
       }
       normalized.put(method, entry.getValue() != null ? entry.getValue() : BigDecimal.ZERO);
     }
@@ -404,6 +514,26 @@ public class ServicoFechamentoCaixa {
       auditService.recordSuccess(command);
     } catch (Exception ignored) {
       // Auditoria nao deve quebrar o fluxo principal.
+    }
+  }
+
+  /** Tentativa barrada no caixa — gravada numa transacao propria, para sobreviver ao rollback. */
+  private void registrarTentativa(
+      UUID tenantId, String action, UUID entityId, Object tentativa, String motivo) {
+    try {
+      AuditEventCommand command = new AuditEventCommand();
+      command.tenantId = tenantId;
+      command.module = AuditConstants.Module.FINANCE;
+      command.action = action;
+      command.entityType = "CASH_CLOSING";
+      command.entityId = entityId != null ? entityId.toString() : null;
+      command.sourceChannel = AuditConstants.SourceChannel.API;
+      command.errorCode = "BLOQUEADO";
+      command.errorMessage = motivo;
+      command.after = tentativa;
+      auditService.recordDeniedIsolated(command);
+    } catch (Exception ignored) {
+      // A trilha nunca decide a resposta.
     }
   }
 

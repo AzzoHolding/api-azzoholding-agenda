@@ -78,6 +78,14 @@ public class Profissional {
   @Column(name = "is_active", nullable = false)
   private boolean isActive = true;
 
+  /**
+   * Aparece para marcar horario? Desligado, a pessoa continua na equipe (login, comissao, perfis),
+   * mas sai da agenda interna, do agendamento publico e do assistente. Os ja marcados continuam.
+   * Diferente de {@code isActive}, que tira a pessoa de tudo.
+   */
+  @Column(name = "accepts_appointments", nullable = false)
+  private boolean acceptsAppointments = true;
+
   @Column(name = "created_at", nullable = false)
   private Instant createdAt;
 

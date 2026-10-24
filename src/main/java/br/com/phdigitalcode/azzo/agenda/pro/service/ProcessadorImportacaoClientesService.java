@@ -46,10 +46,10 @@ import br.com.phdigitalcode.azzo.agenda.pro.util.DataUtil;
  * classe nao passa pelo proxy do Spring, entao a transacao nova por job e aberta explicitamente com
  * {@link TransactionTemplate} (propagacao {@code REQUIRES_NEW}) em {@link #processarJob(UUID)}.
  *
- * <p><b>Assimetria do original preservada (nao "consertada"):</b> ao contrario do processador de
- * estoque, este <b>nao remove o arquivo do storage nem zera {@code arquivoStorageKey}</b> ao
- * concluir ou falhar um job — o original de fato nao faz essa limpeza para clientes. Tambem nao ha
- * scheduler de limpeza de jobs expirados para clientes (existe so para estoque).
+ * <p><b>A planilha sai do storage quando o job termina</b> (sucesso ou falha), e
+ * {@link #limparArquivosDeJobsFinalizados()} tira as que ficaram (jobs antigos, cancelados). Ate
+ * 2026-10-13 o original nao limpava nada: a base inteira de clientes importada (nome, telefone,
+ * CPF) ficava no MinIO para sempre — achado da analise LGPD.
  */
 @Service
 public class ProcessadorImportacaoClientesService {
@@ -164,6 +164,30 @@ public class ProcessadorImportacaoClientesService {
       auditar(job, "CLIENT_IMPORT_JOB_FAILED");
       LOG.error("importacao_clientes_falhou jobId={}", jobId, exception);
     }
+    removerPlanilha(job);
+  }
+
+  /** Planilhas de jobs ja terminados (inclusive cancelados) que ainda estao no storage. */
+  public int limparArquivosDeJobsFinalizados() {
+    List<ImportacaoClienteJob> jobs =
+        importacaoClienteJobRepository.findByStatusNotInAndArquivoStorageKeyIsNotNull(STATUS_PENDENTES);
+    for (ImportacaoClienteJob job : jobs) {
+      requiresNewTransaction.executeWithoutResult(status -> removerPlanilha(job));
+    }
+    return jobs.size();
+  }
+
+  /** Melhor esforco no storage; a chave sai do job de qualquer forma. */
+  private void removerPlanilha(ImportacaoClienteJob job) {
+    String chave = job.getArquivoStorageKey();
+    if (chave == null || chave.isBlank()) return;
+    try {
+      minioStorageService.removerArquivoImportacao(chave, job.getTenantId());
+    } catch (RuntimeException e) {
+      LOG.warn("importacao_clientes_planilha_nao_removida jobId={}", job.getId(), e);
+    }
+    job.setArquivoStorageKey(null);
+    importacaoClienteJobRepository.save(job);
   }
 
   private List<ImportacaoClienteErroLinha> validarELocalizar(

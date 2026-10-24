@@ -9,6 +9,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -18,6 +19,7 @@ import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -35,9 +37,11 @@ import org.springframework.data.domain.Pageable;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import br.com.phdigitalcode.azzo.agenda.pro.dto.ComandaDtos;
+import br.com.phdigitalcode.azzo.agenda.pro.dto.SettingsDtos;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.SchedulingDtos.AgendamentoRequest;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.SchedulingDtos.AgendamentoResponse;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.SchedulingDtos.AppointmentCustomerNoteRequest;
+import br.com.phdigitalcode.azzo.agenda.pro.dto.SchedulingDtos.AppointmentCustomerNoteUpdateRequest;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.SchedulingDtos.AppointmentCustomerNoteResponse;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.SchedulingDtos.AppointmentDetailResponse;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.SchedulingDtos.AppointmentManagementReportResponse;
@@ -130,6 +134,7 @@ class ServicoAgendamentosTest {
   @Mock private AuditService auditService;
   @Mock private ContextoTenant contextoTenant;
   @Mock private AuthenticatedUser authenticatedUser;
+  @Mock private VinculosDeExclusao vinculosDeExclusao;
 
   private ServicoAgendamentos service;
 
@@ -166,8 +171,19 @@ class ServicoAgendamentosTest {
             new ObjectMapper(),
             contextoTenant,
             authenticatedUser);
+    org.springframework.test.util.ReflectionTestUtils.setField(
+        service, "vinculosDeExclusao", vinculosDeExclusao);
+    lenient().when(vinculosDeExclusao.doAgendamento(any(), any())).thenReturn(List.of());
 
     lenient().when(contextoTenant.obterTenantIdOuFalhar()).thenReturn(tenantId);
+    // criar() confere que o cliente e do salao; por padrao ele e. Quem testa o contrario sobrepoe.
+    lenient()
+        .when(clienteRepository.findByIdAndTenantId(clientId, tenantId))
+        .thenReturn(Optional.of(clienteDoSalao()));
+    // O repositorio de verdade nunca devolve nulo (devolve EMPTY); o mock sem stub devolveria.
+    lenient()
+        .when(clienteStatsRepository.findStatsByTenantAndClient(any(), any()))
+        .thenReturn(ClienteStatsRepository.ClienteStats.EMPTY);
     // Simula o que o JPA faz: persist dispara o @PrePersist (id + createdAt).
     lenient()
         .when(agendamentoRepository.saveAndFlush(any(Agendamento.class)))
@@ -261,9 +277,24 @@ class ServicoAgendamentosTest {
     return a;
   }
 
+  /** O padrao do backend: 100% = sem teto de desconto para a equipe. */
+  private SettingsDtos.DiscountPolicyResponse semTetoDeDesconto() {
+    return tetoDeDesconto(100);
+  }
+
+  private SettingsDtos.DiscountPolicyResponse tetoDeDesconto(int percentual) {
+    SettingsDtos.DiscountPolicyResponse politica = new SettingsDtos.DiscountPolicyResponse();
+    politica.maxDiscountPercent = percentual;
+    return politica;
+  }
+
   /** Stubs comuns do caminho feliz de {@code criar}. */
   private void stubCriacaoSemConflito() {
     when(tenantOperationalSettingsService.isClosedOnSpecialDate(eq(tenantId), any())).thenReturn(false);
+    // Sem teto de desconto (100%) e o padrao do backend — e o que a maioria dos casos daqui exercita.
+    lenient()
+        .when(tenantOperationalSettingsService.getDiscountPolicy(eq(tenantId)))
+        .thenReturn(semTetoDeDesconto());
     when(profissionalRepository.findByIdAndTenantIdAndIsActiveTrue(professionalId, tenantId))
         .thenReturn(Optional.of(profissional()));
     when(servicoRepository.findByIdAndTenantId(serviceId, tenantId))
@@ -278,10 +309,20 @@ class ServicoAgendamentosTest {
             eq(tenantId), eq(professionalId), any(), anyList()))
         .thenReturn(List.of());
     lenient().when(agendamentoItemRepository.existsByAppointmentId(any())).thenReturn(false);
-    lenient().when(clienteRepository.findByIdAndTenantId(clientId, tenantId)).thenReturn(Optional.empty());
+    lenient()
+        .when(clienteRepository.findByIdAndTenantId(clientId, tenantId))
+        .thenReturn(Optional.of(clienteDoSalao()));
     lenient()
         .when(profissionalRepository.findByIdAndTenantId(professionalId, tenantId))
         .thenReturn(Optional.empty());
+  }
+
+  private Cliente clienteDoSalao() {
+    Cliente c = new Cliente();
+    c.setId(clientId);
+    c.setTenantId(tenantId);
+    c.setName("Maria");
+    return c;
   }
 
   // ─── CRIACAO ──────────────────────────────────────────────────────────────
@@ -350,7 +391,7 @@ class ServicoAgendamentosTest {
 
       assertThatThrownBy(() -> service.criar(requestValido()))
           .isInstanceOf(IllegalArgumentException.class)
-          .hasMessage("Salao fechado na data informada");
+          .hasMessage("Salão fechado na data informada");
       verify(agendamentoQueryRepository, never()).lockProfessionalDateForWrite(any(), any(), any());
     }
 
@@ -367,7 +408,7 @@ class ServicoAgendamentosTest {
 
       assertThatThrownBy(() -> service.criar(requestValido()))
           .isInstanceOf(IllegalArgumentException.class)
-          .hasMessage("Salao fechado ou fora do horario de funcionamento informado");
+          .hasMessage("Salão fechado ou fora do horário de funcionamento.");
     }
 
     @Test
@@ -385,7 +426,7 @@ class ServicoAgendamentosTest {
 
       assertThatThrownBy(() -> service.criar(requestValido()))
           .isInstanceOf(IllegalArgumentException.class)
-          .hasMessage("Salao ou profissional com fechamento especial no horario informado");
+          .hasMessage("Salão ou profissional com fechamento especial no horário informado");
     }
 
     @Test
@@ -413,7 +454,7 @@ class ServicoAgendamentosTest {
 
       assertThatThrownBy(() -> service.criar(requestValido()))
           .isInstanceOf(IllegalArgumentException.class)
-          .hasMessage("O profissional nao atende neste horario");
+          .hasMessage("O profissional não atende neste horário");
     }
 
     @Test
@@ -425,7 +466,7 @@ class ServicoAgendamentosTest {
 
       assertThatThrownBy(() -> service.criar(requestValido()))
           .isInstanceOf(IllegalArgumentException.class)
-          .hasMessage("Profissional nao encontrado ou inativo");
+          .hasMessage("Profissional não encontrado ou inativo");
     }
 
     @Test
@@ -456,7 +497,7 @@ class ServicoAgendamentosTest {
 
       assertThatThrownBy(() -> service.criar(requestValido()))
           .isInstanceOf(IllegalArgumentException.class)
-          .hasMessage("Profissional nao atende o servico selecionado");
+          .hasMessage("Profissional não atende o serviço selecionado");
     }
 
     @Test
@@ -467,7 +508,7 @@ class ServicoAgendamentosTest {
 
       assertThatThrownBy(() -> service.criar(requestValido()))
           .isInstanceOf(AppointmentConflictException.class)
-          .hasMessage("Profissional indisponivel neste horario.");
+          .hasMessage("Profissional indisponível neste horário.");
       verify(agendamentoRepository, never()).saveAndFlush(any(Agendamento.class));
     }
 
@@ -481,7 +522,7 @@ class ServicoAgendamentosTest {
 
       assertThatThrownBy(() -> service.criar(req))
           .isInstanceOf(AppointmentConflictException.class)
-          .hasMessage("Horario ja utilizado para este profissional. Confirme o conflito para continuar.");
+          .hasMessage("Horário já utilizado para este profissional. Confirme o conflito para continuar.");
     }
 
     @Test
@@ -496,7 +537,7 @@ class ServicoAgendamentosTest {
 
       assertThatThrownBy(() -> service.criar(req))
           .isInstanceOf(AppointmentConflictException.class)
-          .hasMessage("Profissional indisponivel neste horario.");
+          .hasMessage("Profissional indisponível neste horário.");
     }
 
     @Test
@@ -504,7 +545,6 @@ class ServicoAgendamentosTest {
     void overrideManualConfirmadoCria() {
       stubConflitoDeAgenda();
       when(appointmentSettingsService.allowsManualConflictByTenantId(tenantId)).thenReturn(true);
-      lenient().when(clienteRepository.findByIdAndTenantId(clientId, tenantId)).thenReturn(Optional.empty());
       lenient()
           .when(profissionalRepository.findByIdAndTenantId(professionalId, tenantId))
           .thenReturn(Optional.empty());
@@ -537,6 +577,152 @@ class ServicoAgendamentosTest {
           .registrarCriacaoAgendamento(eq(tenantId), any(), eq(clientId), eq("APPOINTMENT_CREATED"));
     }
 
+    @Test
+    @DisplayName("recusa cliente de outro salao (o id nao pode ser gravado sem conferir o tenant)")
+    void recusaClienteDeOutroSalao() {
+      when(clienteRepository.findByIdAndTenantId(clientId, tenantId)).thenReturn(Optional.empty());
+
+      assertThatThrownBy(() -> service.criar(requestValido()))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessage("Cliente não encontrado");
+      verify(agendamentoRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    @DisplayName("sem cliente ou profissional diz o campo, em vez de estourar NPE")
+    void semClienteOuProfissionalDizOCampo() {
+      AgendamentoRequest semCliente = requestValido();
+      semCliente.clientId = null;
+      assertThatThrownBy(() -> service.criar(semCliente)).hasMessage("Cliente é obrigatório");
+
+      AgendamentoRequest semProfissional = requestValido();
+      semProfissional.professionalId = " ";
+      assertThatThrownBy(() -> service.criar(semProfissional)).hasMessage("Profissional é obrigatório");
+
+      AgendamentoRequest idRuim = requestValido();
+      idRuim.professionalId = "nao-e-uuid";
+      assertThatThrownBy(() -> service.criar(idRuim)).hasMessage("Profissional inválido");
+    }
+
+    @Test
+    @DisplayName("agendamento novo so nasce pendente ou confirmado — concluido pularia comanda e pagamento")
+    void naoCriaJaConcluido() {
+      stubCriacaoSemConflito();
+      AgendamentoRequest concluido = requestValido();
+      concluido.status = "COMPLETED";
+
+      assertThatThrownBy(() -> service.criar(concluido))
+          .hasMessage("Agendamento novo só pode ser criado como pendente ou confirmado");
+      verify(agendamentoRepository, never()).saveAndFlush(any());
+      verify(commissionService, never())
+          .registerServiceCommissionsIfApplicable(any(), any(), any(), any(), any());
+
+      AgendamentoRequest confirmado = requestValido();
+      confirmado.status = "CONFIRMED";
+      assertThat(service.criar(confirmado).status).isEqualTo("CONFIRMED");
+    }
+
+    /** Quem nao aceita agendamento continua na equipe, mas nao recebe marcacao nova. */
+    @Test
+    void naoCriaParaQuemNaoRecebeAgendamento() {
+      when(tenantOperationalSettingsService.isClosedOnSpecialDate(eq(tenantId), any())).thenReturn(false);
+      Profissional recepcao = profissional();
+      recepcao.setAcceptsAppointments(false);
+      when(profissionalRepository.findByIdAndTenantIdAndIsActiveTrue(professionalId, tenantId))
+          .thenReturn(Optional.of(recepcao));
+
+      assertThatThrownBy(() -> service.criar(requestValido()))
+          .hasMessage("Este profissional nao recebe agendamentos");
+      verify(agendamentoRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    @DisplayName("preco vem do servico; do pedido so vale o desconto")
+    void precoDoServicoEDescontoDoPedido() {
+      stubCriacaoSemConflito();
+      AgendamentoRequest req = requestValido();
+      req.items = List.of(item("1.00", "30.00"));
+
+      service.criar(req);
+
+      AgendamentoItem gravado = itemGravado();
+      assertThat(gravado.getUnitPrice()).isEqualByComparingTo("100.00");
+      assertThat(gravado.getGrossAmount()).isEqualByComparingTo("100.00");
+      assertThat(gravado.getDiscountAmount()).isEqualByComparingTo("30.00");
+      assertThat(gravado.getTotalPrice()).isEqualByComparingTo("70.00");
+    }
+
+    @Test
+    @DisplayName("desconto acima do preco vira o preco inteiro: total nunca negativo")
+    void descontoAcimaDoPreco() {
+      stubCriacaoSemConflito();
+      AgendamentoRequest req = requestValido();
+      req.items = List.of(item(null, "500.00"));
+
+      service.criar(req);
+
+      AgendamentoItem gravado = itemGravado();
+      assertThat(gravado.getDiscountAmount()).isEqualByComparingTo("100.00");
+      assertThat(gravado.getTotalPrice()).isEqualByComparingTo("0.00");
+    }
+
+    /**
+     * O teto de desconto da equipe vale TAMBEM na agenda.
+     *
+     * Sem isto o teto do PDV era contornavel: bastava marcar o atendimento com desconto igual ao
+     * preco do servico e o item ja nascia a R$0 — e a comanda automatica herda o preco acordado no
+     * agendamento (achado do roteiro de ponta a ponta de 2026-09-16).
+     */
+    @Test
+    void descontoDaAgendaRespeitaOTetoDaEquipe() {
+      // So o necessario: o pedido morre na checagem do teto, antes de olhar agenda e expediente.
+      when(profissionalRepository.findByIdAndTenantIdAndIsActiveTrue(professionalId, tenantId))
+          .thenReturn(Optional.of(profissional()));
+      when(servicoRepository.findByIdAndTenantId(serviceId, tenantId))
+          .thenReturn(Optional.of(servico(30, "100.00")));
+      when(tenantOperationalSettingsService.getDiscountPolicy(eq(tenantId)))
+          .thenReturn(tetoDeDesconto(20));
+      AgendamentoRequest req = requestValido();
+      req.items = List.of(item(null, "100.00")); // servico de R$100 zerado pelo desconto
+
+      assertThatThrownBy(() -> service.criar(req))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("desconto maximo sem o dono e de 20%");
+    }
+
+    @Test
+    void donoDaODescontoQueQuiserNaAgenda() {
+      stubCriacaoSemConflito();
+      lenient()
+          .when(tenantOperationalSettingsService.getDiscountPolicy(eq(tenantId)))
+          .thenReturn(tetoDeDesconto(20));
+      when(authenticatedUser.temRole("OWNER")).thenReturn(true);
+      AgendamentoRequest req = requestValido();
+      req.items = List.of(item(null, "100.00"));
+
+      service.criar(req);
+
+      assertThat(itemGravado().getTotalPrice()).isEqualByComparingTo("0.00");
+    }
+
+    private AgendamentoRequest.ItemRequest item(String precoDoPedido, String desconto) {
+      AgendamentoRequest.ItemRequest item = new AgendamentoRequest.ItemRequest();
+      item.serviceId = serviceId.toString();
+      if (precoDoPedido != null) {
+        item.unitPrice = new BigDecimal(precoDoPedido);
+        item.grossAmount = new BigDecimal(precoDoPedido);
+        item.totalPrice = new BigDecimal(precoDoPedido);
+      }
+      item.discountAmount = new BigDecimal(desconto);
+      return item;
+    }
+
+    private AgendamentoItem itemGravado() {
+      ArgumentCaptor<AgendamentoItem> captor = ArgumentCaptor.forClass(AgendamentoItem.class);
+      verify(agendamentoItemRepository).save(captor.capture());
+      return captor.getValue();
+    }
+
     private void stubConflitoDeAgenda() {
       when(tenantOperationalSettingsService.isClosedOnSpecialDate(eq(tenantId), any())).thenReturn(false);
       when(profissionalRepository.findByIdAndTenantIdAndIsActiveTrue(professionalId, tenantId))
@@ -564,6 +750,19 @@ class ServicoAgendamentosTest {
   class AtualizarStatus {
 
     @Test
+    @DisplayName("iniciar um atendimento de dia futuro e bloqueado")
+    void iniciarAtendimentoDeDiaFuturoEBloqueado() {
+      Agendamento a =
+          agendamentoExistente(StatusAgendamento.CONFIRMED, LocalDate.now(ZONE_BR).plusDays(1), "10:00", "10:30");
+      when(agendamentoRepository.findByIdAndTenantId(a.getId(), tenantId)).thenReturn(Optional.of(a));
+
+      assertThatThrownBy(() -> service.atualizarStatus(a.getId(), "IN_PROGRESS"))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("só pode ser iniciado ou concluído no dia");
+      assertThat(a.getStatus()).isEqualTo(StatusAgendamento.CONFIRMED);
+    }
+
+    @Test
     @DisplayName("concluir sem nenhuma nota operacional e bloqueado")
     void concluirExigeNotaOperacional() {
       Agendamento a = agendamentoExistente(StatusAgendamento.IN_PROGRESS, LocalDate.now(ZONE_BR), "10:00", "10:30");
@@ -586,7 +785,7 @@ class ServicoAgendamentosTest {
 
       assertThatThrownBy(() -> service.atualizarStatus(a.getId(), "COMPLETED"))
           .isInstanceOf(IllegalArgumentException.class)
-          .hasMessage("Transicao de status invalida: PENDING -> COMPLETED");
+          .hasMessage("Transicao de status inválida: PENDING -> COMPLETED");
     }
 
     @Test
@@ -634,6 +833,78 @@ class ServicoAgendamentosTest {
           .consumirInsumosPorAgendamento(tenantId, a.getId(), List.of(serviceId));
     }
 
+    /**
+     * AGD-006: o lock vem ANTES da leitura. A segunda requisicao espera na trava e so entao le o
+     * agendamento, ja concluido pela primeira.
+     */
+    @Test
+    @DisplayName("travar o agendamento vem antes de le-lo (duplo clique em Concluir)")
+    void atualizarStatusTravaOAgendamentoAntesDeLer() {
+      Agendamento a = agendamentoExistente(StatusAgendamento.IN_PROGRESS, LocalDate.now(ZONE_BR), "10:00", "10:30");
+      when(agendamentoRepository.findByIdAndTenantId(a.getId(), tenantId)).thenReturn(Optional.of(a));
+      when(appointmentCustomerNoteRepository.countByTenantIdAndAppointmentId(tenantId, a.getId()))
+          .thenReturn(1L);
+      when(comandaRepository.existsByAppointmentIdAndTenantId(a.getId(), tenantId)).thenReturn(true);
+      lenient().when(clienteRepository.findByIdAndTenantId(clientId, tenantId)).thenReturn(Optional.empty());
+      lenient()
+          .when(profissionalRepository.findByIdAndTenantId(professionalId, tenantId))
+          .thenReturn(Optional.empty());
+      lenient().when(servicoRepository.findByIdAndTenantId(serviceId, tenantId)).thenReturn(Optional.empty());
+
+      service.atualizarStatus(a.getId(), "COMPLETED");
+
+      InOrder ordem = inOrder(agendamentoQueryRepository, agendamentoRepository);
+      ordem.verify(agendamentoQueryRepository).lockAppointmentStatusChange(tenantId, a.getId());
+      ordem.verify(agendamentoRepository).findByIdAndTenantId(a.getId(), tenantId);
+    }
+
+    /** A segunda chamada ve COMPLETED e nao refaz receita, comissao nem baixa de insumo. */
+    @Test
+    @DisplayName("concluir duas vezes registra receita, comissao e insumo uma vez so")
+    void concluirDuasVezesNaoDuplicaEfeitos() {
+      Agendamento a = agendamentoExistente(StatusAgendamento.IN_PROGRESS, LocalDate.now(ZONE_BR), "10:00", "10:30");
+      when(agendamentoRepository.findByIdAndTenantId(a.getId(), tenantId)).thenReturn(Optional.of(a));
+      when(appointmentCustomerNoteRepository.countByTenantIdAndAppointmentId(tenantId, a.getId()))
+          .thenReturn(1L);
+      when(comandaRepository.existsByAppointmentIdAndTenantId(a.getId(), tenantId)).thenReturn(false);
+      when(transacaoRepository.existsByTenantAndAppointmentAndType(
+              tenantId, a.getId(), TipoTransacao.INCOME))
+          .thenReturn(false);
+      when(servicoRepository.findByIdAndTenantId(serviceId, tenantId))
+          .thenReturn(Optional.of(servico(30, "100.00")));
+      when(transactionCategoryRepository.findByTenantAndName(tenantId, "APPOINTMENT"))
+          .thenReturn(Optional.empty());
+      when(transactionCategoryRepository.save(any()))
+          .thenAnswer(
+              invocation -> {
+                var c = (br.com.phdigitalcode.azzo.agenda.pro.entity.TransactionCategory)
+                    invocation.getArgument(0);
+                c.setId(UUID.randomUUID());
+                return c;
+              });
+      lenient().when(clienteRepository.findByIdAndTenantId(clientId, tenantId)).thenReturn(Optional.empty());
+      lenient()
+          .when(profissionalRepository.findByIdAndTenantId(professionalId, tenantId))
+          .thenReturn(Optional.empty());
+      lenient()
+          .when(comandaRepository.findFirstByAppointmentAndTenant(a.getId(), tenantId))
+          .thenReturn(Optional.empty());
+
+      service.atualizarStatus(a.getId(), "COMPLETED");
+      // Segunda requisicao, ja depois da trava: ve o agendamento concluido. Recusar a transicao ou
+      // aceitar sem efeito e igualmente correto; o que nao pode e refazer os efeitos.
+      try {
+        service.atualizarStatus(a.getId(), "COMPLETED");
+      } catch (IllegalArgumentException esperado) {
+        // transicao COMPLETED -> COMPLETED recusada
+      }
+
+      verify(transacaoRepository, times(1)).save(any(Transacao.class));
+      verify(commissionService, times(1))
+          .registerServiceCommissionsIfApplicable(any(), any(), any(), any(), any());
+      verify(estoqueMovimentacaoService, times(1)).consumirInsumosPorAgendamento(any(), any(), any());
+    }
+
     @Test
     @DisplayName("comanda vinculada assume a receita: concluir nao lanca transacao duplicada")
     void concluirComComandaVinculadaNaoDuplicaReceita() {
@@ -651,6 +922,10 @@ class ServicoAgendamentosTest {
       service.atualizarStatus(a.getId(), "COMPLETED");
 
       verify(transacaoRepository, never()).save(any(Transacao.class));
+      // Com comanda, comissao e insumo saem dela ao FECHAR, pelo que ela cobrou (2026-09-17).
+      verify(commissionService, never())
+          .registerServiceCommissionsIfApplicable(any(), any(), any(), any(), any());
+      verify(estoqueMovimentacaoService, never()).consumirInsumosPorAgendamento(any(), any(), any());
     }
 
     @Test
@@ -666,7 +941,7 @@ class ServicoAgendamentosTest {
 
       assertThatThrownBy(() -> service.atualizarStatus(a.getId(), "CANCELLED"))
           .isInstanceOf(IllegalArgumentException.class)
-          .hasMessageContaining("a comanda vinculada ja foi fechada");
+          .hasMessageContaining("a comanda vinculada já foi fechada");
       assertThat(a.getStatus()).isEqualTo(StatusAgendamento.COMPLETED);
     }
 
@@ -683,11 +958,21 @@ class ServicoAgendamentosTest {
           .thenReturn(Optional.empty());
       lenient().when(servicoRepository.findByIdAndTenantId(serviceId, tenantId)).thenReturn(Optional.empty());
 
+      Transacao receita = new Transacao();
+      receita.setId(UUID.randomUUID());
+      receita.setDate(Instant.now());
+      when(transacaoRepository.listarAtivasDoAgendamentoPorCategoria(
+              tenantId, a.getId(), TipoTransacao.INCOME, "APPOINTMENT"))
+          .thenReturn(List.of(receita));
+
       service.atualizarStatus(a.getId(), "CANCELLED");
 
-      verify(transacaoRepository)
-          .deleteByTenantAndAppointmentAndTypeAndCategoryName(
-              tenantId, a.getId(), TipoTransacao.INCOME, "APPOINTMENT");
+      // Soft delete, e nao remocao fisica — e o insumo volta ao estoque (M2).
+      assertThat(receita.getDeletedAt()).isNotNull();
+      verify(transacaoRepository, never())
+          .deleteByTenantAndAppointmentAndTypeAndCategoryName(any(), any(), any(), any());
+      verify(estoqueMovimentacaoService)
+          .devolverInsumosDoAgendamento(tenantId, a.getId(), "agendamento saiu de concluido");
       verify(commissionService)
           .reverseServiceCommissionIfApplicable(
               tenantId, a.getId(), "Agendamento saiu do status COMPLETED");
@@ -714,7 +999,9 @@ class ServicoAgendamentosTest {
       assertThat(response.comandaId).isEqualTo(comandaId.toString());
       ArgumentCaptor<ComandaDtos.AdicionarItemRequest> itemCaptor =
           ArgumentCaptor.forClass(ComandaDtos.AdicionarItemRequest.class);
-      verify(servicoComanda).adicionarItem(eq(comandaId), itemCaptor.capture());
+      // Caminho interno: o preco acordado no agendamento vale, por isso nao e a rota do PDV
+      // (que passou a usar sempre o preco de tabela).
+      verify(servicoComanda).adicionarItemDoAgendamento(eq(comandaId), itemCaptor.capture());
       assertThat(itemCaptor.getValue().tipo).isEqualTo("SERVICO");
       assertThat(itemCaptor.getValue().referenciaId).isEqualTo(serviceId.toString());
     }
@@ -825,7 +1112,7 @@ class ServicoAgendamentosTest {
 
       assertThatThrownBy(() -> service.atualizarStatus(a.getId(), "COMPLETED", "PIX", "PAY_NOW"))
           .isInstanceOf(IllegalArgumentException.class)
-          .hasMessageContaining("Forma de pagamento nao suportada para 'pagar agora': PIX");
+          .hasMessageContaining("Forma de pagamento não suportada para 'pagar agora': PIX");
     }
   }
 
@@ -851,7 +1138,7 @@ class ServicoAgendamentosTest {
 
       assertThatThrownBy(() -> service.registrarPresenca(a.getId(), false))
           .isInstanceOf(IllegalArgumentException.class)
-          .hasMessage("Nao compareceu so pode ser marcado 5 minutos apos o horario agendado");
+          .hasMessage("Não compareceu só pode ser marcado 5 minutos após o horário agendado");
       assertThat(a.getStatus()).isEqualTo(StatusAgendamento.CONFIRMED);
     }
 
@@ -903,7 +1190,7 @@ class ServicoAgendamentosTest {
 
       assertThatThrownBy(() -> service.registrarPresenca(a.getId(), true))
           .isInstanceOf(IllegalArgumentException.class)
-          .hasMessage("Acesso negado: agendamento nao pertence ao profissional");
+          .hasMessage("Acesso negado: agendamento não pertence ao profissional");
     }
 
     @Test
@@ -945,7 +1232,7 @@ class ServicoAgendamentosTest {
 
       assertThatThrownBy(() -> service.atualizar(a.getId(), new AppointmentUpdateRequest()))
           .isInstanceOf(IllegalArgumentException.class)
-          .hasMessage("Nao e permitido editar agendamento concluido ou cancelado");
+          .hasMessage("Não é permitido editar agendamento concluído ou cancelado");
     }
 
     @Test
@@ -968,6 +1255,43 @@ class ServicoAgendamentosTest {
           .isBusinessOpenAt(any(), any(), any(), any());
     }
 
+    /** Corpo sem campo reconhecido voltava 200 sem mudar nada (jornada de 2026-09-17). */
+    @Test
+    @DisplayName("pedido de edicao vazio e recusado")
+    void pedidoDeEdicaoVazioEhRecusado() {
+      Agendamento a = agendamentoExistente(StatusAgendamento.CONFIRMED, LocalDate.now(ZONE_BR), "10:00", "10:30");
+      when(agendamentoRepository.findByIdAndTenantId(a.getId(), tenantId)).thenReturn(Optional.of(a));
+
+      assertThatThrownBy(() -> service.atualizar(a.getId(), new AppointmentUpdateRequest()))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("Informe o que mudar");
+      verify(agendamentoRepository, never()).save(any());
+    }
+
+    /** Profissional, data e hora deixaram de ser obrigatorios: o que nao vem fica como esta. */
+    @Test
+    @DisplayName("so a observacao, sem profissional, data e hora, mantem o resto")
+    void soObservacaoMantemProfissionalDataEHora() {
+      Agendamento a = agendamentoExistente(StatusAgendamento.CONFIRMED, LocalDate.now(ZONE_BR), "10:00", "10:30");
+      UUID profissionalAntes = a.getProfessionalId();
+      LocalDate dataAntes = a.getDate();
+      when(agendamentoRepository.findByIdAndTenantId(a.getId(), tenantId)).thenReturn(Optional.of(a));
+      lenient().when(clienteRepository.findByIdAndTenantId(clientId, tenantId)).thenReturn(Optional.empty());
+      lenient()
+          .when(profissionalRepository.findByIdAndTenantId(professionalId, tenantId))
+          .thenReturn(Optional.empty());
+      lenient().when(servicoRepository.findByIdAndTenantId(serviceId, tenantId)).thenReturn(Optional.empty());
+      AppointmentUpdateRequest req = new AppointmentUpdateRequest();
+      req.notes = "prefere agua sem gas";
+
+      service.atualizar(a.getId(), req);
+
+      assertThat(a.getNotes()).isEqualTo("prefere agua sem gas");
+      assertThat(a.getProfessionalId()).isEqualTo(profissionalAntes);
+      assertThat(a.getDate()).isEqualTo(dataAntes);
+      assertThat(a.getStartTime()).isEqualTo("10:00");
+    }
+
     @Test
     @DisplayName("realocacao para profissional que nao atende os servicos e recusada")
     void realocacaoParaProfissionalIncompativel() {
@@ -987,7 +1311,7 @@ class ServicoAgendamentosTest {
 
       assertThatThrownBy(() -> service.realocarProfissional(a.getId(), novoProfId))
           .isInstanceOf(IllegalArgumentException.class)
-          .hasMessage("Profissional nao atende um ou mais servicos do agendamento");
+          .hasMessage("Profissional não atende um ou mais serviços do agendamento");
     }
 
     @Test
@@ -1028,7 +1352,239 @@ class ServicoAgendamentosTest {
 
       assertThatThrownBy(() -> service.realocarProfissional(a.getId(), novoProfId))
           .isInstanceOf(IllegalArgumentException.class)
-          .hasMessage("Profissional indisponivel neste horario");
+          .hasMessage("Profissional indisponível neste horário");
+    }
+
+    // ─── AGD-002 / BNC-003: edicao e realocacao tomam o mesmo lock da criacao ───────────────
+
+    private void stubEdicaoDeHorario(Agendamento a) {
+      when(agendamentoRepository.findByIdAndTenantId(a.getId(), tenantId)).thenReturn(Optional.of(a));
+      lenient()
+          .when(tenantOperationalSettingsService.isBusinessOpenAt(any(), any(), any(), any()))
+          .thenReturn(true);
+      lenient().when(clienteRepository.findByIdAndTenantId(clientId, tenantId)).thenReturn(Optional.empty());
+      lenient().when(servicoRepository.findByIdAndTenantId(serviceId, tenantId)).thenReturn(Optional.empty());
+    }
+
+    @Test
+    @DisplayName("editar o horario trava profissional/data ANTES de ler os conflitos")
+    void editarHorarioTravaAntesDeLerConflitos() {
+      Agendamento a = agendamentoExistente(StatusAgendamento.CONFIRMED, LocalDate.of(2030, 6, 10), "10:00", "10:30");
+      stubEdicaoDeHorario(a);
+      AppointmentUpdateRequest req = new AppointmentUpdateRequest();
+      req.startTime = "11:00";
+
+      service.atualizar(a.getId(), req);
+
+      InOrder ordem = inOrder(agendamentoQueryRepository, agendamentoRepository);
+      ordem
+          .verify(agendamentoQueryRepository)
+          .lockProfessionalDateForWrite(tenantId, professionalId, LocalDate.of(2030, 6, 10));
+      ordem
+          .verify(agendamentoRepository)
+          .listActiveByProfessionalAndDateExcluding(
+              eq(tenantId), eq(professionalId), eq(LocalDate.of(2030, 6, 10)), eq(a.getId()), anyList());
+    }
+
+    /** O lock e da chave de DESTINO: mudar a data trava a data nova, nao a antiga. */
+    @Test
+    @DisplayName("editar a data trava a data nova")
+    void editarDataTravaADataNova() {
+      Agendamento a = agendamentoExistente(StatusAgendamento.CONFIRMED, LocalDate.of(2030, 6, 10), "10:00", "10:30");
+      stubEdicaoDeHorario(a);
+      AppointmentUpdateRequest req = new AppointmentUpdateRequest();
+      req.date = "2030-06-12";
+
+      service.atualizar(a.getId(), req);
+
+      verify(agendamentoQueryRepository)
+          .lockProfessionalDateForWrite(tenantId, professionalId, LocalDate.of(2030, 6, 12));
+      verify(agendamentoQueryRepository, never())
+          .lockProfessionalDateForWrite(tenantId, professionalId, LocalDate.of(2030, 6, 10));
+    }
+
+    @Test
+    @DisplayName("editar so as notas nao toma lock nenhum")
+    void editarNotasNaoTrava() {
+      Agendamento a = agendamentoExistente(StatusAgendamento.CONFIRMED, LocalDate.of(2030, 6, 10), "10:00", "10:30");
+      stubEdicaoDeHorario(a);
+      AppointmentUpdateRequest req = new AppointmentUpdateRequest();
+      req.notes = "chegar cedo";
+
+      service.atualizar(a.getId(), req);
+
+      verify(agendamentoQueryRepository, never()).lockProfessionalDateForWrite(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("realocar trava o novo profissional na data ANTES de ler os conflitos")
+    void realocarTravaOProfissionalDeDestinoAntesDeLerConflitos() {
+      Agendamento a = agendamentoExistente(StatusAgendamento.CONFIRMED, LocalDate.of(2030, 6, 10), "10:00", "10:30");
+      UUID novoProfId = UUID.randomUUID();
+      when(agendamentoRepository.findByIdAndTenantId(a.getId(), tenantId)).thenReturn(Optional.of(a));
+      Profissional novo = new Profissional();
+      novo.setId(novoProfId);
+      novo.setTenantId(tenantId);
+      novo.setAcceptsAppointments(true);
+      when(profissionalRepository.findByIdAndTenantIdAndIsActiveTrue(novoProfId, tenantId))
+          .thenReturn(Optional.of(novo));
+      when(servicoRepository.findByIdAndTenantId(serviceId, tenantId))
+          .thenReturn(Optional.of(servico(30, "100.00")));
+      lenient().when(clienteRepository.findByIdAndTenantId(clientId, tenantId)).thenReturn(Optional.empty());
+
+      service.realocarProfissional(a.getId(), novoProfId);
+
+      InOrder ordem = inOrder(agendamentoQueryRepository, agendamentoRepository);
+      ordem
+          .verify(agendamentoQueryRepository)
+          .lockProfessionalDateForWrite(tenantId, novoProfId, LocalDate.of(2030, 6, 10));
+      ordem
+          .verify(agendamentoRepository)
+          .listActiveByProfessionalAndDateExcluding(
+              eq(tenantId), eq(novoProfId), eq(LocalDate.of(2030, 6, 10)), eq(a.getId()), anyList());
+    }
+
+    @Test
+    @DisplayName("realocar para o mesmo profissional nao toma lock")
+    void realocarParaOMesmoNaoTrava() {
+      Agendamento a = agendamentoExistente(StatusAgendamento.CONFIRMED, LocalDate.of(2030, 6, 10), "10:00", "10:30");
+      when(agendamentoRepository.findByIdAndTenantId(a.getId(), tenantId)).thenReturn(Optional.of(a));
+      lenient().when(clienteRepository.findByIdAndTenantId(clientId, tenantId)).thenReturn(Optional.empty());
+
+      service.realocarProfissional(a.getId(), professionalId);
+
+      verify(agendamentoQueryRepository, never()).lockProfessionalDateForWrite(any(), any(), any());
+    }
+
+    // ─── AGD-001: trocar SO o profissional tambem revalida a agenda dele ───────────────────
+
+    private UUID colegaAtivoQueAceitaAgendamento() {
+      UUID colegaId = UUID.randomUUID();
+      Profissional colega = new Profissional();
+      colega.setId(colegaId);
+      colega.setTenantId(tenantId);
+      colega.setAcceptsAppointments(true);
+      when(profissionalRepository.findByIdAndTenantIdAndIsActiveTrue(colegaId, tenantId))
+          .thenReturn(Optional.of(colega));
+      // O servico do agendamento, sem lista de profissionais: qualquer um atende.
+      lenient()
+          .when(servicoRepository.findByIdAndTenantId(serviceId, tenantId))
+          .thenReturn(Optional.of(servico(30, "100.00")));
+      return colegaId;
+    }
+
+    private AppointmentUpdateRequest trocarSoOProfissional(UUID novoProfId) {
+      AppointmentUpdateRequest req = new AppointmentUpdateRequest();
+      req.professionalId = novoProfId.toString();
+      return req;
+    }
+
+    @Test
+    @DisplayName("trocar so o profissional trava o novo profissional e le os conflitos dele")
+    void trocarSoOProfissionalTravaELeConflitosDoNovo() {
+      Agendamento a = agendamentoExistente(StatusAgendamento.CONFIRMED, LocalDate.of(2030, 6, 10), "10:00", "10:30");
+      stubEdicaoDeHorario(a);
+      UUID colegaId = colegaAtivoQueAceitaAgendamento();
+
+      service.atualizar(a.getId(), trocarSoOProfissional(colegaId));
+
+      assertThat(a.getProfessionalId()).isEqualTo(colegaId);
+      InOrder ordem = inOrder(agendamentoQueryRepository, agendamentoRepository);
+      ordem
+          .verify(agendamentoQueryRepository)
+          .lockProfessionalDateForWrite(tenantId, colegaId, LocalDate.of(2030, 6, 10));
+      ordem
+          .verify(agendamentoRepository)
+          .listActiveByProfessionalAndDateExcluding(
+              eq(tenantId), eq(colegaId), eq(LocalDate.of(2030, 6, 10)), eq(a.getId()), anyList());
+    }
+
+    /** O cenario do achado: o colega ja tem aquele horario e a troca voltava 200 com overbooking. */
+    @Test
+    @DisplayName("trocar para um profissional ocupado no mesmo horario e recusado")
+    void trocarParaProfissionalOcupadoERecusado() {
+      Agendamento a = agendamentoExistente(StatusAgendamento.CONFIRMED, LocalDate.of(2030, 6, 10), "10:00", "10:30");
+      stubEdicaoDeHorario(a);
+      UUID colegaId = colegaAtivoQueAceitaAgendamento();
+      Agendamento doColega = agendamentoExistente(StatusAgendamento.CONFIRMED, a.getDate(), "10:00", "10:30");
+      when(agendamentoRepository.listActiveByProfessionalAndDateExcluding(
+              eq(tenantId), eq(colegaId), eq(a.getDate()), eq(a.getId()), anyList()))
+          .thenReturn(List.of(doColega));
+
+      assertThatThrownBy(() -> service.atualizar(a.getId(), trocarSoOProfissional(colegaId)))
+          .isInstanceOf(RuntimeException.class)
+          .hasMessageContaining("Profissional indisponível");
+
+      verify(agendamentoRepository, never()).save(any(Agendamento.class));
+    }
+
+    @Test
+    @DisplayName("trocar para profissional de folga especial e recusado")
+    void trocarParaProfissionalDeFolgaEspecialERecusado() {
+      Agendamento a = agendamentoExistente(StatusAgendamento.CONFIRMED, LocalDate.of(2030, 6, 10), "10:00", "10:30");
+      stubEdicaoDeHorario(a);
+      UUID colegaId = colegaAtivoQueAceitaAgendamento();
+      when(specialClosureService.isClosedAt(eq(tenantId), eq(colegaId), any(), any(), any())).thenReturn(true);
+
+      assertThatThrownBy(() -> service.atualizar(a.getId(), trocarSoOProfissional(colegaId)))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessage("Salão ou profissional com fechamento especial no horário informado");
+
+      verify(agendamentoRepository, never()).save(any(Agendamento.class));
+    }
+
+    @Test
+    @DisplayName("trocar para profissional que nao trabalha naquele dia e recusado")
+    void trocarParaProfissionalForaDaJornadaERecusado() {
+      Agendamento a = agendamentoExistente(StatusAgendamento.CONFIRMED, LocalDate.of(2030, 6, 10), "10:00", "10:30");
+      stubEdicaoDeHorario(a);
+      UUID colegaId = colegaAtivoQueAceitaAgendamento();
+      // 10/06/2030 e uma segunda-feira (dia ISO 1): o colega esta de folga nesse dia.
+      br.com.phdigitalcode.azzo.agenda.pro.entity.ProfissionalWorkingHour folga =
+          new br.com.phdigitalcode.azzo.agenda.pro.entity.ProfissionalWorkingHour();
+      folga.setDayOfWeek(1);
+      folga.setWorking(false);
+      when(profissionalWorkingHourRepository.listByProfessional(tenantId, colegaId)).thenReturn(List.of(folga));
+
+      assertThatThrownBy(() -> service.atualizar(a.getId(), trocarSoOProfissional(colegaId)))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessage("O profissional não atende neste horário");
+
+      verify(agendamentoRepository, never()).save(any(Agendamento.class));
+    }
+
+    @Test
+    @DisplayName("trocar para profissional que nao atende o servico e recusado")
+    void trocarParaProfissionalQueNaoAtendeOServicoERecusado() {
+      Agendamento a = agendamentoExistente(StatusAgendamento.CONFIRMED, LocalDate.of(2030, 6, 10), "10:00", "10:30");
+      stubEdicaoDeHorario(a);
+      UUID colegaId = colegaAtivoQueAceitaAgendamento();
+      Servico s = servico(30, "100.00");
+      Profissional somenteOriginal = new Profissional();
+      somenteOriginal.setId(professionalId);
+      s.getProfissionais().add(somenteOriginal);
+      when(servicoRepository.findByIdAndTenantId(serviceId, tenantId)).thenReturn(Optional.of(s));
+
+      assertThatThrownBy(() -> service.atualizar(a.getId(), trocarSoOProfissional(colegaId)))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessage("Profissional não atende um ou mais serviços do agendamento");
+
+      verify(agendamentoRepository, never()).save(any(Agendamento.class));
+    }
+
+    @Test
+    @DisplayName("editar sem trocar o profissional (so notas) nao dispara essas validacoes")
+    void semTrocarOProfissionalNaoRevalida() {
+      Agendamento a = agendamentoExistente(StatusAgendamento.CONFIRMED, LocalDate.of(2030, 6, 10), "10:00", "10:30");
+      stubEdicaoDeHorario(a);
+      AppointmentUpdateRequest req = new AppointmentUpdateRequest();
+      req.professionalId = professionalId.toString(); // o mesmo de agora
+      req.notes = "so a nota";
+
+      service.atualizar(a.getId(), req);
+
+      verify(agendamentoQueryRepository, never()).lockProfessionalDateForWrite(any(), any(), any());
+      verify(specialClosureService, never()).isClosedAt(any(), any(), any(), any(), any());
     }
 
     @Test
@@ -1039,7 +1595,141 @@ class ServicoAgendamentosTest {
 
       assertThatThrownBy(() -> service.realocarProfissional(a.getId(), UUID.randomUUID()))
           .isInstanceOf(IllegalArgumentException.class)
-          .hasMessage("Nao e permitido realocar agendamento concluido ou cancelado");
+          .hasMessage("Não é permitido realocar agendamento concluído ou cancelado");
+    }
+  }
+
+  // ─── AGD-007: profissional so mexe no PROPRIO agendamento ────────────────────────────────
+
+  @Nested
+  @DisplayName("profissional so acessa o proprio agendamento")
+  class ProfissionalSoMexeNoProprio {
+
+    private static final String NEGADO = "Acesso negado: agendamento não pertence ao profissional";
+
+    private Agendamento doColega;
+
+    /** Quem esta logado e PROFISSIONAL, e o agendamento e de outro profissional (o colega). */
+    @BeforeEach
+    void profissionalLogadoEAgendamentoDeUmColega() {
+      doColega = agendamentoExistente(StatusAgendamento.CONFIRMED, LocalDate.of(2030, 6, 10), "10:00", "10:30");
+      when(agendamentoRepository.findByIdAndTenantId(doColega.getId(), tenantId))
+          .thenReturn(Optional.of(doColega));
+      lenient().when(authenticatedUser.isProfessional()).thenReturn(true);
+      lenient().when(authenticatedUser.idOuFalhar()).thenReturn(userId);
+      Profissional euMesmo = new Profissional();
+      euMesmo.setId(UUID.randomUUID()); // outro id: nao e o profissional do agendamento
+      lenient()
+          .when(profissionalRepository.findByTenantIdAndUserId(tenantId, userId))
+          .thenReturn(Optional.of(euMesmo));
+    }
+
+    @Test
+    @DisplayName("nao le o detalhe (linha do tempo e notas do cliente) do colega")
+    void naoLeODetalheDoColega() {
+      assertThatThrownBy(() -> service.obterDetalhe(doColega.getId()))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessage(NEGADO);
+    }
+
+    @Test
+    @DisplayName("nao cancela nem conclui o agendamento do colega (concluir gera receita e comissao dele)")
+    void naoMudaOStatusDoColega() {
+      assertThatThrownBy(() -> service.atualizarStatus(doColega.getId(), "CANCELLED"))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessage(NEGADO);
+      assertThatThrownBy(() -> service.atualizarStatus(doColega.getId(), "COMPLETED", "CASH", null))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessage(NEGADO);
+
+      assertThat(doColega.getStatus()).isEqualTo(StatusAgendamento.CONFIRMED);
+      verify(agendamentoRepository, never()).save(any(Agendamento.class));
+    }
+
+    @Test
+    @DisplayName("nao edita o agendamento do colega")
+    void naoEditaOAgendamentoDoColega() {
+      AppointmentUpdateRequest req = new AppointmentUpdateRequest();
+      req.notes = "mudei a nota do colega";
+
+      assertThatThrownBy(() -> service.atualizar(doColega.getId(), req))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessage(NEGADO);
+
+      assertThat(doColega.getNotes()).isNotEqualTo("mudei a nota do colega");
+    }
+
+    @Test
+    @DisplayName("nao exclui o agendamento do colega")
+    void naoExcluiOAgendamentoDoColega() {
+      assertThatThrownBy(() -> service.deletar(doColega.getId()))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessage(NEGADO);
+
+      verify(agendamentoRepository, never()).delete(any(Agendamento.class));
+    }
+
+    @Test
+    @DisplayName("nao cria, edita nem apaga nota de atendimento do colega")
+    void naoMexeNasNotasDoColega() {
+      UUID notaId = UUID.randomUUID();
+
+      assertThatThrownBy(
+              () -> service.adicionarNotaCliente(doColega.getId(), new AppointmentCustomerNoteRequest()))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessage(NEGADO);
+      assertThatThrownBy(
+              () ->
+                  service.atualizarNotaCliente(
+                      doColega.getId(), notaId, new AppointmentCustomerNoteUpdateRequest()))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessage(NEGADO);
+      assertThatThrownBy(() -> service.deletarNotaCliente(doColega.getId(), notaId))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessage(NEGADO);
+
+      verify(appointmentCustomerNoteRepository, never()).save(any());
+      verify(appointmentCustomerNoteRepository, never()).delete(any());
+    }
+
+    @Test
+    @DisplayName("profissional sem cadastro de profissional tambem e barrado")
+    void semCadastroDeProfissionalEBarrado() {
+      when(profissionalRepository.findByTenantIdAndUserId(tenantId, userId)).thenReturn(Optional.empty());
+
+      assertThatThrownBy(() -> service.obterDetalhe(doColega.getId()))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessage(NEGADO);
+    }
+
+    @Test
+    @DisplayName("no PROPRIO agendamento o profissional segue editando")
+    void noProprioAgendamentoPassa() {
+      Profissional euMesmo = new Profissional();
+      euMesmo.setId(doColega.getProfessionalId()); // agora o agendamento e dele
+      when(profissionalRepository.findByTenantIdAndUserId(tenantId, userId)).thenReturn(Optional.of(euMesmo));
+      lenient().when(clienteRepository.findByIdAndTenantId(clientId, tenantId)).thenReturn(Optional.empty());
+      lenient().when(servicoRepository.findByIdAndTenantId(serviceId, tenantId)).thenReturn(Optional.empty());
+      AppointmentUpdateRequest req = new AppointmentUpdateRequest();
+      req.notes = "cliente prefere agua sem gas";
+
+      service.atualizar(doColega.getId(), req);
+
+      assertThat(doColega.getNotes()).isEqualTo("cliente prefere agua sem gas");
+    }
+
+    @Test
+    @DisplayName("dono e recepcao (nao-profissional) nao sao afetados")
+    void quemNaoEProfissionalNaoEAfetado() {
+      when(authenticatedUser.isProfessional()).thenReturn(false);
+      lenient().when(clienteRepository.findByIdAndTenantId(clientId, tenantId)).thenReturn(Optional.empty());
+      lenient().when(servicoRepository.findByIdAndTenantId(serviceId, tenantId)).thenReturn(Optional.empty());
+      AppointmentUpdateRequest req = new AppointmentUpdateRequest();
+      req.notes = "ajuste da recepcao";
+
+      service.atualizar(doColega.getId(), req);
+
+      assertThat(doColega.getNotes()).isEqualTo("ajuste da recepcao");
     }
   }
 
@@ -1090,7 +1780,7 @@ class ServicoAgendamentosTest {
 
       assertThatThrownBy(() -> service.deletarNotaCliente(a.getId(), noteId))
           .isInstanceOf(IllegalArgumentException.class)
-          .hasMessage("Nota operacional nao encontrada");
+          .hasMessage("Nota operacional não encontrada");
     }
   }
 
@@ -1113,6 +1803,57 @@ class ServicoAgendamentosTest {
       assertThat(captor.getValue().getPageSize()).isEqualTo(500);
     }
 
+    /**
+     * A agenda do dia montava cada horario buscando cliente, estatisticas, profissional e servico um
+     * a um: 30 horarios = ~150 consultas e ~1 s, e o pool de conexoes travava com 200 usuarios
+     * (teste de carga de 2026-09-19). Agora e uma consulta de cada para a lista inteira.
+     */
+    @Test
+    @DisplayName("agenda do dia carrega cliente, profissional e servico uma vez para a lista toda")
+    void agendaDoDiaCarregaRelacionadosEmLote() {
+      LocalDate dia = LocalDate.of(2030, 6, 10);
+      List<Agendamento> doDia =
+          List.of(
+              agendamentoExistente(StatusAgendamento.CONFIRMED, dia, "09:00", "10:00"),
+              agendamentoExistente(StatusAgendamento.CONFIRMED, dia, "10:00", "11:00"),
+              agendamentoExistente(StatusAgendamento.PENDING, dia, "11:00", "12:00"));
+      when(agendamentoRepository.listByTenantAndDate(eq(tenantId), eq(dia), any(Pageable.class)))
+          .thenReturn(doDia);
+      Cliente cliente = clienteDoSalao();
+      cliente.setId(clientId);
+      cliente.setName("Ana");
+      when(clienteRepository.findAllById(any())).thenReturn(List.of(cliente));
+      when(clienteStatsRepository.findStatsByTenantAndClientIds(eq(tenantId), any()))
+          .thenReturn(Map.of(clientId, new ClienteStatsRepository.ClienteStats(4, new BigDecimal("320.00"), dia)));
+      Profissional profissional = new Profissional();
+      profissional.setId(professionalId);
+      profissional.setTenantId(tenantId);
+      profissional.setName("Bia");
+      when(profissionalRepository.findByIdInAndTenantId(List.of(professionalId), tenantId))
+          .thenReturn(List.of(profissional));
+      Servico servico = new Servico();
+      servico.setId(serviceId);
+      servico.setTenantId(tenantId);
+      servico.setName("Corte");
+      when(servicoRepository.findByTenantIdAndIdIn(tenantId, List.of(serviceId))).thenReturn(List.of(servico));
+
+      List<AgendamentoResponse> agenda = service.listar(dia, 1, 50);
+
+      assertThat(agenda).hasSize(3);
+      assertThat(agenda).allSatisfy(r -> {
+        assertThat(r.client.name).isEqualTo("Ana");
+        assertThat(r.client.totalVisits).isEqualTo(4);
+        assertThat(r.professional.name).isEqualTo("Bia");
+        assertThat(r.service.name).isEqualTo("Corte");
+      });
+      verify(clienteRepository, times(1)).findAllById(any());
+      verify(clienteStatsRepository, times(1)).findStatsByTenantAndClientIds(eq(tenantId), any());
+      verify(profissionalRepository, times(1)).findByIdInAndTenantId(any(), eq(tenantId));
+      verify(servicoRepository, times(1)).findByTenantIdAndIdIn(eq(tenantId), any());
+      verify(clienteRepository, never()).findByIdAndTenantId(any(), any());
+      verify(clienteStatsRepository, never()).findStatsByTenantAndClient(any(), any());
+    }
+
     @Test
     @DisplayName("profissional autenticado sem cadastro na agenda enxerga lista vazia")
     void profissionalSemCadastroVeListaVazia() {
@@ -1129,7 +1870,7 @@ class ServicoAgendamentosTest {
     void mesInvalidoNasMetricas() {
       assertThatThrownBy(() -> service.listarMetricasDiarias(13, 2030))
           .isInstanceOf(IllegalArgumentException.class)
-          .hasMessage("Mes invalido. Informe valor entre 1 e 12");
+          .hasMessage("Mês inválido. Informe valor entre 1 e 12");
     }
 
     @Test
@@ -1174,7 +1915,7 @@ class ServicoAgendamentosTest {
 
       assertThatThrownBy(() -> service.obterDetalhe(id))
           .isInstanceOf(IllegalArgumentException.class)
-          .hasMessage("Agendamento nao encontrado");
+          .hasMessage("Agendamento não encontrado");
     }
 
     @Test
@@ -1223,7 +1964,7 @@ class ServicoAgendamentosTest {
                   service.listarRelatorioGerencial(
                       LocalDate.of(2030, 2, 1), LocalDate.of(2030, 1, 1), null, null, null, null))
           .isInstanceOf(IllegalArgumentException.class)
-          .hasMessage("Periodo de filtro invalido");
+          .hasMessage("Período de filtro inválido");
     }
 
     @Test
@@ -1308,7 +2049,7 @@ class ServicoAgendamentosTest {
                       null, null, LocalDate.of(2030, 1, 1), LocalDate.of(2030, 1, 31), null, null, null, null,
                       "MES"))
           .isInstanceOf(IllegalArgumentException.class)
-          .hasMessage("groupBy invalido. Use DAY, PROFESSIONAL, CLIENT ou SERVICE.");
+          .hasMessage("groupBy inválido. Use DAY, PROFESSIONAL, CLIENT ou SERVICE.");
     }
 
     @Test
@@ -1384,7 +2125,7 @@ class ServicoAgendamentosTest {
                   service.obterHistoricoCliente(
                       clientId, null, null, LocalDate.of(2030, 2, 1), LocalDate.of(2030, 1, 1), null))
           .isInstanceOf(IllegalArgumentException.class)
-          .hasMessage("Periodo de filtro invalido");
+          .hasMessage("Período de filtro inválido");
     }
   }
 
@@ -1414,7 +2155,7 @@ class ServicoAgendamentosTest {
 
     assertThatThrownBy(() -> service.deletar(id))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Agendamento nao encontrado");
+        .hasMessage("Agendamento não encontrado");
     verify(agendamentoRepository, never()).delete(any(Agendamento.class));
   }
 
@@ -1431,4 +2172,86 @@ class ServicoAgendamentosTest {
 
     verify(agendamentoRepository).delete(a);
   }
+
+  // ─── Exclusao nao apaga dinheiro nem historico (2026-09-16, A2) ────────────
+
+  /** Concluido e historico do cliente — e o banco levava junto o sinal e o registro. */
+  @Test
+  @DisplayName("agendamento concluido nao se exclui")
+  void agendamentoConcluidoNaoSeExclui() {
+    Agendamento a = agendamentoExistente(StatusAgendamento.COMPLETED, LocalDate.of(2030, 6, 10), "10:00", "10:30");
+    when(agendamentoRepository.findByIdAndTenantId(a.getId(), tenantId)).thenReturn(Optional.of(a));
+
+    assertThatThrownBy(() -> service.deletar(a.getId()))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("histórico do cliente");
+    verify(agendamentoRepository, never()).delete(any(Agendamento.class));
+  }
+
+  @Test
+  @DisplayName("agendamento pendente com sinal pago nao se exclui: cancela")
+  void agendamentoComSinalNaoSeExclui() {
+    Agendamento a = agendamentoExistente(StatusAgendamento.PENDING, LocalDate.of(2030, 6, 10), "10:00", "10:30");
+    when(agendamentoRepository.findByIdAndTenantId(a.getId(), tenantId)).thenReturn(Optional.of(a));
+    when(vinculosDeExclusao.doAgendamento(tenantId, a.getId())).thenReturn(List.of("sinal de reserva"));
+
+    assertThatThrownBy(() -> service.deletar(a.getId()))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("sinal de reserva")
+        .hasMessageContaining("Cancele");
+    verify(agendamentoRepository, never()).delete(any(Agendamento.class));
+  }
+
+  // ─── Atendimento em andamento: so a observacao muda (2026-09-16, M1) ───────
+
+  private SchedulingDtosUpdate formularioIgual(Agendamento a) {
+    return new SchedulingDtosUpdate(a);
+  }
+
+  /** O formulario de edicao manda tudo: profissional, data, hora e itens iguais aos atuais. */
+  private static final class SchedulingDtosUpdate {
+    final br.com.phdigitalcode.azzo.agenda.pro.dto.SchedulingDtos.AppointmentUpdateRequest req =
+        new br.com.phdigitalcode.azzo.agenda.pro.dto.SchedulingDtos.AppointmentUpdateRequest();
+
+    SchedulingDtosUpdate(Agendamento a) {
+      req.professionalId = a.getProfessionalId().toString();
+      req.date = a.getDate().toString();
+      req.startTime = a.getStartTime();
+      for (var item : a.getItems()) {
+        AgendamentoRequest.ItemRequest pedido = new AgendamentoRequest.ItemRequest();
+        pedido.serviceId = item.getServiceId().toString();
+        pedido.quantity = item.getQuantity();
+        req.items.add(pedido);
+      }
+    }
+  }
+
+  @Test
+  @DisplayName("em andamento, trocar o profissional e recusado: ajusta-se na comanda")
+  void emAndamentoNaoTrocaProfissional() {
+    Agendamento a = agendamentoExistente(StatusAgendamento.IN_PROGRESS, LocalDate.now(ZONE_BR), "10:00", "10:30");
+    when(agendamentoRepository.findByIdAndTenantId(a.getId(), tenantId)).thenReturn(Optional.of(a));
+    var form = formularioIgual(a);
+    form.req.professionalId = UUID.randomUUID().toString();
+
+    assertThatThrownBy(() -> service.atualizar(a.getId(), form.req))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("ajuste serviços e profissional na comanda");
+    assertThat(a.getProfessionalId()).isEqualTo(professionalId);
+  }
+
+  @Test
+  @DisplayName("em andamento, o formulario inteiro com so a observacao mudada passa")
+  void emAndamentoMudaSoAObservacao() {
+    Agendamento a = agendamentoExistente(StatusAgendamento.IN_PROGRESS, LocalDate.now(ZONE_BR), "10:00", "10:30");
+    when(agendamentoRepository.findByIdAndTenantId(a.getId(), tenantId)).thenReturn(Optional.of(a));
+    var form = formularioIgual(a);
+    form.req.notes = "Cliente pediu para nao lavar";
+
+    service.atualizar(a.getId(), form.req);
+
+    assertThat(a.getNotes()).isEqualTo("Cliente pediu para nao lavar");
+    verify(agendamentoRepository).save(a);
+  }
 }
+

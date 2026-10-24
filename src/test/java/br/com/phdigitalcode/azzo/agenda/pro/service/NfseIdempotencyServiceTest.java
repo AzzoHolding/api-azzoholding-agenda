@@ -155,10 +155,10 @@ class NfseIdempotencyServiceTest {
   void rejeitaSupplierOuResponseTypeNulos() {
     assertThatThrownBy(() -> service.execute(tenantId, "OP", "key", null, String.class))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("supplier obrigatorio");
+        .hasMessage("supplier obrigatório");
     assertThatThrownBy(() -> service.execute(tenantId, "OP", "key", () -> "ok", null))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("responseType obrigatorio");
+        .hasMessage("responseType obrigatório");
 
     verify(nfseIdempotencyRequestRepository, never()).saveAndFlush(any());
   }

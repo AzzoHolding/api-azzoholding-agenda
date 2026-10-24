@@ -23,6 +23,17 @@ public class ComandaItem {
   public static final String TIPO_PRODUTO = "PRODUTO";
   public static final String TIPO_PACOTE = "PACOTE";
 
+  /** De onde o item veio: o agendamento trouxe, ou alguem lancou na mao no PDV. */
+  public static final String ORIGEM_AGENDAMENTO = "AGENDAMENTO";
+
+  public static final String ORIGEM_MANUAL = "MANUAL";
+
+  /** O servico saiu do pacote comprado pelo cliente (V134). */
+  public static final String COBERTURA_PACOTE = "PACOTE";
+
+  /** O servico saiu da assinatura mensal do cliente (V134). */
+  public static final String COBERTURA_ASSINATURA = "ASSINATURA";
+
   @Id
   @Column(name = "id", nullable = false)
   private UUID id;
@@ -53,6 +64,33 @@ public class ComandaItem {
 
   @Column(name = "total", nullable = false)
   private BigDecimal total;
+
+  /**
+   * Origem do item (V132). Sem isto, o servico que o agendamento trouxe e o lancado a mao ficavam
+   * indistinguiveis — e lancar de novo o mesmo servico cobrava o cliente duas vezes sem que
+   * ninguem visse de onde tinha vindo cada linha.
+   */
+  @Column(name = "origem", nullable = false)
+  private String origem = ORIGEM_MANUAL;
+
+  /** PACOTE ou ASSINATURA quando a recepcao escolheu cobrir o servico (V134); nulo, cobrado. */
+  @Column(name = "cobertura_tipo")
+  private String coberturaTipo;
+
+  /** O saldo de onde a sessao sai — de pacote ou de assinatura, conforme o tipo. */
+  @Column(name = "cobertura_saldo_id")
+  private UUID coberturaSaldoId;
+
+  /**
+   * O valor da sessao dentro do que o cliente pagou pelo pacote/plano. E a base da comissao do
+   * servico coberto: a conta sai zerada, e o profissional nao pode trabalhar de graca.
+   */
+  @Column(name = "valor_cobertura")
+  private BigDecimal valorCobertura;
+
+  /** O preco que o item tinha antes da cobertura, para voltar se ela for retirada. */
+  @Column(name = "preco_antes_cobertura")
+  private BigDecimal precoAntesCobertura;
 
   @Column(name = "created_at", nullable = false)
   private Instant createdAt;

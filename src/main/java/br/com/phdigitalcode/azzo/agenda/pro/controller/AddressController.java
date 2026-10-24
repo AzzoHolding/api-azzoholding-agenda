@@ -12,7 +12,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.service.AddressService;
 /** Espelha {@code modules/address/api/AddressResource.java}. */
 @RestController
 @RequestMapping("/api/v1/utils/addresses")
-@PreAuthorize("hasAnyRole('OWNER', 'PROFESSIONAL')")
+@PreAuthorize("hasAnyRole('OWNER', 'PROFESSIONAL', 'STAFF')")
 public class AddressController {
 
   private final AddressService addressService;

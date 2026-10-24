@@ -6,6 +6,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import br.com.phdigitalcode.azzo.agenda.pro.service.LgpdRetentionService;
+import br.com.phdigitalcode.azzo.agenda.pro.service.ServicoEliminacaoFimDeContrato;
 
 /**
  * Espelha {@code scheduler/LgpdRetentionScheduler.java} ({@code @Scheduled(cron =
@@ -19,9 +20,12 @@ public class LgpdRetentionScheduler {
   private static final Logger LOG = LoggerFactory.getLogger(LgpdRetentionScheduler.class);
 
   private final LgpdRetentionService lgpdRetentionService;
+  private final ServicoEliminacaoFimDeContrato eliminacaoFimDeContrato;
 
-  public LgpdRetentionScheduler(LgpdRetentionService lgpdRetentionService) {
+  public LgpdRetentionScheduler(
+      LgpdRetentionService lgpdRetentionService, ServicoEliminacaoFimDeContrato eliminacaoFimDeContrato) {
     this.lgpdRetentionService = lgpdRetentionService;
+    this.eliminacaoFimDeContrato = eliminacaoFimDeContrato;
   }
 
   @Scheduled(cron = "${app.lgpd.retention.purge-cron:0 30 2 * * ?}")
@@ -30,6 +34,7 @@ public class LgpdRetentionScheduler {
     try {
       lgpdRetentionService.logDadosExpirados();
       lgpdRetentionService.purgarDadosExpirados();
+      eliminacaoFimDeContrato.executar();
     } catch (Exception e) {
       LOG.error("LGPD retention job falhou.", e);
       throw e;

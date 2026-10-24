@@ -91,9 +91,9 @@ public class FiscalDanfeJobService {
     FiscalDanfeJobEntity job =
         fiscalDanfeJobRepository
             .findByTenantAndId(tenantId, id)
-            .orElseThrow(() -> new ApiClientErrorException("Job DANFE nao encontrado.", 404));
+            .orElseThrow(() -> new ApiClientErrorException("Job DANFE não encontrado.", 404));
     if (!invoice.getId().equals(job.getInvoiceId())) {
-      throw new ApiClientErrorException("Job DANFE nao encontrado para a invoice informada.", 404);
+      throw new ApiClientErrorException("Job DANFE não encontrado para a invoice informada.", 404);
     }
     return toResponse(job);
   }
@@ -106,20 +106,20 @@ public class FiscalDanfeJobService {
     FiscalDanfeJobEntity job =
         fiscalDanfeJobRepository
             .findByTenantAndId(tenantId, id)
-            .orElseThrow(() -> new ApiClientErrorException("Job DANFE nao encontrado.", 404));
+            .orElseThrow(() -> new ApiClientErrorException("Job DANFE não encontrado.", 404));
     if (!invoice.getId().equals(job.getInvoiceId())) {
-      throw new ApiClientErrorException("Job DANFE nao encontrado para a invoice informada.", 404);
+      throw new ApiClientErrorException("Job DANFE não encontrado para a invoice informada.", 404);
     }
     if (!"DONE".equalsIgnoreCase(job.getStatus())) {
-      throw new ApiClientErrorException("DANFE ainda nao esta pronto para download.", 409);
+      throw new ApiClientErrorException("DANFE ainda não esta pronto para download.", 409);
     }
     if (Boolean.TRUE.equals(isDownloadConsumido(job))) {
-      throw new ApiClientErrorException("DANFE ja foi baixado e removido.", 410);
+      throw new ApiClientErrorException("DANFE já foi baixado e removido.", 410);
     }
     if (isDownloadExpirado(job)) {
       minioStorageService.removerArquivoFiscalDanfe(job.getPdfStorageKey(), job.getTenantId());
       job.setPdfStorageKey(null);
-      throw new ApiClientErrorException("DANFE expirado e removido apos 24 horas.", 410);
+      throw new ApiClientErrorException("DANFE expirado e removido após 24 horas.", 410);
     }
 
     byte[] arquivo =
@@ -132,7 +132,7 @@ public class FiscalDanfeJobService {
                     fiscalProvider.obterInvoice(tenantId, externalInvoiceId),
                     fiscalProvider.obterTaxConfig(tenantId)));
     if (arquivo == null || arquivo.length == 0) {
-      throw new ApiClientErrorException("Arquivo DANFE indisponivel para download.", 410);
+      throw new ApiClientErrorException("Arquivo DANFE indisponível para download.", 410);
     }
 
     job.setDownloadCount((job.getDownloadCount() == null ? 0 : job.getDownloadCount()) + 1);
@@ -149,7 +149,7 @@ public class FiscalDanfeJobService {
   private FiscalInvoiceEntity obterInvoiceOuFalhar(UUID tenantId, String externalInvoiceId) {
     return fiscalInvoiceRepository
         .findByTenantAndExternalInvoiceId(tenantId, externalInvoiceId)
-        .orElseThrow(() -> new ApiClientErrorException("Invoice fiscal nao encontrada.", 404));
+        .orElseThrow(() -> new ApiClientErrorException("Invoice fiscal não encontrada.", 404));
   }
 
   private UUID obterUsuarioAtualOuFalhar() {

@@ -117,7 +117,9 @@ class AssistantInternalControllerTest {
         profissionalRepository,
         tenantWhatsAppConfigRepository,
         contextoTenant,
-        tenantOperationalSettingsService);
+        tenantOperationalSettingsService,
+        org.mockito.Mockito.mock(br.com.phdigitalcode.azzo.agenda.pro.repository.TenantAddressRepository.class),
+        org.mockito.Mockito.mock(br.com.phdigitalcode.azzo.agenda.pro.service.SpecialClosureService.class));
   }
 
   // ─── contrato de classe ─────────────────────────────────────────────────
@@ -242,7 +244,8 @@ class AssistantInternalControllerTest {
   @Test
   void listarProfissionaisDelegaParaProfissionalServiceComServiceId() {
     List<ProfissionalResponse> response = List.of(new ProfissionalResponse());
-    when(profissionalService.listar("srv-1")).thenReturn(response);
+    // `true`: o assistente so oferece quem aceita agendamento.
+    when(profissionalService.listar("srv-1", true)).thenReturn(response);
 
     assertThat(controller.listarProfissionais(tenantId.toString(), "srv-1")).isSameAs(response);
     verify(contextoTenant).definirTenantId(tenantId);
@@ -543,5 +546,17 @@ class AssistantInternalControllerTest {
     assertThat(result.canSchedule).isTrue();
     assertThat(result.canCancel).isFalse();
     assertThat(result.canReschedule).isTrue();
+  }
+
+  @Test
+  void enderecoDoSalaoEmTextoSemAsPartesVazias() {
+    br.com.phdigitalcode.azzo.agenda.pro.entity.TenantAddress a = new br.com.phdigitalcode.azzo.agenda.pro.entity.TenantAddress();
+    a.setStreet("Rua das Flores");
+    a.setNumber("10");
+    a.setNeighborhood("Centro");
+    a.setCity("Rio de Janeiro");
+    a.setState("RJ");
+    assertThat(AssistantInternalController.enderecoEmTexto(a)).isEqualTo("Rua das Flores, 10 - Centro, Rio de Janeiro/RJ");
+    assertThat(AssistantInternalController.enderecoEmTexto(new br.com.phdigitalcode.azzo.agenda.pro.entity.TenantAddress())).isNull();
   }
 }

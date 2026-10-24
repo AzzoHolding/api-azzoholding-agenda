@@ -45,17 +45,30 @@ public class TotpService {
   }
 
   public boolean verifyCode(String secretBase32, String code, Instant now) {
-    if (secretBase32 == null || secretBase32.isBlank()) return false;
+    return passoValido(secretBase32, code, now).isPresent();
+  }
+
+  /**
+   * O passo de tempo (contador TOTP) que o codigo corresponde, se valido. Quem chama guarda o
+   * ultimo passo usado e recusa um passo igual ou anterior — sem isso, o mesmo codigo vale de novo
+   * durante toda a janela (pentest 14/10/2026, SEG-007).
+   */
+  public java.util.OptionalLong passoValido(String secretBase32, String code, Instant now) {
+    if (secretBase32 == null || secretBase32.isBlank()) return java.util.OptionalLong.empty();
     String normalizedCode = normalizeCode(code);
-    if (normalizedCode == null) return false;
+    if (normalizedCode == null) return java.util.OptionalLong.empty();
     byte[] secret = base32Decode(secretBase32);
-    if (secret.length == 0) return false;
+    if (secret.length == 0) return java.util.OptionalLong.empty();
     long counter = now.getEpochSecond() / DEFAULT_STEP_SECONDS;
     for (long i = -DEFAULT_WINDOW; i <= DEFAULT_WINDOW; i++) {
       String expected = hotp(secret, counter + i, DEFAULT_DIGITS);
-      if (expected.equals(normalizedCode)) return true;
+      if (java.security.MessageDigest.isEqual(
+          expected.getBytes(java.nio.charset.StandardCharsets.US_ASCII),
+          normalizedCode.getBytes(java.nio.charset.StandardCharsets.US_ASCII))) {
+        return java.util.OptionalLong.of(counter + i);
+      }
     }
-    return false;
+    return java.util.OptionalLong.empty();
   }
 
   private String normalizeIssuer(String issuer) {
@@ -85,7 +98,7 @@ public class TotpService {
       int otp = binary % (int) Math.pow(10, digits);
       return String.format(Locale.ROOT, "%0" + digits + "d", otp);
     } catch (GeneralSecurityException e) {
-      throw new IllegalStateException("Falha ao gerar codigo TOTP", e);
+      throw new IllegalStateException("Falha ao gerar código TOTP", e);
     }
   }
 

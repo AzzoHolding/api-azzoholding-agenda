@@ -43,7 +43,7 @@ public class MetaSignedRequestService {
 
     String[] parts = signedRequest.split("\\.", 2);
     if (parts.length != 2) {
-      throw new IllegalArgumentException("signed_request invalido.");
+      throw new IllegalArgumentException("signed_request inválido.");
     }
 
     byte[] signature = decodeBase64Url(parts[0]);
@@ -79,7 +79,7 @@ public class MetaSignedRequestService {
   private void validateAlgorithm(JsonNode payload) {
     String algorithm = text(payload.path("algorithm"));
     if (algorithm == null || !"HMAC-SHA256".equalsIgnoreCase(algorithm)) {
-      throw new IllegalArgumentException("Algoritmo do signed_request invalido.");
+      throw new IllegalArgumentException("Algoritmo do signed_request inválido.");
     }
   }
 
@@ -89,7 +89,7 @@ public class MetaSignedRequestService {
       mac.init(new SecretKeySpec(appSecret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
       byte[] expected = mac.doFinal(payloadSegment.getBytes(StandardCharsets.UTF_8));
       if (!MessageDigest.isEqual(signature, expected)) {
-        throw new IllegalArgumentException("Assinatura do signed_request invalida.");
+        throw new IllegalArgumentException("Assinatura do signed_request inválida.");
       }
     } catch (IllegalArgumentException e) {
       throw e;
@@ -103,7 +103,7 @@ public class MetaSignedRequestService {
       byte[] payloadBytes = decodeBase64Url(payloadSegment);
       return objectMapper.readTree(payloadBytes);
     } catch (Exception e) {
-      throw new IllegalArgumentException("Payload do signed_request invalido.", e);
+      throw new IllegalArgumentException("Payload do signed_request inválido.", e);
     }
   }
 
@@ -111,7 +111,7 @@ public class MetaSignedRequestService {
     try {
       return Base64.getUrlDecoder().decode(padBase64(value));
     } catch (Exception e) {
-      throw new IllegalArgumentException("Base64 URL invalido no signed_request.", e);
+      throw new IllegalArgumentException("Base64 URL inválido no signed_request.", e);
     }
   }
 
@@ -148,7 +148,7 @@ public class MetaSignedRequestService {
 
   private void ensureAppSecretConfigured() {
     if (appSecret == null || appSecret.isBlank() || "__unset__".equalsIgnoreCase(appSecret.trim())) {
-      throw new IllegalStateException("META_APP_SECRET nao configurado.");
+      throw new IllegalStateException("META_APP_SECRET não configurado.");
     }
   }
 

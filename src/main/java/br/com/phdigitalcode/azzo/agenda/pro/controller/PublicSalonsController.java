@@ -45,12 +45,12 @@ public class PublicSalonsController {
   }
 
   @GetMapping("/{slug}/services")
-  public List<ServicoResponse> listarServicosAtivos(@PathVariable("slug") String slug) {
+  public List<PublicBookingDtos.PublicService> listarServicosAtivos(@PathVariable("slug") String slug) {
     return servicoPublicBooking.listarServicosAtivos(slug);
   }
 
   @GetMapping("/{slug}/professionals")
-  public List<ProfissionalResponse> listarProfissionaisAtivos(
+  public List<PublicBookingDtos.PublicProfessional> listarProfissionaisAtivos(
       @PathVariable("slug") String slug,
       @RequestParam(name = "serviceId", required = false) String serviceId,
       @RequestParam(name = "serviceIds", required = false) String serviceIds) {

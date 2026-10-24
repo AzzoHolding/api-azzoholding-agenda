@@ -52,6 +52,53 @@ public class WhatsAppController {
     return servicoTenantWhatsapp.validarConfiguracao(request);
   }
 
+  /**
+   * Registra o numero no Cloud API para uma conexao que JA existe.
+   *
+   * <p>O Embedded Signup passou a registrar na conexao nova, mas quem ja estava conectado antes
+   * ficou com um numero que nao envia — e reconectar pelo popup so para disparar o registro seria
+   * absurdo. Este e o caminho para esses casos, e para quando o registro falhou na primeira vez.
+   */
+  /** O salao cadastra o template que ele aprovou na Meta para a confirmacao de agendamento. */
+  @PostMapping("/confirmation-template")
+  public TenantWhatsAppDtos.ConfigResponse definirTemplateDeConfirmacao(
+      @RequestBody TenantWhatsAppDtos.TemplateDeConfirmacaoRequest request) {
+    return servicoTenantWhatsapp.definirTemplateDeConfirmacao(request);
+  }
+
+  /** Os templates do salao, com o estado da analise da Meta. */
+  @GetMapping("/templates")
+  public TenantWhatsAppDtos.TemplatesResponse listarTemplates() {
+    return servicoTenantWhatsapp.listarTemplates();
+  }
+
+  /**
+   * Poe os modelos em dia: cria o que falta e reconfere o status na Meta.
+   *
+   * <p>Existe pelo legado — quem conectou antes de 2026-09-23 tem numero registrado e nenhum
+   * template criado, porque a criacao automatica roda no fim do Embedded Signup. Serve tambem
+   * para reconferir na hora, sem esperar os 10 minutos do monitoramento.
+   */
+  @PostMapping("/templates/sync")
+  public TenantWhatsAppDtos.TemplatesResponse sincronizarTemplates() {
+    return servicoTenantWhatsapp.sincronizarTemplates();
+  }
+
+  /**
+   * Cria na Meta os templates das mensagens automaticas que o salao escreveu.
+   *
+   * <p>Criar nao e aprovar: a resposta volta com os pendentes, e o estado e reconferido sozinho.
+   */
+  @PostMapping("/templates")
+  public TenantWhatsAppDtos.TemplatesResponse criarTemplates() {
+    return servicoTenantWhatsapp.criarTemplatesDasMensagens();
+  }
+
+  @PostMapping("/register-number")
+  public TenantWhatsAppDtos.RegistroDoNumeroResponse registrarNumero() {
+    return servicoTenantWhatsapp.registrarNumero();
+  }
+
   @PostMapping("/test-message")
   public TenantWhatsAppDtos.TestMessageResponse enviarMensagemTeste(
       @Valid @RequestBody TenantWhatsAppDtos.TestMessageRequest request) {
@@ -69,9 +116,18 @@ public class WhatsAppController {
     return servicoTenantWhatsapp.concluirEmbeddedSignup(request);
   }
 
+  /**
+   * O log de mensagens, com filtro de situacao e periodo.
+   *
+   * <p>Sem filtro no servidor, a tela so poderia filtrar a pagina carregada — e uma mensagem que
+   * falhou tres dias atras ficaria invisivel justamente para quem esta procurando por ela.
+   */
   @GetMapping("/message-log")
   public TenantWhatsAppDtos.MessageLogResponse listarMensagens(
-      @RequestParam(name = "limit", defaultValue = "50") int limit) {
-    return servicoTenantWhatsapp.listarMensagens(limit);
+      @RequestParam(name = "limit", defaultValue = "50") int limit,
+      @RequestParam(name = "status", required = false) String status,
+      @RequestParam(name = "de", required = false) String de,
+      @RequestParam(name = "ate", required = false) String ate) {
+    return servicoTenantWhatsapp.listarMensagens(limit, status, de, ate);
   }
 }

@@ -82,14 +82,14 @@ public class ServicoClientMemberships {
     Cliente cliente =
         clienteRepository
             .findByIdAndTenantId(clientId, tenantId)
-            .orElseThrow(() -> new ApiClientErrorException("Cliente nao encontrado.", 404));
+            .orElseThrow(() -> new ApiClientErrorException("Cliente não encontrado.", 404));
     MembershipPlan plano =
         membershipPlanRepository
             .findByIdAndTenantId(UUID.fromString(request.planId), tenantId)
             .orElseThrow(
-                () -> new ApiClientErrorException("Plano de assinatura nao encontrado.", 404));
+                () -> new ApiClientErrorException("Plano de assinatura não encontrado.", 404));
     if (!plano.isAtivo()) {
-      throw new IllegalArgumentException("Plano de assinatura nao esta ativo.");
+      throw new IllegalArgumentException("Plano de assinatura não esta ativo.");
     }
 
     if (request.customerCpfCnpj != null && !request.customerCpfCnpj.isBlank()) {
@@ -147,9 +147,9 @@ public class ServicoClientMemberships {
     ClientMembership membership =
         clientMembershipRepository
             .findByIdAndTenantId(membershipId, tenantId)
-            .orElseThrow(() -> new ApiClientErrorException("Assinatura nao encontrada.", 404));
+            .orElseThrow(() -> new ApiClientErrorException("Assinatura não encontrada.", 404));
     if (ClientMembership.STATUS_CANCELADA.equals(membership.getStatus())) {
-      throw new IllegalArgumentException("Assinatura ja esta cancelada.");
+      throw new IllegalArgumentException("Assinatura já esta cancelada.");
     }
 
     if (membership.getAsaasSubscriptionId() != null) {

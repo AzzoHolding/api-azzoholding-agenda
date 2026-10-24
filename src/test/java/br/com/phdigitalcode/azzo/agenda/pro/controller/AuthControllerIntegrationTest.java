@@ -52,6 +52,7 @@ class AuthControllerIntegrationTest {
 
   @Autowired private MockMvc mockMvc;
   @Autowired private ObjectMapper objectMapper;
+  @Autowired private br.com.phdigitalcode.azzo.agenda.pro.repository.EmailJobRepository emailJobRepository;
 
   private RegisterRequest buildRegisterRequest(String email) {
     RegisterRequest request = new RegisterRequest();
@@ -73,18 +74,34 @@ class AuthControllerIntegrationTest {
     String email = "maria." + System.nanoTime() + "@example.com";
     RegisterRequest registerRequest = buildRegisterRequest(email);
 
-    MvcResult registerResult = mockMvc.perform(post("/api/v1/auth/register")
+    // O cadastro NAO devolve sessao: a conta so entra depois de confirmar o e-mail.
+    mockMvc.perform(post("/api/v1/auth/register")
             .contentType("application/json")
             .content(objectMapper.writeValueAsString(registerRequest)))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.user.email").value(email))
-        .andExpect(jsonPath("$.user.role").value("OWNER"))
-        .andExpect(cookie().exists("AZZO_ACCESS_TOKEN"))
-        .andExpect(cookie().exists("AZZO_REFRESH_TOKEN"))
-        .andReturn();
+        .andExpect(jsonPath("$.message").exists())
+        .andExpect(cookie().doesNotExist("AZZO_ACCESS_TOKEN"))
+        .andExpect(cookie().doesNotExist("AZZO_REFRESH_TOKEN"));
 
-    Cookie refreshCookie = registerResult.getResponse().getCookie("AZZO_REFRESH_TOKEN");
-    Cookie accessCookie = registerResult.getResponse().getCookie("AZZO_ACCESS_TOKEN");
+    LoginRequest antesDeConfirmar = new LoginRequest();
+    antesDeConfirmar.email = email;
+    antesDeConfirmar.password = "SenhaForte@123";
+    mockMvc.perform(post("/api/v1/auth/login")
+            .contentType("application/json")
+            .content(objectMapper.writeValueAsString(antesDeConfirmar)))
+        .andExpect(status().isForbidden());
+
+    // O link da fila de e-mail traz o token puro.
+    String payload = emailJobRepository.findAll().stream()
+        .filter(j -> email.equals(j.getRecipientEmail()))
+        .map(j -> j.getPayloadJson())
+        .findFirst().orElseThrow();
+    java.util.regex.Matcher m = java.util.regex.Pattern.compile("token=([A-Za-z0-9_-]+)").matcher(payload);
+    org.junit.jupiter.api.Assertions.assertTrue(m.find());
+    mockMvc.perform(post("/api/v1/auth/confirm-email")
+            .contentType("application/json")
+            .content("{\"token\":\"" + m.group(1) + "\"}"))
+        .andExpect(status().isOk());
 
     // login com a senha recem-cadastrada
     LoginRequest loginRequest = new LoginRequest();
@@ -101,6 +118,7 @@ class AuthControllerIntegrationTest {
     AuthResponse loginResponse =
         objectMapper.readValue(loginResult.getResponse().getContentAsString(), AuthResponse.class);
     Cookie loginAccessCookie = loginResult.getResponse().getCookie("AZZO_ACCESS_TOKEN");
+    Cookie refreshCookie = loginResult.getResponse().getCookie("AZZO_REFRESH_TOKEN");
 
     // /me autenticado via cookie
     mockMvc.perform(get("/api/v1/auth/me").cookie(loginAccessCookie))
@@ -111,7 +129,7 @@ class AuthControllerIntegrationTest {
     // /me sem cookie -> nao autenticado
     mockMvc.perform(get("/api/v1/auth/me")).andExpect(status().isUnauthorized());
 
-    // refresh usando o cookie de refresh emitido no registro
+    // refresh usando o cookie de refresh emitido no login
     mockMvc.perform(post("/api/v1/auth/refresh").cookie(refreshCookie))
         .andExpect(status().isOk())
         .andExpect(cookie().exists("AZZO_ACCESS_TOKEN"));
@@ -170,12 +188,20 @@ class AuthControllerIntegrationTest {
   @Test
   void menuAtualRespondeComRoleERotasParaUsuarioAutenticado() throws Exception {
     String email = "menu." + System.nanoTime() + "@example.com";
-    MvcResult registerResult = mockMvc.perform(post("/api/v1/auth/register")
+    mockMvc.perform(post("/api/v1/auth/register")
             .contentType("application/json")
             .content(objectMapper.writeValueAsString(buildRegisterRequest(email))))
+        .andExpect(status().isOk());
+    confirmarEmail(email);
+    LoginRequest login = new LoginRequest();
+    login.email = email;
+    login.password = "SenhaForte@123";
+    MvcResult loginResult = mockMvc.perform(post("/api/v1/auth/login")
+            .contentType("application/json")
+            .content(objectMapper.writeValueAsString(login)))
         .andExpect(status().isOk())
         .andReturn();
-    Cookie accessCookie = registerResult.getResponse().getCookie("AZZO_ACCESS_TOKEN");
+    Cookie accessCookie = loginResult.getResponse().getCookie("AZZO_ACCESS_TOKEN");
 
     mockMvc.perform(get("/api/v1/config/menus/current").cookie(accessCookie))
         .andExpect(status().isOk())
@@ -184,5 +210,19 @@ class AuthControllerIntegrationTest {
         .andExpect(jsonPath("$.items", notNullValue()));
 
     mockMvc.perform(get("/api/v1/config/menus/current")).andExpect(status().isUnauthorized());
+  }
+
+  /** Abre o link de confirmacao que o cadastro enfileirou para o e-mail. */
+  private void confirmarEmail(String email) throws Exception {
+    String payload = emailJobRepository.findAll().stream()
+        .filter(j -> email.equals(j.getRecipientEmail()))
+        .map(j -> j.getPayloadJson())
+        .findFirst().orElseThrow();
+    java.util.regex.Matcher m = java.util.regex.Pattern.compile("token=([A-Za-z0-9_-]+)").matcher(payload);
+    org.junit.jupiter.api.Assertions.assertTrue(m.find());
+    mockMvc.perform(post("/api/v1/auth/confirm-email")
+            .contentType("application/json")
+            .content("{\"token\":\"" + m.group(1) + "\"}"))
+        .andExpect(status().isOk());
   }
 }

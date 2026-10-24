@@ -15,7 +15,13 @@ import br.com.phdigitalcode.azzo.agenda.pro.dto.CheckoutDtos;
 import br.com.phdigitalcode.azzo.agenda.pro.service.CheckoutService;
 import jakarta.validation.Valid;
 
-/** Espelha {@code modules/billing/api/CheckoutResource.java} — classe inteira sob {@code OWNER}. */
+/**
+ * Espelha {@code modules/billing/api/CheckoutResource.java} — classe inteira sob {@code OWNER}.
+ *
+ * <p>⚠️ {@code /intents} e {@code /intents/{id}/confirm} confirmam com pagamento de MENTIRA e ficam
+ * desligados por padrao ({@code app.checkout.stub-enabled}, ver {@code CheckoutService}). So
+ * {@code /products} atende em producao; contratar e o {@code POST /billing/subscriptions}.
+ */
 @RestController
 @RequestMapping("/api/v1/checkout")
 @PreAuthorize("hasRole('OWNER')")

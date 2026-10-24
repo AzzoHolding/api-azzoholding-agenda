@@ -55,7 +55,7 @@ class ServicoCatalogoRelatoriosTest {
   void rejeitaChaveNaoSuportada() {
     assertThatThrownBy(() -> service.gerar("relatorio-inexistente", null, null, null, null, null, null))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("Relatorio nao suportado");
+        .hasMessageContaining("Relatório não suportado");
   }
 
   @Test
@@ -64,7 +64,7 @@ class ServicoCatalogoRelatoriosTest {
     assertThatThrownBy(
             () -> service.gerar("ranking-servicos", "2026-02-10", "2026-02-01", null, null, null, null))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("Periodo invalido");
+        .hasMessageContaining("Período inválido");
   }
 
   @Test
@@ -73,7 +73,7 @@ class ServicoCatalogoRelatoriosTest {
     assertThatThrownBy(
             () -> service.gerar("ranking-servicos", "2026-01-01", "2027-02-01", null, null, null, null))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("maximo de 370 dias");
+        .hasMessageContaining("máximo de 370 dias");
   }
 
   @Test
@@ -82,7 +82,7 @@ class ServicoCatalogoRelatoriosTest {
     assertThatThrownBy(
             () -> service.exportar("ranking-servicos", "2026-02-01", "2026-02-10", null, "pdf", null))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("Formato invalido");
+        .hasMessageContaining("Formato inválido");
   }
 
   @Test

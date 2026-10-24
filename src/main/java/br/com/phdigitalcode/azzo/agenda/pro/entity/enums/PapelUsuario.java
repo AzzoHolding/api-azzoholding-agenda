@@ -9,5 +9,7 @@ public enum PapelUsuario {
   OWNER,
   PROFESSIONAL,
   ADMIN,
-  FINANCE
+  FINANCE,
+  /** Membro da equipe SEM agenda (recepcao, financeiro): o acesso vem so dos perfis. */
+  STAFF
 }

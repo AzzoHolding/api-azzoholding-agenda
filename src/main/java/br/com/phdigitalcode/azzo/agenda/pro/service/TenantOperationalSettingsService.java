@@ -20,6 +20,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -371,6 +372,13 @@ public class TenantOperationalSettingsService {
             () -> {
               TenantOperationalSettings created = new TenantOperationalSettings();
               created.setTenantId(tenantId);
+              // Numa leitura (transacao readOnly de quem chamou) nao da para gravar: o salao novo,
+              // que ainda nao salvou configuracao nenhuma, quebrava o "Perfil do salao", a vitrine
+              // publica e os horarios livres com "Ocorreu um erro inesperado" (teste de
+              // 2026-09-18). Na leitura vale o padrao em memoria; a linha nasce na primeira escrita.
+              if (TransactionSynchronizationManager.isCurrentTransactionReadOnly()) {
+                return created;
+              }
               return repository.saveAndFlush(created);
             });
   }
@@ -453,7 +461,7 @@ public class TenantOperationalSettingsService {
     try {
       return objectMapper.writeValueAsString(normalizeBusinessHours(businessHours));
     } catch (Exception e) {
-      throw new IllegalStateException("Nao foi possivel serializar horarios de funcionamento", e);
+      throw new IllegalStateException("Não foi possível serializar horários de funcionamento", e);
     }
   }
 
@@ -490,12 +498,12 @@ public class TenantOperationalSettingsService {
 
   private LocalDate parseSpecialClosureDate(String value) {
     if (value == null || value.isBlank()) {
-      throw new IllegalArgumentException("Data especial de fechamento obrigatoria");
+      throw new IllegalArgumentException("Data especial de fechamento obrigatória");
     }
     try {
       return LocalDate.parse(value.trim());
     } catch (Exception e) {
-      throw new IllegalArgumentException("Data especial de fechamento invalida");
+      throw new IllegalArgumentException("Data especial de fechamento inválida");
     }
   }
 
@@ -875,6 +883,65 @@ public class TenantOperationalSettingsService {
   }
 
   // ============================================================
+  // Teto de desconto do PDV (V131)
+  // ============================================================
+
+  @Transactional
+  public SettingsDtos.DiscountPolicyResponse getDiscountPolicy(UUID tenantId) {
+    return toDiscountPolicyResponse(findByTenantIdOrCreate(tenantId));
+  }
+
+  /**
+   * Grava o teto. Fora de 0..100 o pedido e RECUSADO, e nao silenciosamente ignorado como nos
+   * campos antigos daqui: um teto que a tela acha que salvou e o servidor descartou seria pior que
+   * nao ter teto — o dono confiaria num limite inexistente.
+   */
+  @Transactional
+  public SettingsDtos.DiscountPolicyResponse updateDiscountPolicy(
+      UUID tenantId, SettingsDtos.DiscountPolicyRequest request) {
+    // Sem o campo, a chamada voltava 200 sem mudar nada — e quem errou o nome do campo achava que
+    // tinha salvo o teto (jornada de usuario de 2026-09-17).
+    if (request == null || request.maxDiscountPercent == null) {
+      throw new IllegalArgumentException("Informe o teto de desconto (maxDiscountPercent, de 0 a 100).");
+    }
+    TenantOperationalSettings entity = findByTenantIdOrCreate(tenantId);
+    {
+      int teto = request.maxDiscountPercent;
+      if (teto < 0 || teto > 100) {
+        throw new IllegalArgumentException("O teto de desconto vai de 0% a 100%.");
+      }
+      int anterior = entity.getPosMaxDiscountPercent();
+      entity.setPosMaxDiscountPercent(teto);
+      if (anterior != teto) {
+        try {
+          br.com.phdigitalcode.azzo.agenda.pro.integration.AuditEventCommand command =
+              new br.com.phdigitalcode.azzo.agenda.pro.integration.AuditEventCommand();
+          command.tenantId = tenantId;
+          command.module = br.com.phdigitalcode.azzo.agenda.pro.integration.AuditConstants.Module.FINANCE;
+          command.action = "FINANCE_DISCOUNT_POLICY_UPDATE";
+          command.entityType = "DISCOUNT_POLICY";
+          command.entityId = tenantId.toString();
+          command.sourceChannel =
+              br.com.phdigitalcode.azzo.agenda.pro.integration.AuditConstants.SourceChannel.API;
+          command.before = java.util.Map.of("maxDiscountPercent", anterior);
+          command.after = java.util.Map.of("maxDiscountPercent", teto);
+          auditService.recordSuccess(command);
+        } catch (Exception ignored) {
+          // Auditoria nao deve quebrar o fluxo principal.
+        }
+      }
+    }
+    return toDiscountPolicyResponse(entity);
+  }
+
+  private SettingsDtos.DiscountPolicyResponse toDiscountPolicyResponse(
+      TenantOperationalSettings entity) {
+    SettingsDtos.DiscountPolicyResponse r = new SettingsDtos.DiscountPolicyResponse();
+    r.maxDiscountPercent = entity.getPosMaxDiscountPercent();
+    return r;
+  }
+
+  // ============================================================
   // Regua de lembretes (F03 — V120)
   // ============================================================
 
@@ -1011,7 +1078,7 @@ public class TenantOperationalSettingsService {
     try {
       return EmailTemplateType.valueOf(type.toUpperCase(Locale.ROOT));
     } catch (Exception e) {
-      throw new IllegalArgumentException("Tipo de template invalido: " + type);
+      throw new IllegalArgumentException("Tipo de template inválido: " + type);
     }
   }
 

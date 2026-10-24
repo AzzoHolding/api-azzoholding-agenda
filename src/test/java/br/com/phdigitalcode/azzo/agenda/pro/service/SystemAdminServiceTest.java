@@ -147,6 +147,50 @@ class SystemAdminServiceTest {
   }
 
   @Test
+  void whatsappOverviewClassificaConectadoQuebradoENaoConfigurado() {
+    UUID conectadoId = UUID.randomUUID();
+    UUID quebradoId = UUID.randomUUID();
+    UUID naoConfiguradoId = UUID.randomUUID();
+    Query query = mock(Query.class);
+    when(query.getResultList()).thenReturn(List.of(
+        new Object[] {
+            conectadoId.toString(), "Salao Conectado", true, "CONNECTED", "+5511999990000", null
+        },
+        new Object[] {
+            quebradoId.toString(), "Salao Quebrado", true, "FAILED", null, "Token expirado"
+        },
+        new Object[] {
+            naoConfiguradoId.toString(), "Salao Sem Config", false, "NOT_STARTED", null, null
+        }));
+    when(entityManager.createNativeQuery(anyString())).thenReturn(query);
+
+    SystemAdminDtos.WhatsAppOverviewResponse response = service.whatsappOverview();
+
+    assertThat(response.totalTenants).isEqualTo(3);
+    assertThat(response.connectedCount).isEqualTo(1);
+    assertThat(response.brokenCount).isEqualTo(1);
+    assertThat(response.notConfiguredCount).isEqualTo(1);
+    assertThat(response.items).hasSize(3);
+    assertThat(response.items.get(1).lastError).isEqualTo("Token expirado");
+  }
+
+  @Test
+  void whatsappOverviewPendenteNoMeioDoFluxoContaComoQuebrado() {
+    Query query = mock(Query.class);
+    when(query.getResultList()).thenReturn(List.<Object[]>of(
+        new Object[] {
+            UUID.randomUUID().toString(), "Salao Pendente", false, "PENDING_EXCHANGE", null, null
+        }));
+    when(entityManager.createNativeQuery(anyString())).thenReturn(query);
+
+    SystemAdminDtos.WhatsAppOverviewResponse response = service.whatsappOverview();
+
+    assertThat(response.brokenCount).isEqualTo(1);
+    assertThat(response.connectedCount).isEqualTo(0);
+    assertThat(response.notConfiguredCount).isEqualTo(0);
+  }
+
+  @Test
   void listGlobalAuditsMapeiaLinhasEAplicaLimitePadrao() {
     Query query = mock(Query.class);
     Object[] row = {
@@ -599,7 +643,7 @@ class SystemAdminServiceTest {
 
     assertThat(item.currency).isEqualTo("BRL");
     verify(productRepository).save(any(Product.class));
-    verify(auditService).recordSuccess(any(AuditEventCommand.class));
+    verify(auditService).recordSuccessIsolated(any(AuditEventCommand.class));
   }
 
   @Test
@@ -765,7 +809,7 @@ class SystemAdminServiceTest {
 
     assertThat(response.subjectTemplate).isEqualTo("Assunto novo");
     verify(emailTemplateConfigRepository).save(any(EmailTemplateConfig.class));
-    verify(auditService).recordSuccess(any(AuditEventCommand.class));
+    verify(auditService).recordSuccessIsolated(any(AuditEventCommand.class));
   }
 
   @Test
@@ -841,7 +885,7 @@ class SystemAdminServiceTest {
     assertThat(response.configured).isFalse();
     assertThat(response.subjectTemplate).isEqualTo("assunto padrao");
     verify(emailTemplateConfigRepository).delete(config);
-    verify(auditService).recordSuccess(any(AuditEventCommand.class));
+    verify(auditService).recordSuccessIsolated(any(AuditEventCommand.class));
   }
 
   @Test

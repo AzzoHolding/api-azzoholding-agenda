@@ -189,6 +189,9 @@ public class GlobalExceptionHandler {
     if (isUnexpected || hasNullMessage) {
       msg = "Ocorreu um erro inesperado. Tente novamente ou contate o suporte.";
     }
+    // Pentest 14/10/2026 (SEG-013): falha inesperada (NPE, banco fora, bug) saia como 400 e era
+    // logada so como WARN, sem a pilha — parecia erro do cliente e escondia defeito do servidor.
+    if (isUnexpected) status = 500;
 
     if (root instanceof IllegalArgumentException) {
       if (isFunctionalCode(msg)) {
@@ -198,7 +201,13 @@ public class GlobalExceptionHandler {
         msg = appendCorrectiveAction(msg, "Revise os dados informados e tente novamente.");
       }
     }
-    if (msg.toLowerCase(Locale.ROOT).contains("credenciais")) status = 401;
+    // SEG-013: o 401 dependia de a mensagem CONTER "credenciais" (qualquer texto com a palavra virava
+    // 401). Agora so a falha de autenticacao propriamente dita.
+    if (root instanceof IllegalArgumentException
+        && root.getMessage() != null
+        && br.com.phdigitalcode.azzo.agenda.pro.util.TextoSemAcento.de(root.getMessage().trim()).startsWith("credenciais invalidas")) {
+      status = 401;
+    }
     if (status == 429) {
       msg = "Muitas tentativas em pouco tempo. Aguarde alguns minutos e tente novamente.";
     }
@@ -211,6 +220,9 @@ public class GlobalExceptionHandler {
   private ResponseEntity<ErrorResponse> buildErrorResponse(int status, ErrorResponse payload, Throwable exception) {
     logRequestFailure(status, payload, exception);
     registrarErroGlobal(payload.path, payload.code, payload.message);
+    if (payload.traceId != null) {
+      return ResponseEntity.status(status).header("X-Trace-Id", payload.traceId).body(payload);
+    }
     return ResponseEntity.status(status).body(payload);
   }
 

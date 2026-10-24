@@ -23,6 +23,6 @@ public enum StatusSubscription {
       if (item.name().equalsIgnoreCase(value.trim())) return item;
       if (item.description.equalsIgnoreCase(value.trim())) return item;
     }
-    throw new IllegalArgumentException("Status de assinatura invalido: " + value);
+    throw new IllegalArgumentException("Status de assinatura inválido: " + value);
   }
 }

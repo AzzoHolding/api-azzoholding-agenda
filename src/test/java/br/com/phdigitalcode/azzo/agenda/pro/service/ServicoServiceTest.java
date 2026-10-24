@@ -29,8 +29,8 @@ import br.com.phdigitalcode.azzo.agenda.pro.security.ContextoTenant;
 /**
  * Cobre as regras de negocio de servicos que existem no {@code ServicoServicos} do Quarkus
  * original — validacao de sinal (deposit), resolucao/criacao de categoria por nome, vinculo de
- * profissionais e isolamento por tenant. Verifica o resultado observavel, nao "se o mock foi
- * chamado".
+ * profissionais e isolamento por tenant. Verifica o resultado observavel, nao "se o mock foi"
+ * chamado"."
  */
 class ServicoServiceTest {
 
@@ -39,6 +39,7 @@ class ServicoServiceTest {
   private ServiceCategoryRepository serviceCategoryRepository;
   private ContextoTenant contextoTenant;
   private ServicoService service;
+  private VinculosDeExclusao vinculosDeExclusao;
 
   private final UUID tenantId = UUID.randomUUID();
 
@@ -55,6 +56,10 @@ class ServicoServiceTest {
       return s;
     });
     service = new ServicoService(servicoRepository, profissionalRepository, serviceCategoryRepository, contextoTenant);
+    vinculosDeExclusao = mock(VinculosDeExclusao.class);
+    when(vinculosDeExclusao.doServico(any(), any())).thenReturn(List.of());
+    org.springframework.test.util.ReflectionTestUtils.setField(
+        service, "vinculosDeExclusao", vinculosDeExclusao);
   }
 
   private ServicoRequest baseRequest() {
@@ -89,7 +94,7 @@ class ServicoServiceTest {
 
     assertThatThrownBy(() -> service.criar(req))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("Tipo de sinal e obrigatorio");
+        .hasMessageContaining("Tipo de sinal é obrigatório");
   }
 
   @Test
@@ -100,7 +105,7 @@ class ServicoServiceTest {
 
     assertThatThrownBy(() -> service.criar(req))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("Valor do sinal e obrigatorio");
+        .hasMessageContaining("Valor do sinal é obrigatório");
   }
 
   @Test
@@ -112,7 +117,7 @@ class ServicoServiceTest {
 
     assertThatThrownBy(() -> service.criar(req))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("nao pode ser maior que 100");
+        .hasMessageContaining("não pode ser maior que 100");
   }
 
   @Test
@@ -188,19 +193,51 @@ class ServicoServiceTest {
 
     assertThatThrownBy(() -> service.atualizar(outroId, baseRequest()))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("Servico nao encontrado");
+        .hasMessageContaining("Serviço não encontrado");
   }
 
   @Test
   void deletarSelecionadosComListaVaziaEhRejeitado() {
     assertThatThrownBy(() -> service.deletarSelecionados(List.of()))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("Nenhum servico selecionado");
+        .hasMessageContaining("Nenhum serviço selecionado");
   }
 
   @Test
   void deletarTodosSemServicosRetornaZero() {
     when(servicoRepository.findByTenantId(tenantId)).thenReturn(List.of());
     assertThat(service.deletarTodos()).isZero();
+  }
+
+  // ─── Exclusao nao apaga dinheiro (2026-09-16, A6) ──────────────────────────
+
+  /** O banco levava junto o saldo de sessoes que os clientes pagaram. O caminho e desativar. */
+  @Test
+  void servicoUsadoNaoSeExclui() {
+    Servico servico = new Servico();
+    servico.setId(UUID.randomUUID());
+    servico.setTenantId(tenantId);
+    servico.setName("Corte");
+    when(servicoRepository.findByIdAndTenantId(servico.getId(), tenantId)).thenReturn(Optional.of(servico));
+    when(vinculosDeExclusao.doServico(tenantId, servico.getId()))
+        .thenReturn(List.of("pacotes", "saldo de pacote de clientes"));
+
+    assertThatThrownBy(() -> service.deletar(servico.getId()))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("saldo de pacote de clientes")
+        .hasMessageContaining("Desative");
+    org.mockito.Mockito.verify(servicoRepository, org.mockito.Mockito.never()).delete(any(Servico.class));
+  }
+
+  @Test
+  void servicoNuncaUsadoSeExclui() {
+    Servico servico = new Servico();
+    servico.setId(UUID.randomUUID());
+    servico.setTenantId(tenantId);
+    when(servicoRepository.findByIdAndTenantId(servico.getId(), tenantId)).thenReturn(Optional.of(servico));
+
+    service.deletar(servico.getId());
+
+    org.mockito.Mockito.verify(servicoRepository).delete(servico);
   }
 }

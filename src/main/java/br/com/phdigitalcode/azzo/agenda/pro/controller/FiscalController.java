@@ -47,11 +47,22 @@ import br.com.phdigitalcode.azzo.agenda.pro.service.ServicoFiscal;
  * identidade plugavel por-resource. Nao ha padrao ja estabelecido em outro controller portado para
  * reaproveitar; implementar isso ad-hoc aqui seria inventar um mecanismo novo fora do escopo desta
  * fronteira. Lacuna sinalizada, nao implementada.
+ *
+ * <p><b>Perfis de acesso (V128).</b> Tres faixas: leitura com {@code fiscal:view} (gate da classe,
+ * inclusive a LEITURA da configuracao, que a emissao usa); operacao — rascunho, emitir, cancelar,
+ * reprocessar, recalcular — com {@code fiscal:manage}; e ESCRITA de configuracao (impostos,
+ * certificados) so do dono, porque as telas {@code /configuracoes/fiscal/*} sao exclusivas. O gate
+ * do metodo substitui o da classe; o papel OWNER vale sozinho e os codigos nao vao para o ADMIN. O
+ * {@link NfseController} usa as mesmas tres faixas.
  */
 @RestController
 @RequestMapping("/api/v1/fiscal")
-@PreAuthorize("hasRole('OWNER')")
+@PreAuthorize(FiscalController.LEITURA)
 public class FiscalController {
+
+  static final String LEITURA = "hasRole('OWNER') or @permissionService.possuiPermissao('fiscal:view')";
+  static final String OPERACAO = "hasRole('OWNER') or @permissionService.possuiPermissao('fiscal:manage')";
+  static final String CONFIGURACAO = "hasRole('OWNER')";
 
   private final ServicoFiscal servicoFiscal;
   private final FiscalAccessService fiscalAccessService;
@@ -76,6 +87,7 @@ public class FiscalController {
   }
 
   @PutMapping("/tax-config")
+  @PreAuthorize(CONFIGURACAO)
   public FiscalDtos.TaxConfig atualizarTaxConfig(@RequestBody FiscalDtos.TaxConfig request) {
     validarAcessoFiscalAtual();
     return servicoFiscal.atualizarTaxConfig(request);
@@ -99,6 +111,7 @@ public class FiscalController {
   }
 
   @PostMapping("/invoices")
+  @PreAuthorize(OPERACAO)
   public ResponseEntity<FiscalDtos.Invoice> criarInvoice(
       @RequestBody(required = false) FiscalDtos.Invoice request,
       @RequestHeader(value = "X-Idempotency-Key", required = false) String key) {
@@ -115,6 +128,7 @@ public class FiscalController {
   }
 
   @PatchMapping("/invoices/{id}")
+  @PreAuthorize(OPERACAO)
   public FiscalDtos.Invoice atualizarInvoice(
       @PathVariable String id,
       @RequestBody(required = false) FiscalDtos.Invoice request,
@@ -130,6 +144,7 @@ public class FiscalController {
   }
 
   @PatchMapping("/invoices/{id}/cancel")
+  @PreAuthorize(OPERACAO)
   public FiscalDtos.Invoice cancelar(
       @PathVariable String id,
       @RequestBody(required = false) FiscalDtos.CancelInvoiceRequest request,
@@ -145,6 +160,7 @@ public class FiscalController {
   }
 
   @PostMapping("/invoices/{id}/authorize")
+  @PreAuthorize(OPERACAO)
   public FiscalDtos.Invoice autorizar(
       @PathVariable String id,
       @RequestBody(required = false) FiscalDtos.AuthorizeInvoiceRequest request,
@@ -160,6 +176,7 @@ public class FiscalController {
   }
 
   @PostMapping("/invoices/{id}/reprocess-authorize")
+  @PreAuthorize(OPERACAO)
   public FiscalDtos.Invoice reprocessarAutorizacao(
       @PathVariable String id,
       @RequestBody(required = false) FiscalDtos.AuthorizeInvoiceRequest request,
@@ -211,6 +228,7 @@ public class FiscalController {
   }
 
   @PostMapping("/certificates")
+  @PreAuthorize(CONFIGURACAO)
   public ResponseEntity<FiscalDtos.CertificateResponse> salvarCertificado(
       @RequestBody(required = false) FiscalDtos.CertificateUpsertRequest request) {
     validarAcessoFiscalAtual();
@@ -218,12 +236,14 @@ public class FiscalController {
   }
 
   @PostMapping("/certificates/{id}/activate")
+  @PreAuthorize(CONFIGURACAO)
   public FiscalDtos.CertificateResponse ativarCertificado(@PathVariable String id) {
     validarAcessoFiscalAtual();
     return servicoFiscal.ativarCertificado(id);
   }
 
   @PatchMapping("/certificates/{id}/delete")
+  @PreAuthorize(CONFIGURACAO)
   public ResponseEntity<Void> removerCertificado(@PathVariable String id) {
     validarAcessoFiscalAtual();
     servicoFiscal.removerCertificado(id);
@@ -243,6 +263,7 @@ public class FiscalController {
   }
 
   @PostMapping("/apuracoes/{ano}/{mes}/recalculate")
+  @PreAuthorize(OPERACAO)
   public FiscalDtos.ApuracaoMensal recalcular(@PathVariable int ano, @PathVariable int mes) {
     validarAcessoFiscalAtual();
     return servicoFiscal.recalcularApuracao(ano, mes);

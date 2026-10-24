@@ -54,8 +54,8 @@ import jakarta.annotation.PostConstruct;
  *   <li>{@code removerArquivoImportacao} e best-effort: nunca propaga falha, so loga.
  *   <li>{@code gerarUrlAssinadaLeitura} <b>nao</b> gera presigned URL do MinIO: devolve a URL do
  *       proxy do proprio backend, para nunca expor o storage ao browser. O endpoint
- *       {@code /api/v1/storage/proxy} pertence ao modulo {@code storage}, ainda nao migrado — a URL
- *       ja e emitida, mas so respondera quando esse modulo for portado.
+ *       {@code /api/v1/storage/proxy} e atendido por {@code StorageProxyController} (pentest
+ *       14/10/2026, SEG-020), com URL assinada e com prazo.
  * </ol>
  */
 @Service
@@ -70,6 +70,12 @@ public class MinioStorageService {
   private final String bucket;
   private final int presignExpirationMinutes;
   private final String proxyBaseUrl;
+
+  /**
+   * Derivada de {@code app.security.encryption-key} (separacao de dominio pelo rotulo). Sem ela (teste
+   * que instancia direto), uma chave aleatoria do processo: os links valem so ate o reinicio.
+   */
+  private byte[] chaveDeAssinatura = new java.security.SecureRandom().generateSeed(32);
 
   private volatile MinioClient client;
   private volatile boolean operacional;
@@ -106,7 +112,7 @@ public class MinioStorageService {
 
     inicializarClienteSeNecessario();
     if (!operacional) {
-      throw new IllegalStateException("Storage MinIO indisponivel para upload.");
+      throw new IllegalStateException("Storage MinIO indisponível para upload.");
     }
 
     try {
@@ -135,7 +141,7 @@ public class MinioStorageService {
 
     inicializarClienteSeNecessario();
     if (!operacional) {
-      throw new IllegalStateException("Storage MinIO indisponivel para upload de DANFE.");
+      throw new IllegalStateException("Storage MinIO indisponível para upload de DANFE.");
     }
 
     try {
@@ -163,7 +169,7 @@ public class MinioStorageService {
 
     inicializarClienteSeNecessario();
     if (!operacional) {
-      throw new IllegalStateException("Storage MinIO indisponivel para upload.");
+      throw new IllegalStateException("Storage MinIO indisponível para upload.");
     }
 
     try {
@@ -190,7 +196,7 @@ public class MinioStorageService {
 
     inicializarClienteSeNecessario();
     if (!operacional) {
-      throw new IllegalStateException("Storage MinIO indisponivel para upload do avatar do cliente.");
+      throw new IllegalStateException("Storage MinIO indisponível para upload do avatar do cliente.");
     }
 
     try {
@@ -216,7 +222,7 @@ public class MinioStorageService {
 
     inicializarClienteSeNecessario();
     if (!operacional) {
-      throw new IllegalStateException("Storage MinIO indisponivel para upload da logo do salao.");
+      throw new IllegalStateException("Storage MinIO indisponível para upload da logo do salão.");
     }
 
     try {
@@ -230,13 +236,13 @@ public class MinioStorageService {
       return storageKey;
     } catch (Exception exception) {
       LOG.error("Falha ao enviar logo do salao para o MinIO (key={}).", storageKey, exception);
-      throw new IllegalStateException("Falha ao enviar logo do salao para o storage.", exception);
+      throw new IllegalStateException("Falha ao enviar logo do salão para o storage.", exception);
     }
   }
 
   public byte[] baixarArquivo(String storageKey, UUID tenantId) {
     if (storageKey == null || storageKey.isBlank()) {
-      throw new IllegalArgumentException("Storage key obrigatoria para download.");
+      throw new IllegalArgumentException("Storage key obrigatória para download.");
     }
     validarEscopoTenant(storageKey, tenantId);
     if (!minioEnabled) {
@@ -245,7 +251,7 @@ public class MinioStorageService {
 
     inicializarClienteSeNecessario();
     if (!operacional) {
-      throw new IllegalStateException("Storage MinIO indisponivel para download.");
+      throw new IllegalStateException("Storage MinIO indisponível para download.");
     }
 
     try (var stream =
@@ -331,23 +337,76 @@ public class MinioStorageService {
     }
   }
 
-  /** URL do proxy do backend — nunca expoe o MinIO diretamente ao browser. */
+  /**
+   * URL do proxy do backend — nunca expoe o MinIO diretamente ao browser.
+   *
+   * <p>Pentest 14/10/2026 (SEG-020): a URL levava so a chave, sem assinatura nem prazo (e nenhum
+   * controller a atendia). Agora leva {@code exp} e {@code sig} (HMAC-SHA256 de chave+prazo), e o
+   * {@code StorageProxyController} so entrega com assinatura valida e dentro do prazo — a chave
+   * sozinha nao abre nada, e quem recebeu o link nao consegue troca-la por outro arquivo ou salao.
+   */
   public String gerarUrlAssinadaLeitura(String storageKey, UUID tenantId) {
     if (storageKey == null || storageKey.isBlank()) {
-      throw new IllegalArgumentException("Storage key obrigatoria para gerar URL.");
+      throw new IllegalArgumentException("Storage key obrigatória para gerar URL.");
     }
     validarEscopoTenant(storageKey, tenantId);
     String base =
         proxyBaseUrl.endsWith("/")
             ? proxyBaseUrl.substring(0, proxyBaseUrl.length() - 1)
             : proxyBaseUrl;
+    long exp = calcularExpiracaoUrlAssinada().getEpochSecond();
     return base
         + "/api/v1/storage/proxy?key="
-        + URLEncoder.encode(storageKey, StandardCharsets.UTF_8);
+        + URLEncoder.encode(storageKey, StandardCharsets.UTF_8)
+        + "&exp="
+        + exp
+        + "&sig="
+        + assinar(storageKey, exp);
   }
 
   public Instant calcularExpiracaoUrlAssinada() {
     return Instant.now().plusSeconds(Math.max(presignExpirationMinutes, 1) * 60L);
+  }
+
+  /** SEG-020: assinatura valida, prazo nao vencido e chave no formato de um salao. */
+  public boolean assinaturaDeLeituraValida(String storageKey, long exp, String sig) {
+    if (storageKey == null || sig == null || !storageKey.startsWith("tenant/")) return false;
+    if (storageKey.contains("..") || Instant.now().getEpochSecond() > exp) return false;
+    return java.security.MessageDigest.isEqual(
+        assinar(storageKey, exp).getBytes(StandardCharsets.US_ASCII),
+        sig.getBytes(StandardCharsets.US_ASCII));
+  }
+
+  /** Arquivo baixado pelo proxy, com o tipo deduzido da extensao gravada na chave. */
+  public record ArquivoDoProxy(byte[] conteudo, String contentType) {}
+
+  /** So depois de {@link #assinaturaDeLeituraValida}: o salao vem da propria chave assinada. */
+  public ArquivoDoProxy baixarParaProxy(String storageKey) {
+    String semPrefixo = storageKey.substring("tenant/".length());
+    int barra = semPrefixo.indexOf('/');
+    if (barra <= 0) throw new IllegalStateException("Storage key fora do escopo do tenant.");
+    UUID tenantId = UUID.fromString(semPrefixo.substring(0, barra));
+    return new ArquivoDoProxy(baixarArquivo(storageKey, tenantId), resolverContentType(storageKey));
+  }
+
+  @Value("${app.security.encryption-key:}")
+  void definirSegredoDeAssinatura(String segredo) {
+    if (segredo == null || segredo.isBlank()) return;
+    this.chaveDeAssinatura = hmac(segredo.getBytes(StandardCharsets.UTF_8), "azzo-storage-proxy-v1");
+  }
+
+  private String assinar(String storageKey, long exp) {
+    return java.util.HexFormat.of().formatHex(hmac(chaveDeAssinatura, storageKey + "\n" + exp));
+  }
+
+  private static byte[] hmac(byte[] chave, String dado) {
+    try {
+      javax.crypto.Mac mac = javax.crypto.Mac.getInstance("HmacSHA256");
+      mac.init(new javax.crypto.spec.SecretKeySpec(chave, "HmacSHA256"));
+      return mac.doFinal(dado.getBytes(StandardCharsets.UTF_8));
+    } catch (java.security.GeneralSecurityException e) {
+      throw new IllegalStateException("HmacSHA256 indisponível", e);
+    }
   }
 
   public boolean isStorageHabilitado() {
@@ -363,7 +422,19 @@ public class MinioStorageService {
   private synchronized void inicializarClienteSeNecessario() {
     if (!minioEnabled || operacional) return;
     try {
-      client = MinioClient.builder().endpoint(endpoint).credentials(accessKey, secretKey).build();
+      // Pentest 14/10/2026 (INT-029): sem timeout, um MinIO travado prendia a thread da requisicao
+      // (e o pool) indefinidamente.
+      okhttp3.OkHttpClient http = new okhttp3.OkHttpClient.Builder()
+          .connectTimeout(java.time.Duration.ofSeconds(5))
+          .readTimeout(java.time.Duration.ofSeconds(60))
+          .writeTimeout(java.time.Duration.ofSeconds(60))
+          .callTimeout(java.time.Duration.ofMinutes(5))
+          .build();
+      client = MinioClient.builder()
+          .endpoint(endpoint)
+          .credentials(accessKey, secretKey)
+          .httpClient(http, true)
+          .build();
 
       boolean bucketExiste = client.bucketExists(BucketExistsArgs.builder().bucket(bucket).build());
       if (!bucketExiste) {
@@ -380,7 +451,7 @@ public class MinioStorageService {
 
   private String gerarStorageKeyFiscalDanfe(String nomeArquivo, UUID tenantId) {
     if (tenantId == null) {
-      throw new IllegalArgumentException("TenantId obrigatorio para gerar storage key.");
+      throw new IllegalArgumentException("TenantId obrigatório para gerar storage key.");
     }
     YearMonth periodoAtual = YearMonth.now();
     return String.format(
@@ -395,7 +466,7 @@ public class MinioStorageService {
 
   private String gerarStorageKeyClientes(String nomeArquivo, UUID tenantId) {
     if (tenantId == null) {
-      throw new IllegalArgumentException("TenantId obrigatorio para gerar storage key.");
+      throw new IllegalArgumentException("TenantId obrigatório para gerar storage key.");
     }
     YearMonth periodoAtual = YearMonth.now();
     return String.format(
@@ -410,10 +481,10 @@ public class MinioStorageService {
 
   private String gerarStorageKeyClienteAvatar(String nomeArquivo, UUID tenantId, UUID clientId) {
     if (tenantId == null) {
-      throw new IllegalArgumentException("TenantId obrigatorio para gerar storage key.");
+      throw new IllegalArgumentException("TenantId obrigatório para gerar storage key.");
     }
     if (clientId == null) {
-      throw new IllegalArgumentException("ClientId obrigatorio para gerar storage key.");
+      throw new IllegalArgumentException("ClientId obrigatório para gerar storage key.");
     }
     return String.format(
         Locale.ROOT,
@@ -426,7 +497,7 @@ public class MinioStorageService {
 
   private String gerarStorageKeySalaoLogo(String nomeArquivo, UUID tenantId) {
     if (tenantId == null) {
-      throw new IllegalArgumentException("TenantId obrigatorio para gerar storage key.");
+      throw new IllegalArgumentException("TenantId obrigatório para gerar storage key.");
     }
     return String.format(
         Locale.ROOT, "tenant/%s/salao/logo/%s-%s", tenantId, UUID.randomUUID(), sanitizarNomeArquivo(nomeArquivo));
@@ -434,7 +505,7 @@ public class MinioStorageService {
 
   private String gerarStorageKey(String nomeArquivo, UUID tenantId) {
     if (tenantId == null) {
-      throw new IllegalArgumentException("TenantId obrigatorio para gerar storage key.");
+      throw new IllegalArgumentException("TenantId obrigatório para gerar storage key.");
     }
     YearMonth periodoAtual = YearMonth.now();
     return String.format(
@@ -449,7 +520,7 @@ public class MinioStorageService {
 
   private void validarEscopoTenant(String storageKey, UUID tenantId) {
     if (tenantId == null) {
-      throw new IllegalArgumentException("TenantId obrigatorio para validar storage key.");
+      throw new IllegalArgumentException("TenantId obrigatório para validar storage key.");
     }
     String prefixoEsperado = "tenant/" + tenantId + "/";
     if (!storageKey.startsWith(prefixoEsperado)) {

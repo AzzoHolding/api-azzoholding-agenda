@@ -46,6 +46,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.repository.TenantWhatsAppConfigRepos
 import br.com.phdigitalcode.azzo.agenda.pro.repository.WhatsAppBookingReactivationCycleRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.security.WebhookVerifyTokenHashService;
 import br.com.phdigitalcode.azzo.agenda.pro.service.ChatMessageStatusService;
+import br.com.phdigitalcode.azzo.agenda.pro.service.ServicoStatusDeEntrega;
 import br.com.phdigitalcode.azzo.agenda.pro.service.ChatService;
 import br.com.phdigitalcode.azzo.agenda.pro.service.LicenseStatusService;
 import br.com.phdigitalcode.azzo.agenda.pro.service.NotificationPublisher;
@@ -67,6 +68,7 @@ class WhatsAppWebhookControllerTest {
   private NotificationPublisher notificationPublisher;
   private WhatsAppClient whatsAppClient;
   private WebhookVerifyTokenHashService webhookVerifyTokenHashService;
+  private ServicoStatusDeEntrega servicoStatusDeEntrega;
   private ChatMessageStatusService chatMessageStatusService;
   private ChatService chatService;
   private WhatsAppBookingReactivationService whatsAppBookingReactivationService;
@@ -86,6 +88,7 @@ class WhatsAppWebhookControllerTest {
     notificationPublisher = mock(NotificationPublisher.class);
     whatsAppClient = mock(WhatsAppClient.class);
     webhookVerifyTokenHashService = mock(WebhookVerifyTokenHashService.class);
+    servicoStatusDeEntrega = mock(ServicoStatusDeEntrega.class);
     chatMessageStatusService = mock(ChatMessageStatusService.class);
     chatService = mock(ChatService.class);
     whatsAppBookingReactivationService = mock(WhatsAppBookingReactivationService.class);
@@ -118,6 +121,7 @@ class WhatsAppWebhookControllerTest {
         notificationPublisher,
         whatsAppClient,
         webhookVerifyTokenHashService,
+        servicoStatusDeEntrega,
         chatMessageStatusService,
         chatService,
         whatsAppBookingReactivationService,
@@ -139,6 +143,7 @@ class WhatsAppWebhookControllerTest {
         notificationPublisher,
         whatsAppClient,
         webhookVerifyTokenHashService,
+        servicoStatusDeEntrega,
         chatMessageStatusService,
         chatService,
         whatsAppBookingReactivationService,
@@ -244,7 +249,7 @@ class WhatsAppWebhookControllerTest {
     WhatsAppWebhookController.WebhookResponse response = controller.receive(badSignature, body);
 
     assertThat(response.status).isEqualTo("REJECTED");
-    assertThat(response.message).isEqualTo("Assinatura invalida");
+    assertThat(response.message).isEqualTo("Assinatura inválida");
   }
 
   @Test
@@ -288,7 +293,7 @@ class WhatsAppWebhookControllerTest {
     WhatsAppWebhookController.WebhookResponse response = controller.receive(null, "{invalido");
 
     assertThat(response.status).isEqualTo("IGNORED");
-    assertThat(response.message).isEqualTo("Payload invalido");
+    assertThat(response.message).isEqualTo("Payload inválido");
   }
 
   @Test
@@ -364,6 +369,29 @@ class WhatsAppWebhookControllerTest {
     verify(chatService, never()).processInboundWhatsAppMessage(any(), any(), any(), any(), any());
   }
 
+  // ---- POST receive: pedido de atendente (teste de dialogos de 23/10/2026) --
+
+  @Test
+  void pedidoDeAtendenteMarcaAConversaEAindaRespondeOCliente() {
+    WhatsAppWebhookController controller = controllerWithoutSecret();
+    String payload = "{\"entry\":[{\"changes\":[{\"value\":{"
+        + "\"metadata\":{\"phone_number_id\":\"" + phoneNumberId + "\"},"
+        + "\"messages\":[{\"id\":\"wamid-atendente\",\"from\":\"5511988887777\",\"type\":\"text\","
+        + "\"text\":{\"body\":\"quero falar com um atendente\"}}]}}]}]}";
+    ChatService.InboundProcessingResult inbound = new ChatService.InboundProcessingResult();
+    inbound.conversation = conversation();
+    inbound.client = cliente();
+    when(chatService.processInboundWhatsAppMessage(any(), any(), any(), any(), any())).thenReturn(inbound);
+    AssistantMessageResponse resposta = new AssistantMessageResponse("Claro! Ja avisei a equipe.");
+    resposta.slots.put("manualInterventionReason", ChatService.MOTIVO_CLIENTE_PEDIU_ATENDENTE);
+    when(assistantApiClient.processarMensagem(any(), any(), any(), any(AssistantMessageRequest.class))).thenReturn(resposta);
+
+    controller.receive(null, payload);
+
+    verify(chatService).marcarPedidoDeAtendente(any(), eq(inbound.conversation.getId()));
+    verify(whatsAppClient).sendMessage(any(), eq("5511988887777"), eq("Claro! Ja avisei a equipe."));
+  }
+
   // ---- POST receive: mensagens duplicadas ---------------------------------
 
   @Test
@@ -408,6 +436,74 @@ class WhatsAppWebhookControllerTest {
     assertThat(response.status).isEqualTo("OK");
     assertThat(response.success).isEqualTo(1);
     verify(assistantApiClient, never()).processarMensagem(any(), any(), any(), any());
+  }
+
+  // ---- saude do envio (17/10/2026): nao gastar IA quando o WhatsApp nao envia ----
+
+  @Test
+  void envioIndisponivelNaoChamaOAssistenteEAvisaOSalao() {
+    WhatsAppWebhookController controller = controllerWithoutSecret();
+    br.com.phdigitalcode.azzo.agenda.pro.service.SaudeDoEnvioWhatsApp saude =
+        mock(br.com.phdigitalcode.azzo.agenda.pro.service.SaudeDoEnvioWhatsApp.class);
+    when(saude.verificar(config)).thenReturn(
+        new br.com.phdigitalcode.azzo.agenda.pro.service.SaudeDoEnvioWhatsApp.Situacao(false, "token vencido"));
+    controller.setSaudeDoEnvio(saude);
+    ChatService.InboundProcessingResult inbound = new ChatService.InboundProcessingResult();
+    inbound.conversation = conversation();
+    inbound.client = cliente();
+    when(chatService.processInboundWhatsAppMessage(any(), any(), any(), any(), any())).thenReturn(inbound);
+
+    controller.receive(null, textMessagePayload("wamid-1", "5511988887777", "ola"));
+
+    verify(assistantApiClient, never()).processarMensagem(any(), any(), any(), any());
+    verify(whatsAppClient, never()).sendMessage(any(), any(), any());
+    verify(notificationPublisher).publish(
+        eq(tenantId), eq((UUID) null), eq("WHATSAPP_CONFIG_ALERT"), eq("5511988887777"),
+        anyString(), eq(StatusNotification.FAILED), eq("token vencido"), eq((java.time.Instant) null), eq(1800L));
+  }
+
+  @Test
+  void falhaDoSalaoNoEnvioDepoisDaIaMarcaESemTentarOFallback() {
+    WhatsAppWebhookController controller = controllerWithoutSecret();
+    br.com.phdigitalcode.azzo.agenda.pro.service.SaudeDoEnvioWhatsApp saude =
+        mock(br.com.phdigitalcode.azzo.agenda.pro.service.SaudeDoEnvioWhatsApp.class);
+    when(saude.verificar(config)).thenReturn(
+        new br.com.phdigitalcode.azzo.agenda.pro.service.SaudeDoEnvioWhatsApp.Situacao(true, null));
+    when(saude.registrarFalhaDeEnvio(eq(config), any())).thenReturn("a Meta recusou o envio (HTTP 401)");
+    controller.setSaudeDoEnvio(saude);
+    ChatService.InboundProcessingResult inbound = new ChatService.InboundProcessingResult();
+    inbound.conversation = conversation();
+    inbound.client = cliente();
+    when(chatService.processInboundWhatsAppMessage(any(), any(), any(), any(), any())).thenReturn(inbound);
+    when(assistantApiClient.processarMensagem(any(), any(), any(), any()))
+        .thenReturn(new AssistantMessageResponse("Oi! Tenho horario sim."));
+    when(whatsAppClient.sendMessage(any(), any(), any()))
+        .thenThrow(new IllegalStateException("Falha ao enviar mensagem no WhatsApp - Token nao autorizado"));
+
+    controller.receive(null, textMessagePayload("wamid-1", "5511988887777", "ola"));
+
+    // Uma tentativa so (a resposta); o "nao foi possivel processar" falharia igual.
+    verify(whatsAppClient, times(1)).sendMessage(any(), any(), any());
+  }
+
+  @Test
+  void falhaDoAssistenteNaoContaComoFalhaDoWhatsApp() {
+    WhatsAppWebhookController controller = controllerWithoutSecret();
+    br.com.phdigitalcode.azzo.agenda.pro.service.SaudeDoEnvioWhatsApp saude =
+        mock(br.com.phdigitalcode.azzo.agenda.pro.service.SaudeDoEnvioWhatsApp.class);
+    when(saude.verificar(config)).thenReturn(
+        new br.com.phdigitalcode.azzo.agenda.pro.service.SaudeDoEnvioWhatsApp.Situacao(true, null));
+    controller.setSaudeDoEnvio(saude);
+    ChatService.InboundProcessingResult inbound = new ChatService.InboundProcessingResult();
+    inbound.conversation = conversation();
+    inbound.client = cliente();
+    when(chatService.processInboundWhatsAppMessage(any(), any(), any(), any(), any())).thenReturn(inbound);
+    when(assistantApiClient.processarMensagem(any(), any(), any(), any()))
+        .thenThrow(new RuntimeException("assistant 401"));
+
+    controller.receive(null, textMessagePayload("wamid-1", "5511988887777", "ola"));
+
+    verify(saude, never()).registrarFalhaDeEnvio(any(), any());
   }
 
   // ---- POST receive: from/body ausente ------------------------------------
@@ -512,7 +608,7 @@ class WhatsAppWebhookControllerTest {
     inbound.client = cli;
     when(chatService.processInboundWhatsAppMessage(any(), any(), any(), any(), any())).thenReturn(inbound);
     when(assistantApiClient.processarMensagem(any(), any(), any(), any()))
-        .thenThrow(new RuntimeException("Token do WhatsApp nao configurado para o tenant"));
+        .thenThrow(new RuntimeException("Token do WhatsApp não configurado para o tenant"));
     when(whatsAppClient.sendMessage(any(), any(), any())).thenReturn("provider-fallback-1");
 
     controller.receive(null, payload);
@@ -692,5 +788,47 @@ class WhatsAppWebhookControllerTest {
 
     assertThat(response.status).isEqualTo("ERROR");
     assertThat(response.failed).isEqualTo(1);
+  }
+
+  // ---- INT-006: "CANCELAR" e a resposta ao lembrete, nao um pedido de opt-out -------------------
+
+  @Test
+  void cancelarEmRespostaAoLembreteNaoEhOptOutESegueParaOAssistente() {
+    for (String texto : new String[] {"CANCELAR", "cancelar", "Cancelar", "  Cancelar  "}) {
+      WhatsAppWebhookController controller = controllerWithoutSecret();
+      String payload = textMessagePayload("wamid-" + texto.trim(), "5511988887777", texto);
+      Cliente cli = cliente();
+      ChatService.InboundProcessingResult inbound = new ChatService.InboundProcessingResult();
+      inbound.conversation = conversation();
+      inbound.client = cli;
+      when(chatService.processInboundWhatsAppMessage(any(), any(), any(), any(), any())).thenReturn(inbound);
+      when(assistantApiClient.processarMensagem(any(), any(), any(), any(AssistantMessageRequest.class)))
+          .thenReturn(new AssistantMessageResponse("Quer cancelar o horario?"));
+
+      WhatsAppWebhookController.WebhookResponse response = controller.receive(null, payload);
+
+      assertThat(response.status).as(texto).isEqualTo("OK");
+      assertThat(cli.getWhatsappOptOut()).as(texto).isNotEqualTo(Boolean.TRUE);
+    }
+    // Nenhum cadastro foi descadastrado e o texto chegou ao assistente nas quatro variacoes.
+    verify(consentHistoryRepository, never()).save(any());
+    verify(clienteRepository, never()).save(any());
+    verify(assistantApiClient, times(4)).processarMensagem(any(), any(), any(), any(AssistantMessageRequest.class));
+  }
+
+  /** As palavras inequivocas continuam descadastrando, com ou sem acento e caixa. */
+  @Test
+  void asPalavrasInequivocasDeOptOutContinuamFuncionando() {
+    for (String texto : new String[] {"PARE", "stop", "Sair", "remover", "NÃO QUERO"}) {
+      WhatsAppWebhookController controller = controllerWithoutSecret();
+      String payload = textMessagePayload("wamid-" + texto, "5511988887777", texto);
+      Cliente cli = cliente();
+      when(clienteRepository.findFirstByTenantIdAndPhone(tenantId, "5511988887777")).thenReturn(Optional.of(cli));
+
+      controller.receive(null, payload);
+
+      assertThat(cli.getWhatsappOptOut()).as(texto).isTrue();
+    }
+    verify(chatService, never()).processInboundWhatsAppMessage(any(), any(), any(), any(), any());
   }
 }

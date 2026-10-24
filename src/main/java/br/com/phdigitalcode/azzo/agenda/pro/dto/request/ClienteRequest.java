@@ -7,11 +7,11 @@ import jakarta.validation.constraints.Size;
 
 /** Espelha {@code modules/customers/api/dto/ClienteRequest.java}. */
 public class ClienteRequest {
-  @NotBlank(message = "Nome do cliente e obrigatorio")
-  @Size(max = 255, message = "Nome deve ter no maximo 255 caracteres")
+  @NotBlank(message = "Nome do cliente é obrigatório")
+  @Size(max = 255, message = "Nome deve ter no máximo 255 caracteres")
   public String name;
 
-  @Email(message = "Email invalido")
+  @Email(message = "Email inválido")
   @Size(max = 255)
   public String email;
 

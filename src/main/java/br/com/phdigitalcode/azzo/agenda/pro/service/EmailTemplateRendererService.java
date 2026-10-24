@@ -49,12 +49,13 @@ public class EmailTemplateRendererService {
   }
 
   public List<TemplateDefinition> definitions() {
-    return List.of(passwordResetDefinition());
+    return List.of(passwordResetDefinition(), emailVerificationDefinition());
   }
 
   public TemplateDefinition definition(EmailTemplateType type) {
     return switch (type) {
       case PASSWORD_RESET -> passwordResetDefinition();
+      case EMAIL_VERIFICATION -> emailVerificationDefinition();
     };
   }
 
@@ -63,6 +64,13 @@ public class EmailTemplateRendererService {
     variables.put("userName", normalize(userName, "usuario"));
     variables.put("resetLink", normalize(resetLink, "#"));
     return render(EmailTemplateType.PASSWORD_RESET, variables);
+  }
+
+  public RenderedTemplate renderEmailVerification(String userName, String confirmLink) {
+    Map<String, String> variables = sampleVariables();
+    variables.put("userName", normalize(userName, "usuario"));
+    variables.put("confirmLink", normalize(confirmLink, "#"));
+    return render(EmailTemplateType.EMAIL_VERIFICATION, variables);
   }
 
   public RenderedTemplate preview(EmailTemplateType type, TemplateInput input) {
@@ -92,6 +100,7 @@ public class EmailTemplateRendererService {
     Map<String, String> variables = new LinkedHashMap<>();
     variables.put("userName", "Phelipp Nascimento Damasceno");
     variables.put("resetLink", "https://www.azzoholding.com.br/redefinir-senha?token=abc123");
+    variables.put("confirmLink", "https://www.azzoholding.com.br/confirmar-email?token=abc123");
     variables.put("productName", productName);
     variables.put("supportEmail", normalize(globalFrom, "support@azzoholding.com.br"));
     variables.put("requestDateTime", DATE_FORMATTER.format(Instant.now()));
@@ -198,6 +207,62 @@ public class EmailTemplateRendererService {
         List.of(
             "{{userName}}",
             "{{resetLink}}",
+            "{{productName}}",
+            "{{supportEmail}}",
+            "{{requestDateTime}}"));
+  }
+
+  private TemplateDefinition emailVerificationDefinition() {
+    return new TemplateDefinition(
+        EmailTemplateType.EMAIL_VERIFICATION,
+        EmailTemplateType.EMAIL_VERIFICATION.label(),
+        "Confirme seu e-mail - {{productName}}",
+        """
+        <div style="margin:0;padding:32px;background:#f4efe8;font-family:Georgia,'Times New Roman',serif;color:#241f1a;">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:640px;margin:0 auto;background:#fffaf2;border:1px solid #e6dccd;">
+            <tr>
+              <td style="padding:36px 40px 20px 40px;background:#1f3a5f;color:#fffaf2;">
+                <div style="font-size:12px;letter-spacing:0.24em;text-transform:uppercase;opacity:0.85;">{{productName}}</div>
+                <h1 style="margin:12px 0 0 0;font-size:30px;line-height:1.2;font-weight:700;">Confirme seu e-mail</h1>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:32px 40px;">
+                <p style="margin:0 0 16px 0;font-size:17px;line-height:1.7;">Ola <strong>{{userName}}</strong>,</p>
+                <p style="margin:0 0 16px 0;font-size:16px;line-height:1.7;">
+                  Recebemos o cadastro da sua conta em <strong>{{requestDateTime}}</strong>.
+                </p>
+                <p style="margin:0 0 28px 0;font-size:16px;line-height:1.7;">
+                  Para ativar o acesso, confirme que este e-mail e seu clicando no botao abaixo. O link vale por 24 horas.
+                </p>
+                <p style="margin:0 0 28px 0;">
+                  <a href="{{confirmLink}}" style="display:inline-block;background:#d88a32;color:#fffaf2;text-decoration:none;padding:14px 24px;font-size:15px;font-weight:700;border-radius:999px;">
+                    Confirmar e-mail
+                  </a>
+                </p>
+                <p style="margin:0 0 12px 0;font-size:14px;line-height:1.7;color:#4f4337;">
+                  Se o botao nao abrir, copie e cole este link no navegador:
+                </p>
+                <p style="margin:0 0 28px 0;font-size:13px;line-height:1.7;word-break:break-word;color:#1f3a5f;">
+                  {{confirmLink}}
+                </p>
+                <div style="padding-top:20px;border-top:1px solid #e6dccd;">
+                  <p style="margin:0 0 8px 0;font-size:14px;line-height:1.7;color:#4f4337;">
+                    Se voce nao criou essa conta, ignore este e-mail.
+                  </p>
+                  <p style="margin:0;font-size:14px;line-height:1.7;color:#4f4337;">
+                    Duvidas? Fale com nosso suporte em <strong>{{supportEmail}}</strong>.
+                  </p>
+                </div>
+              </td>
+            </tr>
+          </table>
+        </div>
+        """
+            .trim(),
+        List.of(
+            "{{userName}}",
+            "{{confirmLink}}",
             "{{productName}}",
             "{{supportEmail}}",
             "{{requestDateTime}}"));

@@ -22,11 +22,20 @@ public class CommunicationChannelDispatcher {
   }
 
   public ChannelSendResult sendText(ChannelSendCommand command) {
-    if (command == null) throw new IllegalArgumentException("Comando de envio obrigatorio.");
+    if (command == null) throw new IllegalArgumentException("Comando de envio obrigatório.");
     return adapters().stream()
         .filter(adapter -> adapter.channel() == command.channel())
         .findFirst()
         .map(adapter -> adapter.sendText(command))
+        .orElseGet(() -> unsupported(command.channel()));
+  }
+
+  public ChannelSendResult sendTemplate(ChannelTemplateCommand command) {
+    if (command == null) throw new IllegalArgumentException("Comando de envio obrigatório.");
+    return adapters().stream()
+        .filter(adapter -> adapter.channel() == command.channel())
+        .findFirst()
+        .map(adapter -> adapter.sendTemplate(command))
         .orElseGet(() -> unsupported(command.channel()));
   }
 

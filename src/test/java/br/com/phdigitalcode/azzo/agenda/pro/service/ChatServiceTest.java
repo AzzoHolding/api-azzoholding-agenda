@@ -110,6 +110,26 @@ class ChatServiceTest {
         24);
   }
 
+  // ---- pedido de atendente (teste de dialogos de 23/10/2026) ----
+
+  @Test
+  void pedidoDeAtendenteLigaOModoManualEAvisaOChat() {
+    UUID conversaId = UUID.randomUUID();
+    UUID clienteId = UUID.randomUUID();
+    ChatConversationEntity conversa = new ChatConversationEntity();
+    conversa.setId(conversaId);
+    conversa.setTenantId(tenantId);
+    conversa.setClientId(clienteId);
+    conversa.setChannel(ChatChannel.WHATSAPP);
+    when(chatConversationRepository.findByTenantAndId(tenantId, conversaId)).thenReturn(Optional.of(conversa));
+
+    service.marcarPedidoDeAtendente(tenantId, conversaId);
+
+    org.assertj.core.api.Assertions.assertThat(conversa.getManualModeUntil()).isAfter(java.time.Instant.now());
+    org.assertj.core.api.Assertions.assertThat(conversa.getManualModeReason()).isEqualTo(ChatService.MOTIVO_CLIENTE_PEDIU_ATENDENTE);
+    verify(chatRealtimePublisher).publishChatUpdate(tenantId, conversaId, clienteId, "HUMAN_REQUESTED");
+  }
+
   // ---- resolveOutboundRoute ----
 
   @Test

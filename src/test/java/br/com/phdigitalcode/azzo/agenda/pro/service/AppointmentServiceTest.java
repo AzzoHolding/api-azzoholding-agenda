@@ -90,19 +90,19 @@ class AppointmentServiceTest {
   void validaEntrada() {
     assertThatThrownBy(() -> service.findAvailableSlots(null, professionalId, DATA, 30, 0))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("tenantId obrigatorio");
+        .hasMessage("tenantId obrigatório");
     assertThatThrownBy(() -> service.findAvailableSlots(tenantId, null, DATA, 30, 0))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("professionalId obrigatorio");
+        .hasMessage("professionalId obrigatório");
     assertThatThrownBy(() -> service.findAvailableSlots(tenantId, professionalId, null, 30, 0))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("date obrigatoria");
+        .hasMessage("date obrigatória");
     assertThatThrownBy(() -> service.findAvailableSlots(tenantId, professionalId, DATA, 0, 0))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("serviceDurationMinutes invalido");
+        .hasMessage("serviceDurationMinutes inválido");
     assertThatThrownBy(() -> service.findAvailableSlots(tenantId, professionalId, DATA, 30, -1))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("bufferMinutes invalido");
+        .hasMessage("bufferMinutes inválido");
 
     verify(specialClosureService, never()).isClosedAt(any(), any(), any(), any(), any());
   }
@@ -116,20 +116,60 @@ class AppointmentServiceTest {
 
     assertThatThrownBy(() -> service.findAvailableSlots(tenantId, professionalId, DATA, 30, 0))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Profissional nao encontrado para o tenant informado");
+        .hasMessage("Profissional não encontrado para o tenant informado");
   }
 
   @Test
-  @DisplayName("profissional sem jornada na data cadastrada lanca IllegalStateException")
+  @DisplayName("profissional sem jornada cadastrada segue a janela do salao (mesma regra da criacao)")
   void profissionalSemJornada() {
     janelaSalao("09:00", "19:00");
     profissionalExiste();
     when(profissionalWorkingHourRepository.listByProfessional(tenantId, professionalId))
         .thenReturn(List.of());
 
-    assertThatThrownBy(() -> service.findAvailableSlots(tenantId, professionalId, DATA, 30, 0))
-        .isInstanceOf(IllegalStateException.class)
-        .hasMessage("Profissional sem horario de trabalho para a data informada");
+    List<TimeSlotResponse> slots = service.findAvailableSlots(tenantId, professionalId, DATA, 30, 0);
+
+    assertThat(slots).isNotEmpty();
+    assertThat(slots)
+        .allSatisfy(
+            slot -> {
+              assertThat(slot.startTime).isAfterOrEqualTo(LocalTime.of(9, 0));
+              assertThat(slot.endTime).isBeforeOrEqualTo(LocalTime.of(19, 0));
+            });
+  }
+
+  @Test
+  @DisplayName("jornada so de outros dias: o dia sem cadastro segue a janela do salao")
+  void diaSemCadastroSegueOSalao() {
+    janelaSalao("09:00", "19:00");
+    profissionalExiste();
+    int hoje = DATA.getDayOfWeek().getValue();
+    int outroDia = hoje == 7 ? 1 : hoje + 1;
+    when(profissionalWorkingHourRepository.listByProfessional(tenantId, professionalId))
+        .thenReturn(List.of(workingHour(outroDia, "09:00", "12:00", true)));
+
+    assertThat(service.findAvailableSlots(tenantId, professionalId, DATA, 30, 0)).isNotEmpty();
+  }
+
+  /** Teste de dialogos de 24/10/2026: 14:30 era oferecido num fechamento de 14h as 16h. */
+  @Test
+  @DisplayName("fechamento de parte do dia tira os horarios desse trecho")
+  void fechamentoParcialTiraOTrecho() {
+    janelaSalao("09:00", "19:00");
+    profissionalExiste();
+    jornada("09:00", "19:00");
+    semAgendamentos();
+    when(specialClosureService.trechosFechados(tenantId, professionalId, DATA))
+        .thenReturn(List.<LocalTime[]>of(new LocalTime[] {LocalTime.of(14, 0), LocalTime.of(16, 0)}));
+
+    List<TimeSlotResponse> slots = service.findAvailableSlots(tenantId, professionalId, DATA, 30, 0);
+
+    assertThat(slots).isNotEmpty();
+    assertThat(slots).noneSatisfy(slot -> {
+      assertThat(slot.startTime).isBefore(LocalTime.of(16, 0));
+      assertThat(slot.endTime).isAfter(LocalTime.of(14, 0));
+    });
+    assertThat(slots).anySatisfy(slot -> assertThat(slot.startTime).isEqualTo(LocalTime.of(16, 0)));
   }
 
   // ---------- portoes que zeram a agenda ----------
@@ -331,7 +371,7 @@ class AppointmentServiceTest {
   }
 
   @Test
-  @DisplayName("jornada marcada como nao-trabalhada ou de outro dia da semana e descartada")
+  @DisplayName("dia cadastrado como folga zera os horarios, sem erro; o de outro dia nao conta")
   void jornadaDeOutroDiaOuInativaEDescartada() {
     janelaSalao("09:00", "19:00");
     profissionalExiste();
@@ -343,8 +383,7 @@ class AppointmentServiceTest {
                 workingHour(hoje, "09:00", "12:00", false),
                 workingHour(outroDia, "09:00", "12:00", true)));
 
-    assertThatThrownBy(() -> service.findAvailableSlots(tenantId, professionalId, DATA, 30, 0))
-        .isInstanceOf(IllegalStateException.class);
+    assertThat(service.findAvailableSlots(tenantId, professionalId, DATA, 30, 0)).isEmpty();
   }
 
   @Test

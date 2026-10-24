@@ -27,20 +27,24 @@ import br.com.phdigitalcode.azzo.agenda.pro.entity.AppointmentDeposit;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.Cliente;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.Profissional;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.Servico;
+import br.com.phdigitalcode.azzo.agenda.pro.entity.Specialty;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.Tenant;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.SalonDtos;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.BookingFunnelStage;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.StatusAgendamento;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.TenantDepositPaymentService;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.AgendamentoItemRepository;
+import br.com.phdigitalcode.azzo.agenda.pro.repository.AgendamentoQueryRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.AgendamentoRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.AppointmentBookingFunnelEventRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.ClienteRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.ProfissionalRepository;
+import br.com.phdigitalcode.azzo.agenda.pro.repository.ProfissionalWorkingHourRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.ServiceCategoryRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.ServicoRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.TenantRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.util.DataUtil;
+import br.com.phdigitalcode.azzo.agenda.pro.util.JornadaDoProfissional;
 import br.com.phdigitalcode.azzo.agenda.pro.util.NumericUtil;
 
 /**
@@ -69,6 +73,8 @@ public class ServicoPublicBooking {
   private final SpecialClosureService specialClosureService;
   private final NotificationService notificationService;
   private final TenantDepositPaymentService tenantDepositPaymentService;
+  private final ProfissionalWorkingHourRepository profissionalWorkingHourRepository;
+  private final AgendamentoQueryRepository agendamentoQueryRepository;
 
   public ServicoPublicBooking(
       TenantRepository tenantRepository,
@@ -82,7 +88,9 @@ public class ServicoPublicBooking {
       TenantOperationalSettingsService tenantOperationalSettingsService,
       SpecialClosureService specialClosureService,
       NotificationService notificationService,
-      TenantDepositPaymentService tenantDepositPaymentService) {
+      TenantDepositPaymentService tenantDepositPaymentService,
+      ProfissionalWorkingHourRepository profissionalWorkingHourRepository,
+      AgendamentoQueryRepository agendamentoQueryRepository) {
     this.tenantRepository = tenantRepository;
     this.servicoRepository = servicoRepository;
     this.serviceCategoryRepository = serviceCategoryRepository;
@@ -95,31 +103,43 @@ public class ServicoPublicBooking {
     this.specialClosureService = specialClosureService;
     this.notificationService = notificationService;
     this.tenantDepositPaymentService = tenantDepositPaymentService;
+    this.profissionalWorkingHourRepository = profissionalWorkingHourRepository;
+    this.agendamentoQueryRepository = agendamentoQueryRepository;
   }
 
   @Transactional(readOnly = true)
-  public List<ServicoResponse> listarServicosAtivos(String slug) {
+  public List<PublicBookingDtos.PublicService> listarServicosAtivos(String slug) {
     Tenant tenant = obterTenantPorSlug(slug);
+    // SEM profissional vinculado significa "qualquer profissional" — e o padrao de quem acabou de
+    // cadastrar o servico, e e assim que a agenda, a lista de profissionais do link e a criacao do
+    // agendamento ja tratam. Aqui ficava de fora (anyMatch numa lista vazia e falso), e o salao
+    // novo via "nenhum servico disponivel" no proprio link publico (achado de 2026-09-20).
+    boolean alguemAtende =
+        profissionalRepository.findByTenantIdAndIsActiveTrue(tenant.getId()).stream()
+            .anyMatch(ServicoPublicBooking::atendeNoLink);
     return servicoRepository.findByTenantId(tenant.getId()).stream()
-        .filter(s -> s.isActive() && !s.getProfissionais().isEmpty())
+        .filter(s -> s.isActive() && servicoTemQuemAtenda(s, alguemAtende))
         .map(this::toServicoResponse)
         .toList();
   }
 
   @Transactional(readOnly = true)
-  public List<ProfissionalResponse> listarProfissionaisAtivos(String slug) {
+  public List<PublicBookingDtos.PublicProfessional> listarProfissionaisAtivos(String slug) {
     return listarProfissionaisAtivos(slug, null, null);
   }
 
   @Transactional(readOnly = true)
-  public List<ProfissionalResponse> listarProfissionaisAtivos(String slug, String serviceId) {
+  public List<PublicBookingDtos.PublicProfessional> listarProfissionaisAtivos(String slug, String serviceId) {
     return listarProfissionaisAtivos(slug, serviceId, null);
   }
 
   @Transactional(readOnly = true)
-  public List<ProfissionalResponse> listarProfissionaisAtivos(String slug, String serviceId, String serviceIds) {
+  public List<PublicBookingDtos.PublicProfessional> listarProfissionaisAtivos(String slug, String serviceId, String serviceIds) {
     Tenant tenant = obterTenantPorSlug(slug);
-    List<Profissional> ativos = profissionalRepository.findByTenantIdAndIsActiveTrue(tenant.getId());
+    // Quem nao recebe agendamento continua na equipe, mas nao e opcao no link publico.
+    List<Profissional> ativos = profissionalRepository.findByTenantIdAndIsActiveTrue(tenant.getId()).stream()
+        .filter(Profissional::isAcceptsAppointments)
+        .toList();
     List<Servico> selectedServices = resolveSelectedServices(tenant.getId(), serviceId, serviceIds);
     if (selectedServices.isEmpty()) {
       return ativos.stream().map(this::toProfissionalResponse).toList();
@@ -146,22 +166,23 @@ public class ServicoPublicBooking {
       String slug, String date, String serviceId, String serviceIds, String professionalId) {
     Tenant tenant = obterTenantPorSlug(slug);
     LocalDate data = DataUtil.parseDataISO(date);
-    if (data == null) throw new IllegalArgumentException("Data invalida");
+    if (data == null) throw new IllegalArgumentException("Data inválida");
 
     List<Servico> selectedServices = resolveSelectedServices(tenant.getId(), serviceId, serviceIds);
-    if (selectedServices.isEmpty()) throw new IllegalArgumentException("Servico nao encontrado");
+    if (selectedServices.isEmpty()) throw new IllegalArgumentException("Serviço não encontrado");
 
     UUID profissionalUuid = professionalId == null || professionalId.isBlank() ? null : UUID.fromString(professionalId);
     if (profissionalUuid != null) {
       Profissional profissional = profissionalRepository
           .findByIdAndTenantIdAndIsActiveTrue(profissionalUuid, tenant.getId())
+          .filter(Profissional::isAcceptsAppointments)
           .orElse(null);
-      if (profissional == null) throw new IllegalArgumentException("Profissional nao encontrado");
+      if (profissional == null) throw new IllegalArgumentException("Profissional não encontrado");
       for (Servico servico : selectedServices) {
         if (servico.getProfissionais() != null
             && !servico.getProfissionais().isEmpty()
             && servico.getProfissionais().stream().noneMatch(p -> p.getId().equals(profissionalUuid))) {
-          throw new IllegalArgumentException("Profissional nao atende o servico selecionado");
+          throw new IllegalArgumentException("Profissional não atende o serviço selecionado");
         }
       }
     }
@@ -187,6 +208,11 @@ public class ServicoPublicBooking {
     LocalTime cursor = janela[0];
     LocalTime fim = janela[1];
     long totalDuration = selectedServices.stream().mapToLong(Servico::getDuration).sum();
+    // A jornada do profissional escolhido: o link nao pode oferecer o dia de folga dele.
+    List<br.com.phdigitalcode.azzo.agenda.pro.entity.ProfissionalWorkingHour> jornada =
+        profissionalUuid == null
+            ? List.of()
+            : profissionalWorkingHourRepository.listByProfessional(tenant.getId(), profissionalUuid);
     // Para o dia atual, nao exibe horarios que ja passaram
     LocalTime agora = data.isEqual(LocalDate.now(ZONE_BR)) ? LocalTime.now(ZONE_BR) : null;
     while (!cursor.plusMinutes(totalDuration).isAfter(fim)) {
@@ -195,7 +221,9 @@ public class ServicoPublicBooking {
         slot.time = cursor.format(TIME_FMT);
         LocalTime slotStart = cursor;
         LocalTime slotEnd = cursor.plusMinutes(totalDuration);
-        slot.available = ativos.stream().noneMatch(a -> overlaps(a, slotStart, slotEnd));
+        slot.available =
+            ativos.stream().noneMatch(a -> overlaps(a, slotStart, slotEnd))
+                && JornadaDoProfissional.atende(jornada, data, slotStart, slotEnd);
         resp.slots.add(slot);
       }
       cursor = cursor.plusMinutes(30);
@@ -210,7 +238,7 @@ public class ServicoPublicBooking {
 
     UUID professionalUuid = UUID.fromString(request.professionalId);
     LocalDate data = DataUtil.parseDataISO(request.date);
-    if (data == null) throw new IllegalArgumentException("Data invalida");
+    if (data == null) throw new IllegalArgumentException("Data inválida");
     LocalTime startTime = parseTimeOrThrow(request.startTime);
     String normalizedStartTime = startTime.format(TIME_FMT);
     List<ResolvedPublicItem> selectedItems = resolveRequestItems(tenant.getId(), request);
@@ -218,35 +246,64 @@ public class ServicoPublicBooking {
         .mapToLong(item -> (long) item.service().getDuration() * item.quantity())
         .sum();
     LocalTime endTime = startTime.plusMinutes(totalDuration);
+    // Horario que ja passou: a tela de horarios nao oferece, mas o POST aceitava — marcar ontem
+    // pelo link criava um atendimento "pendente" no passado (analise de 2026-09-16, A3).
+    if (data.atTime(startTime).atZone(ZONE_BR).isBefore(java.time.ZonedDateTime.now(ZONE_BR))) {
+      throw new IllegalArgumentException("Esse horário já passou. Escolha outro horário.");
+    }
     if (!tenantOperationalSettingsService.isBusinessOpenAt(tenant.getId(), data, startTime, endTime)) {
-      throw new IllegalArgumentException("Salao fechado ou fora do horario de funcionamento informado");
+      throw new IllegalArgumentException("Salão fechado ou fora do horário de funcionamento.");
     }
     // Verificar fechamentos especiais (all_day e parciais, incluindo do profissional)
     if (specialClosureService.isClosedAt(tenant.getId(), professionalUuid, data, startTime, endTime)) {
-      throw new IllegalArgumentException("Salao ou profissional com fechamento especial no horario informado");
+      throw new IllegalArgumentException("Salão ou profissional com fechamento especial no horário informado");
     }
 
     Profissional profissional = profissionalRepository
         .findByIdAndTenantIdAndIsActiveTrue(professionalUuid, tenant.getId())
+        .filter(Profissional::isAcceptsAppointments)
         .orElse(null);
-    if (profissional == null) throw new IllegalArgumentException("Profissional nao encontrado");
+    if (profissional == null) throw new IllegalArgumentException("Profissional não encontrado");
     for (ResolvedPublicItem item : selectedItems) {
       Servico servico = item.service();
       if (servico.getProfissionais() != null
           && !servico.getProfissionais().isEmpty()
           && servico.getProfissionais().stream().noneMatch(p -> p.getId().equals(professionalUuid))) {
-        throw new IllegalArgumentException("Profissional nao atende o servico selecionado");
+        throw new IllegalArgumentException("Profissional não atende o serviço selecionado");
       }
     }
 
-    boolean conflito = agendamentoRepository
-        .findFirstByTenantIdAndProfessionalIdAndDateAndStartTimeAndStatusNot(
-            tenant.getId(), professionalUuid, data, normalizedStartTime, StatusAgendamento.CANCELLED)
-        .isPresent();
-    if (conflito) throw new IllegalArgumentException("Horario indisponivel");
+    if (!JornadaDoProfissional.atende(
+        profissionalWorkingHourRepository.listByProfessional(tenant.getId(), professionalUuid),
+        data,
+        startTime,
+        endTime)) {
+      throw new IllegalArgumentException("O profissional não atende neste horário");
+    }
+
+    // O sinal exige CPF/CNPJ — conferido ANTES de gravar qualquer coisa.
+    BigDecimal depositAmount = calcularValorSinal(selectedItems);
+    String cpfCnpjInformado =
+        request.customerCpfCnpj != null && !request.customerCpfCnpj.isBlank()
+            ? request.customerCpfCnpj.trim()
+            : null;
+
+    // Serializa marcacoes do mesmo profissional no mesmo dia (mesmo lock da agenda interna): duas
+    // pessoas no link ao mesmo tempo nao pegam o mesmo horario.
+    agendamentoQueryRepository.lockProfessionalDateForWrite(tenant.getId(), professionalUuid, data);
+
+    // SOBREPOSICAO, e nao so o mesmo inicio: com 10:00-11:00 marcado, o POST aceitava 10:30
+    // (analise de 2026-09-16, A3). E a mesma conta que a tela de horarios usa.
+    boolean conflito =
+        agendamentoRepository
+            .findByTenantIdAndDateAndProfessionalId(tenant.getId(), data, professionalUuid)
+            .stream()
+            .filter(a -> a.getStatus() != StatusAgendamento.CANCELLED)
+            .anyMatch(a -> overlaps(a, startTime, endTime));
+    if (conflito) throw new IllegalArgumentException("Horário indisponível");
 
     String normalizedPhone = normalizePhone(request.customerPhone);
-    if (normalizedPhone == null) throw new IllegalArgumentException("Telefone do cliente invalido");
+    if (normalizedPhone == null) throw new IllegalArgumentException("Telefone do cliente inválido");
 
     // O original faz clienteRepository.list("tenantId = ?1", tenant.id) (ordem nao especificada
     // pelo banco) e compara telefone normalizado sem variantes de DDI — nao usa o
@@ -261,18 +318,38 @@ public class ServicoPublicBooking {
         .filter(c -> Objects.equals(normalizePhone(c.getPhone()), normalizedPhone))
         .findFirst()
         .orElse(null);
+    if (NumericUtil.isPositive(depositAmount)
+        && cpfCnpjInformado == null
+        && (cliente == null || cliente.getCpfCnpj() == null || cliente.getCpfCnpj().isBlank())) {
+      throw new IllegalArgumentException(
+          "Este agendamento exige sinal: informe o CPF/CNPJ do cliente para gerar o Pix.");
+    }
+
     if (cliente == null) {
       cliente = new Cliente();
       cliente.setTenantId(tenant.getId());
       cliente.setName(request.customerName);
       cliente.setPhone(normalizedPhone);
       cliente.setEmail(request.customerEmail);
+      cliente.setCpfCnpj(cpfCnpjInformado);
       cliente = clienteRepository.save(cliente);
     } else {
-      cliente.setName(request.customerName);
-      cliente.setPhone(normalizedPhone);
-      cliente.setEmail(request.customerEmail);
-      cliente = clienteRepository.save(cliente);
+      // Cliente que JA EXISTE nao e reescrito por quem esta no link, que nao tem login: bastava
+      // saber o telefone de alguem para trocar nome, e-mail e CPF do cadastro (analise de
+      // 2026-09-16, A4). O que o salao ja sabe fica; so se preenche o que esta em branco.
+      boolean completou = false;
+      if ((cliente.getEmail() == null || cliente.getEmail().isBlank())
+          && request.customerEmail != null
+          && !request.customerEmail.isBlank()) {
+        cliente.setEmail(request.customerEmail.trim());
+        completou = true;
+      }
+      if ((cliente.getCpfCnpj() == null || cliente.getCpfCnpj().isBlank())
+          && cpfCnpjInformado != null) {
+        cliente.setCpfCnpj(cpfCnpjInformado);
+        completou = true;
+      }
+      if (completou) cliente = clienteRepository.save(cliente);
     }
 
     Agendamento agendamento = new Agendamento();
@@ -293,17 +370,8 @@ public class ServicoPublicBooking {
     resp.status = agendamento.getStatus().name();
     resp.message = "Agendamento criado com sucesso.";
 
-    BigDecimal depositAmount = calcularValorSinal(selectedItems);
     if (NumericUtil.isPositive(depositAmount)) {
-      if (cliente.getName() != null) cliente.setName(cliente.getName().trim());
-      String cpfCnpj = request.customerCpfCnpj != null ? request.customerCpfCnpj.trim() : null;
-      if (cpfCnpj == null || cpfCnpj.isBlank()) {
-        throw new IllegalArgumentException(
-            "Este agendamento exige sinal: informe o CPF/CNPJ do cliente para gerar o Pix.");
-      }
-      cliente.setCpfCnpj(cpfCnpj);
-      clienteRepository.save(cliente);
-
+      // O CPF ja foi conferido antes de gravar: e o do cadastro, ou o informado para quem nao tinha.
       AppointmentDeposit deposit = tenantDepositPaymentService.criarCobrancaSinal(
           tenant.getId(), agendamento.getId(), cliente, depositAmount,
           "Sinal de reserva - " + tenant.getName());
@@ -337,7 +405,7 @@ public class ServicoPublicBooking {
   @Transactional
   public PublicBookingDtos.BookingFunnelEventResponse registrarEventoFunil(
       String slug, PublicBookingDtos.BookingFunnelEventRequest request) {
-    if (request == null) throw new IllegalArgumentException("Payload do evento de funil obrigatorio.");
+    if (request == null) throw new IllegalArgumentException("Payload do evento de funil obrigatório.");
     Tenant tenant = obterTenantPorSlug(slug);
 
     UUID sessionId = parseUuidOrThrow(request.sessionId, "sessionId invalido.");
@@ -370,9 +438,26 @@ public class ServicoPublicBooking {
     return specialClosureService.listarDatasIndisponiveis(tenant.getId(), from, to);
   }
 
+  /**
+   * Alguem pode fazer este servico pelo link? Sem vinculo, qualquer profissional que atenda serve;
+   * com vinculo, pelo menos um dos vinculados precisa atender (vinculado so a quem nao recebe
+   * agendamento, o cliente escolheria e nao acharia profissional).
+   */
+  private static boolean servicoTemQuemAtenda(Servico servico, boolean alguemAtendeNoSalao) {
+    if (servico.getProfissionais() == null || servico.getProfissionais().isEmpty()) {
+      return alguemAtendeNoSalao;
+    }
+    return servico.getProfissionais().stream().anyMatch(ServicoPublicBooking::atendeNoLink);
+  }
+
+  /** Pode ser escolhido no link publico: ativo e aceitando agendamento. */
+  private static boolean atendeNoLink(Profissional profissional) {
+    return profissional.isActive() && profissional.isAcceptsAppointments();
+  }
+
   private Tenant obterTenantPorSlug(String slug) {
     return tenantRepository.findBySlug(slug)
-        .orElseThrow(() -> new IllegalArgumentException("Salao nao encontrado"));
+        .orElseThrow(() -> new IllegalArgumentException("Salão não encontrado"));
   }
 
   private void persistItems(Agendamento appointment, List<ResolvedPublicItem> items) {
@@ -395,7 +480,18 @@ public class ServicoPublicBooking {
       item = agendamentoItemRepository.save(item);
       persistedItems.add(item);
     }
-    appointment.setItems(persistedItems);
+    // TROCAR a lista quebrava TODO agendamento pelo link publico: `Agendamento.items` e
+    // `orphanRemoval = true`, e o Hibernate recusa no flush uma colecao com orfaos que deixou de
+    // ser a mesma instancia ("A collection with orphan deletion was no longer referenced by the
+    // owning entity instance"). O agendamento nem chegava a existir: a transacao caia inteira e o
+    // cliente lia "Ocorreu um erro inesperado" (achado na jornada de usuario de 2026-09-17).
+    // A colecao aqui esta sempre vazia — `exists` acima devolve antes quando ja ha item.
+    if (appointment.getItems() == null) {
+      appointment.setItems(new ArrayList<>(persistedItems));
+      return;
+    }
+    appointment.getItems().clear();
+    appointment.getItems().addAll(persistedItems);
   }
 
   private List<Servico> resolveSelectedServices(UUID tenantId, String serviceId, String serviceIds) {
@@ -406,7 +502,7 @@ public class ServicoPublicBooking {
     for (UUID id : ids) {
       Servico servico = servicoRepository.findByIdAndTenantId(id, tenantId).orElse(null);
       if (servico == null || !servico.isActive()) {
-        throw new IllegalArgumentException("Servico nao encontrado");
+        throw new IllegalArgumentException("Serviço não encontrado");
       }
       services.add(servico);
     }
@@ -420,13 +516,13 @@ public class ServicoPublicBooking {
     List<ResolvedPublicItem> resolvedItems = new ArrayList<>();
     for (PublicBookingDtos.ItemRequest item : requestedItems) {
       if (item == null || item.serviceId == null || item.serviceId.isBlank()) {
-        throw new IllegalArgumentException("Item de agendamento invalido");
+        throw new IllegalArgumentException("Item de agendamento inválido");
       }
       UUID serviceId = UUID.fromString(item.serviceId);
       Servico servico = servicoRepository.findByIdAndTenantId(serviceId, tenantId)
           .filter(Servico::isActive)
           .orElse(null);
-      if (servico == null) throw new IllegalArgumentException("Servico nao encontrado");
+      if (servico == null) throw new IllegalArgumentException("Serviço não encontrado");
       int quantity = item.quantity <= 0 ? 1 : item.quantity;
       resolvedItems.add(new ResolvedPublicItem(servico, quantity));
     }
@@ -477,14 +573,15 @@ public class ServicoPublicBooking {
   private String normalizePhone(String phone) {
     if (phone == null) return null;
     String digits = phone.replaceAll("\\D", "");
-    return digits.length() < 10 ? null : digits;
+    // Mesma regra do cadastro (TelefoneBr): 13 digitos sem o 55 nao e celular e nao recebe WhatsApp.
+    return br.com.phdigitalcode.azzo.agenda.pro.util.TelefoneBr.valido(digits) ? digits : null;
   }
 
   private LocalTime parseTimeOrThrow(String value) {
     try {
       return LocalTime.parse(value);
     } catch (Exception e) {
-      throw new IllegalArgumentException("Horario inicial invalido");
+      throw new IllegalArgumentException("Horário inicial inválido");
     }
   }
 
@@ -505,18 +602,15 @@ public class ServicoPublicBooking {
     }
   }
 
-  private ServicoResponse toServicoResponse(Servico s) {
-    ServicoResponse r = new ServicoResponse();
+  /** So o que a tela de agendar mostra (inclui o sinal, que o cliente precisa saber). */
+  private PublicBookingDtos.PublicService toServicoResponse(Servico s) {
+    PublicBookingDtos.PublicService r = new PublicBookingDtos.PublicService();
     r.id = s.getId().toString();
-    r.tenantId = s.getTenantId().toString();
     r.name = s.getName();
     r.description = s.getDescription();
     r.duration = s.getDuration();
     r.price = s.getPrice();
     r.category = resolveCategoryName(s.getCategoryId());
-    r.professionalIds = new ArrayList<>(s.getProfissionais().stream().map(Profissional::getId).toList());
-    r.isActive = s.isActive();
-    r.createdAt = s.getCreatedAt() != null ? s.getCreatedAt().toString() : null;
     r.requiresDeposit = s.isRequiresDeposit();
     r.depositType = s.getDepositType();
     r.depositValue = s.getDepositValue();
@@ -528,18 +622,15 @@ public class ServicoPublicBooking {
     return serviceCategoryRepository.findById(categoryId).map(c -> c.getName()).orElse(null);
   }
 
-  private ProfissionalResponse toProfissionalResponse(Profissional p) {
-    ProfissionalResponse r = new ProfissionalResponse();
+  /** So o que a tela de agendar mostra. Nada de e-mail, telefone, comissao ou id interno. */
+  private PublicBookingDtos.PublicProfessional toProfissionalResponse(Profissional p) {
+    PublicBookingDtos.PublicProfessional r = new PublicBookingDtos.PublicProfessional();
     r.id = p.getId().toString();
-    r.tenantId = p.getTenantId().toString();
-    r.userId = p.getUserId() != null ? p.getUserId().toString() : null;
     r.name = p.getName();
-    r.email = p.getEmail();
-    r.phone = p.getPhone();
     r.avatar = p.getAvatar();
-    r.commissionRate = p.getCommissionRate();
-    r.isActive = p.isActive();
-    r.createdAt = p.getCreatedAt() != null ? p.getCreatedAt().toString() : null;
+    if (p.getSpecialties() != null) {
+      r.specialties = p.getSpecialties().stream().map(Specialty::getName).sorted().toList();
+    }
     return r;
   }
 

@@ -224,7 +224,7 @@ public class CommissionService {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     LocalDate start = parseRequiredDate(from, "from obrigatorio");
     LocalDate end = parseRequiredDate(to, "to obrigatorio");
-    if (end.isBefore(start)) throw new IllegalArgumentException("Periodo invalido");
+    if (end.isBefore(start)) throw new IllegalArgumentException("Período inválido");
     UUID professionalUuid = parseUuidNullable(professionalId, "professionalId invalido");
     String normalizedStatus = normalizeStatusNullable(status);
 
@@ -299,7 +299,7 @@ public class CommissionService {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     LocalDate start = parseRequiredDate(from, "from obrigatorio");
     LocalDate end = parseRequiredDate(to, "to obrigatorio");
-    if (end.isBefore(start)) throw new IllegalArgumentException("Periodo invalido");
+    if (end.isBefore(start)) throw new IllegalArgumentException("Período inválido");
 
     Profissional professional = getProfessionalOrFail(tenantId, professionalId);
     List<CommissionEntry> entries =
@@ -355,9 +355,9 @@ public class CommissionService {
     UUID actorUserId = authenticatedUser.idOuNulo();
     LocalDate start = parseRequiredDate(request.periodStart, "periodStart obrigatorio");
     LocalDate end = parseRequiredDate(request.periodEnd, "periodEnd obrigatorio");
-    if (end.isBefore(start)) throw new IllegalArgumentException("Periodo invalido");
+    if (end.isBefore(start)) throw new IllegalArgumentException("Período inválido");
     if (cycleRepository.findByTenantIdAndPeriodStartAndPeriodEnd(tenantId, start, end).isPresent()) {
-      throw new IllegalArgumentException("Ja existe fechamento de comissao para este periodo");
+      throw new IllegalArgumentException("Já existe fechamento de comissão para este período");
     }
 
     CommissionCycle cycle = new CommissionCycle();
@@ -384,12 +384,13 @@ public class CommissionService {
     CommissionCycle cycle =
         cycleRepository
             .findByTenantIdAndId(tenantId, cycleId)
-            .orElseThrow(() -> new IllegalArgumentException("Ciclo de comissao nao encontrado"));
+            .orElseThrow(() -> new IllegalArgumentException("Ciclo de comissão não encontrado"));
     if ("PAID".equals(cycle.getStatus())) {
-      throw new IllegalArgumentException("Ciclo de comissao ja pago");
+      throw new IllegalArgumentException("Ciclo de comissão já pago");
     }
 
     CommissionDtos.CycleResponse before = toCycleResponse(cycle);
+    adiarProfissionaisSemSaldoNoCiclo(tenantId, cycle);
     cycle.setStatus("PAID");
     cycle.setPaidAt(Instant.now());
     cycle.setPaidByUserId(actorUserId);
@@ -421,8 +422,10 @@ public class CommissionService {
     UUID actorUserId = authenticatedUser.idOuNulo();
     UUID professionalId = parseUuidRequired(request.professionalId, "professionalId invalido");
     Profissional professional = getProfessionalOrFail(tenantId, professionalId);
-    if (request.amount == null || NumericUtil.isZeroOrNegative(request.amount)) {
-      throw new IllegalArgumentException("amount nao pode ser zero");
+    // Negativo e permitido: e o DESCONTO de comissao — o unico jeito de acertar o que foi pago a
+    // mais (analise de 2026-09-16, M4). Zero nao muda nada e continua recusado.
+    if (request.amount == null || request.amount.signum() == 0) {
+      throw new IllegalArgumentException("amount não pode ser zero");
     }
 
     Instant effectiveAt = parseInstantNullable(request.effectiveAt);
@@ -476,7 +479,6 @@ public class CommissionService {
 
     Profissional professional = getProfessionalOrFail(tenantId, professionalId);
     CommissionRuleSet ruleSet = resolveApplicableRuleSet(tenantId, professionalId);
-    if (ruleSet == null) return;
 
     for (AgendamentoItem appointmentItem : appointmentItems) {
       if (appointmentItem == null || appointmentItem.getId() == null || appointmentItem.getServiceId() == null) {
@@ -494,8 +496,15 @@ public class CommissionService {
               : servicoRepository.findById(appointmentItem.getServiceId()).orElse(null);
       if (service == null || !tenantId.equals(service.getTenantId())) continue;
 
-      CommissionRule rule = resolveApplicableRule(ruleSet, service);
-      if (rule == null) continue;
+      CommissionRule rule = ruleSet != null ? resolveApplicableRule(ruleSet, service) : null;
+      if (rule == null) {
+        registrarPeloPercentualDoProfissional(
+            tenantId, professional, service, appointmentItem.getId(),
+            "APPOINTMENT:" + appointmentId + ":ITEM:" + appointmentItem.getId(),
+            PERIOD_KEY_FORMAT.format(appointmentDate != null ? appointmentDate : LocalDate.now()),
+            appointmentItem.getTotalPrice());
+        continue;
+      }
 
       BigDecimal grossAmt =
           appointmentItem.getGrossAmount() != null ? appointmentItem.getGrossAmount() : BigDecimal.ZERO;
@@ -535,6 +544,23 @@ public class CommissionService {
           null,
           toEntryResponse(entry, professional.getName()));
     }
+  }
+
+  /**
+   * O agendamento ja tem comissao de servico (nao estornada) gerada na CONCLUSAO — a regra antiga.
+   *
+   * <p>Desde 2026-09-17 a comissao sai do que a COMANDA cobrou, ao fechar. Atendimento concluido
+   * antes do deploy, com comanda ainda aberta, ja tem a comissao pela regra antiga; fechar a comanda
+   * nao pode gerar a segunda.
+   */
+  @Transactional(readOnly = true)
+  public boolean possuiComissaoDeServicoDoAgendamento(UUID tenantId, UUID appointmentId) {
+    if (tenantId == null || appointmentId == null) return false;
+    return entryRepository
+        .listByTenantAndOriginReferencePrefix(
+            tenantId, "SERVICE", "APPOINTMENT:" + appointmentId + ":ITEM:")
+        .stream()
+        .anyMatch(entry -> entry != null && !"REVERSED".equals(entry.getEntryStatus()));
   }
 
   @Transactional
@@ -579,13 +605,20 @@ public class CommissionService {
 
     Profissional professional = getProfessionalOrFail(tenantId, professionalId);
     CommissionRuleSet ruleSet = resolveApplicableRuleSet(tenantId, professionalId);
-    if (ruleSet == null) return;
 
     Servico service = servicoRepository.findById(serviceId).orElse(null);
     if (service == null || !tenantId.equals(service.getTenantId())) return;
 
-    CommissionRule rule = resolveApplicableRule(ruleSet, service);
-    if (rule == null) return;
+    CommissionRule rule = ruleSet != null ? resolveApplicableRule(ruleSet, service) : null;
+    if (rule == null) {
+      Instant quando = effectiveAt != null ? effectiveAt : Instant.now();
+      registrarPeloPercentualDoProfissional(
+          tenantId, professional, service, comandaItemId,
+          "COMANDA:" + comandaId + ":ITEM:" + comandaItemId,
+          PERIOD_KEY_FORMAT.format(quando.atZone(ZONA_BR).toLocalDate()),
+          netAmount);
+      return;
+    }
 
     long baseAmountCents =
         computeBaseAmount(
@@ -707,25 +740,25 @@ public class CommissionService {
   private CommissionRuleSet getRuleSetOrFail(UUID tenantId, UUID ruleSetId) {
     return ruleSetRepository
         .findByTenantIdAndId(tenantId, ruleSetId)
-        .orElseThrow(() -> new IllegalArgumentException("Regra de comissao nao encontrada"));
+        .orElseThrow(() -> new IllegalArgumentException("Regra de comissão não encontrada"));
   }
 
   private Profissional getProfessionalOrFail(UUID tenantId, UUID professionalId) {
     return profissionalRepository
         .findById(professionalId)
         .filter(item -> tenantId.equals(item.getTenantId()))
-        .orElseThrow(() -> new IllegalArgumentException("Profissional nao encontrado"));
+        .orElseThrow(() -> new IllegalArgumentException("Profissional não encontrado"));
   }
 
   private void applyRuleSet(
       CommissionRuleSet entity, CommissionDtos.RuleSetUpsertRequest request, UUID tenantId) {
     String scopeType = requiredUpper(request.scopeType, "scopeType obrigatorio");
     if (!"GLOBAL".equals(scopeType) && !"PROFESSIONAL".equals(scopeType)) {
-      throw new IllegalArgumentException("scopeType invalido");
+      throw new IllegalArgumentException("scopeType inválido");
     }
     UUID professionalId = parseUuidNullable(request.professionalId, "professionalId invalido");
     if ("GLOBAL".equals(scopeType) && professionalId != null) {
-      throw new IllegalArgumentException("Regra global nao pode informar profissional");
+      throw new IllegalArgumentException("Regra global não pode informar profissional");
     }
     if ("PROFESSIONAL".equals(scopeType) && professionalId == null) {
       throw new IllegalArgumentException("Regra do profissional exige professionalId");
@@ -793,12 +826,12 @@ public class CommissionService {
     switch (rule.getTargetType()) {
       case "GENERAL" -> {
         if (rule.getTargetId() != null || rule.getTargetCode() != null) {
-          throw new IllegalArgumentException("Regra geral nao aceita alvo especifico");
+          throw new IllegalArgumentException("Regra geral não aceita alvo específico");
         }
       }
       case "SERVICE" -> {
         if (rule.getTargetId() == null || rule.getTargetCode() != null) {
-          throw new IllegalArgumentException("Servico exige targetId");
+          throw new IllegalArgumentException("Serviço exige targetId");
         }
         ensureCount("services", tenantId, rule.getTargetId(), "Servico nao encontrado");
       }
@@ -813,7 +846,7 @@ public class CommissionService {
           throw new IllegalArgumentException("Categoria exige targetCode");
         }
       }
-      default -> throw new IllegalArgumentException("targetType invalido");
+      default -> throw new IllegalArgumentException("targetType inválido");
     }
   }
 
@@ -1032,10 +1065,14 @@ public class CommissionService {
     if (tenantId == null || originId == null) return;
     CommissionEntry entry = entryRepository.findByTenantAndOrigin(tenantId, originType, originId).orElse(null);
     if (entry == null) return;
-    if ("PAID".equals(entry.getEntryStatus()) || "REVERSED".equals(entry.getEntryStatus())) return;
-
+    if ("REVERSED".equals(entry.getEntryStatus())) return;
     if (!"REVERSE_COMMISSION".equals(resolveRefundPolicy(entry))) return;
+    if ("PAID".equals(entry.getEntryStatus())) {
+      descontarComissaoJaPaga(tenantId, entry, reason);
+      return;
+    }
 
+    descontarDoCicloFechado(tenantId, entry);
     entry.setEntryStatus("REVERSED");
     entry.setReversedAt(Instant.now());
     entry.setNotes(appendNote(entry.getNotes(), reason));
@@ -1061,9 +1098,14 @@ public class CommissionService {
             tenantId, "SERVICE", "APPOINTMENT:" + appointmentId + ":ITEM:");
     for (CommissionEntry entry : entries) {
       if (entry == null) continue;
-      if ("PAID".equals(entry.getEntryStatus()) || "REVERSED".equals(entry.getEntryStatus())) continue;
+      if ("REVERSED".equals(entry.getEntryStatus())) continue;
       if (!"REVERSE_COMMISSION".equals(resolveRefundPolicy(entry))) continue;
+      if ("PAID".equals(entry.getEntryStatus())) {
+        descontarComissaoJaPaga(tenantId, entry, reason);
+        continue;
+      }
 
+      descontarDoCicloFechado(tenantId, entry);
       entry.setEntryStatus("REVERSED");
       entry.setReversedAt(Instant.now());
       entry.setNotes(appendNote(entry.getNotes(), reason));
@@ -1083,6 +1125,79 @@ public class CommissionService {
     }
   }
 
+  /**
+   * A venda foi estornada, mas a comissao dela JA FOI PAGA.
+   *
+   * <p>Antes, o estorno simplesmente ignorava a comissao paga, e o ajuste manual recusava valor
+   * negativo: o salao pagava comissao de venda desfeita e nao tinha como descontar (analise de
+   * 2026-09-16, M4). Agora nasce um AJUSTE NEGATIVO aberto, do mesmo valor, que entra no proximo
+   * ciclo do profissional. A entrada paga fica como esta — o pagamento aconteceu — e aponta para o
+   * desconto ({@code reversalEntryId}), o que tambem impede descontar duas vezes.
+   */
+  private void descontarComissaoJaPaga(UUID tenantId, CommissionEntry paga, String reason) {
+    if (paga.getReversalEntryId() != null || paga.getTotalAmountCents() <= 0) return;
+
+    Instant agora = Instant.now();
+    CommissionEntry desconto = new CommissionEntry();
+    desconto.setTenantId(tenantId);
+    desconto.setProfessionalId(paga.getProfessionalId());
+    desconto.setOriginType("MANUAL_ADJUSTMENT");
+    desconto.setOriginId(paga.getId());
+    desconto.setOriginReference("DESCONTO_DE_COMISSAO_PAGA:" + paga.getId());
+    desconto.setPeriodKey(PERIOD_KEY_FORMAT.format(agora.atZone(ZONA_BR).toLocalDate()));
+    desconto.setBaseAmountCents(0L);
+    desconto.setPercentValue(BigDecimal.ZERO);
+    desconto.setPercentAmountCents(0L);
+    desconto.setFixedAmountCents(-paga.getTotalAmountCents());
+    desconto.setTotalAmountCents(-paga.getTotalAmountCents());
+    desconto.setEntryStatus("OPEN");
+    desconto.setNotes(
+        "Desconto de comissao ja paga — a venda foi desfeita"
+            + (reason != null && !reason.isBlank() ? ": " + reason.trim() : ""));
+    desconto.setCreatedAt(agora);
+    entryRepository.save(desconto);
+    paga.setReversalEntryId(desconto.getId());
+
+    auditSuccess(
+        tenantId,
+        authenticatedUser.idOuNulo(),
+        "COMMISSION_PAID_REVERSAL_ADJUSTMENT",
+        "COMMISSION_ENTRY",
+        desconto.getId(),
+        null,
+        Map.of(
+            "entradaPagaId", paga.getId().toString(),
+            "valorDescontadoCents", paga.getTotalAmountCents(),
+            "motivo", reason == null ? "" : reason));
+  }
+
+  /**
+   * Entrada ja num ciclo FECHADO (e ainda nao pago) que e estornada: o total do ciclo baixa junto.
+   * O pagamento ja ignorava entrada estornada, mas o total exibido continuava com ela.
+   */
+  private void descontarDoCicloFechado(UUID tenantId, CommissionEntry entry) {
+    if (entry.getCycleId() == null) return;
+    cycleRepository
+        .findByTenantIdAndId(tenantId, entry.getCycleId())
+        .filter(ciclo -> !"PAID".equals(ciclo.getStatus()))
+        .ifPresent(ciclo -> ciclo.setTotalAmountCents(ciclo.getTotalAmountCents() - entry.getTotalAmountCents()));
+  }
+
+  /**
+   * Profissional com saldo zerado ou negativo no ciclo nao recebe agora — e as entradas dele passam
+   * para o proximo ciclo. Sem isso, pagar o ciclo marcava o DESCONTO como pago sem ter descontado
+   * nada, e a divida sumia.
+   */
+  private void adiarProfissionaisSemSaldoNoCiclo(UUID tenantId, CommissionCycle cycle) {
+    for (Object[] row : entryRepository.sumTotalCentsByProfessionalForCycle(tenantId, cycle.getId())) {
+      UUID professionalId = (UUID) row[0];
+      long total = row[1] instanceof Number number ? number.longValue() : 0L;
+      if (professionalId == null || total > 0) continue;
+      entryRepository.releaseProfessionalFromCycle(tenantId, cycle.getId(), professionalId);
+      cycle.setTotalAmountCents(cycle.getTotalAmountCents() - total);
+    }
+  }
+
   /** Sem regra vinculada, o original assume REVERSE_COMMISSION (reverte). */
   private String resolveRefundPolicy(CommissionEntry entry) {
     if (entry.getRuleId() == null) return "REVERSE_COMMISSION";
@@ -1090,6 +1205,55 @@ public class CommissionService {
         .findById(entry.getRuleId())
         .map(CommissionRule::getRefundPolicy)
         .orElse("REVERSE_COMMISSION");
+  }
+
+  /**
+   * Sem regra que se aplique, a comissao sai pelo percentual do CADASTRO do profissional, sobre o
+   * que foi cobrado.
+   *
+   * <p>O campo "Comissao (%)" do cadastro era gravado e nao entrava em calculo nenhum: com 40% no
+   * profissional e nenhuma regra, fechar a comanda nao gerava comissao (teste ponta a ponta de
+   * 23/10/2026). Decisao do dono: o cadastro e o padrao; as regras de Financeiro > Comissoes valem
+   * por cima dele, para servico ou categoria. Sem percentual (zero ou vazio), nada.
+   */
+  private void registrarPeloPercentualDoProfissional(
+      UUID tenantId,
+      Profissional professional,
+      Servico service,
+      UUID originId,
+      String originReference,
+      String periodKey,
+      BigDecimal valorCobrado) {
+    BigDecimal percentual = professional.getCommissionRate();
+    if (NumericUtil.isZeroOrNegative(percentual) || percentual.compareTo(BigDecimal.valueOf(100)) > 0) return;
+    long baseAmountCents = Math.max(0L, NumericUtil.toCents(valorCobrado != null ? valorCobrado : BigDecimal.ZERO));
+    long totalAmountCents = calculatePercentAmountCents(baseAmountCents, percentual);
+    if (totalAmountCents <= 0) return;
+
+    CommissionEntry entry = new CommissionEntry();
+    entry.setTenantId(tenantId);
+    entry.setProfessionalId(professional.getId());
+    entry.setOriginType("SERVICE");
+    entry.setOriginId(originId);
+    entry.setOriginReference(originReference);
+    entry.setPeriodKey(periodKey);
+    entry.setBaseAmountCents(baseAmountCents);
+    entry.setPercentValue(percentual);
+    entry.setPercentAmountCents(totalAmountCents);
+    entry.setFixedAmountCents(0L);
+    entry.setTotalAmountCents(totalAmountCents);
+    entry.setEntryStatus("OPEN");
+    entry.setNotes("Comissao do cadastro do profissional: " + service.getName());
+    entryRepository.save(entry);
+
+    auditSuccess(
+        tenantId,
+        authenticatedUser.idOuNulo(),
+        "COMMISSION_ENTRY_AUTO_CREATE",
+        "COMMISSION_ENTRY",
+        entry.getId(),
+        null,
+        toEntryResponse(entry, professional.getName()));
   }
 
   private CommissionRuleSet resolveApplicableRuleSet(UUID tenantId, UUID professionalId) {
@@ -1221,7 +1385,7 @@ public class CommissionService {
     try {
       return Instant.parse(value.trim());
     } catch (Exception e) {
-      throw new IllegalArgumentException("Data/hora invalida");
+      throw new IllegalArgumentException("Data/hora inválida");
     }
   }
 
@@ -1229,7 +1393,7 @@ public class CommissionService {
     if (value == null || value.isBlank()) return null;
     String normalized = value.trim().toUpperCase(Locale.ROOT);
     if (!VALID_ENTRY_STATUS.contains(normalized)) {
-      throw new IllegalArgumentException("status invalido");
+      throw new IllegalArgumentException("status inválido");
     }
     return normalized;
   }

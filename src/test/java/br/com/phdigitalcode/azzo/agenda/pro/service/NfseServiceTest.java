@@ -147,7 +147,7 @@ class NfseServiceTest {
 
     assertThatThrownBy(() -> service.criarRascunho(request))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("Tomador obrigatorio");
+        .hasMessageContaining("Tomador obrigatório");
   }
 
   @Test
@@ -670,7 +670,7 @@ class NfseServiceTest {
   void exportacaoContabil_periodoInvalido_lancaExcecao() {
     assertThatThrownBy(() -> service.exportacaoContabil("2026-02-01", "2026-01-01", null, null))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("Periodo invalido");
+        .hasMessageContaining("Período inválido");
   }
 
   @Test

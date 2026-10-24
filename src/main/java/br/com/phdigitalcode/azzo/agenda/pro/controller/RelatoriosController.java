@@ -32,7 +32,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.service.ServicoRelatorios;
  */
 @RestController
 @RequestMapping("/api/v1/reports")
-@PreAuthorize("hasAnyRole('OWNER', 'PROFESSIONAL')")
+@PreAuthorize("hasAnyRole('OWNER', 'PROFESSIONAL', 'STAFF')")
 public class RelatoriosController {
 
   private final ServicoRelatorios servicoRelatorios;

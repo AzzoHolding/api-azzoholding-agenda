@@ -161,7 +161,7 @@ class NfseProviderCapabilitiesServiceTest {
   void salvarProviderCapabilitiesRejeitaCamposObrigatoriosAusentes() {
     assertThatThrownBy(() -> service.salvarProviderCapabilities(null))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Capacidades do provedor sao obrigatorias.");
+        .hasMessage("Capacidades do provedor são obrigatórias.");
 
     NfseDtos.ProviderCapabilities semMunicipio = new NfseDtos.ProviderCapabilities();
     semMunicipio.provedor = "ABRASF";
@@ -198,7 +198,7 @@ class NfseProviderCapabilitiesServiceTest {
 
     assertThatThrownBy(() -> service.salvarProviderCapabilities(request))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Cancel mode NFS-e invalido.");
+        .hasMessage("Cancel mode NFS-e inválido.");
   }
 
   @Test

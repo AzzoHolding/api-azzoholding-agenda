@@ -61,7 +61,7 @@ public class ServicoTenantLoyalty {
     Cliente cliente =
         clienteRepository
             .findByIdAndTenantId(clientId, tenantId)
-            .orElseThrow(() -> new ApiClientErrorException("Cliente nao encontrado.", 404));
+            .orElseThrow(() -> new ApiClientErrorException("Cliente não encontrado.", 404));
     TenantLoyaltyDtos.ClientLoyaltyResponse response =
         new TenantLoyaltyDtos.ClientLoyaltyResponse();
     response.saldo = cliente.getLoyaltyPoints();

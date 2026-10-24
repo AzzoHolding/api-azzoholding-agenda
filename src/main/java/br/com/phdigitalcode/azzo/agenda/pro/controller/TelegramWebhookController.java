@@ -25,6 +25,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.repository.TenantRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.TenantTelegramConfigRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.security.WebhookVerifyTokenHashService;
 import br.com.phdigitalcode.azzo.agenda.pro.service.ChatService;
+import br.com.phdigitalcode.azzo.agenda.pro.service.ServicoOptOutDoTitular;
 import br.com.phdigitalcode.azzo.agenda.pro.service.channel.ChannelSendCommand;
 import br.com.phdigitalcode.azzo.agenda.pro.service.channel.ChannelSendResult;
 import br.com.phdigitalcode.azzo.agenda.pro.service.channel.CommunicationChannelDispatcher;
@@ -57,6 +58,7 @@ public class TelegramWebhookController {
   private final ChatService chatService;
   private final ObjectMapper objectMapper;
   private final AssistantApiClient assistantApiClient;
+  private final ServicoOptOutDoTitular servicoOptOut;
 
   public TelegramWebhookController(
       TenantRepository tenantRepository,
@@ -65,7 +67,8 @@ public class TelegramWebhookController {
       CommunicationChannelDispatcher communicationChannelDispatcher,
       ChatService chatService,
       ObjectMapper objectMapper,
-      AssistantApiClient assistantApiClient) {
+      AssistantApiClient assistantApiClient,
+      ServicoOptOutDoTitular servicoOptOut) {
     this.tenantRepository = tenantRepository;
     this.tenantTelegramConfigRepository = tenantTelegramConfigRepository;
     this.webhookVerifyTokenHashService = webhookVerifyTokenHashService;
@@ -73,6 +76,7 @@ public class TelegramWebhookController {
     this.chatService = chatService;
     this.objectMapper = objectMapper;
     this.assistantApiClient = assistantApiClient;
+    this.servicoOptOut = servicoOptOut;
   }
 
   @PostMapping("/{tenantId}")
@@ -102,7 +106,7 @@ public class TelegramWebhookController {
     UUID tenantId = parseTenantId(tenantIdRaw);
     if (tenantId == null) {
       response.status = "IGNORED";
-      response.message = "tenantId invalido";
+      response.message = "tenantId inválido";
       return response;
     }
 
@@ -118,7 +122,7 @@ public class TelegramWebhookController {
           "telegramWebhook.receive.rejected {}",
           CorrelatedLogging.context("tenantId", tenantId, "reason", "invalid_secret_token"));
       response.status = "REJECTED";
-      response.message = "Secret token invalido";
+      response.message = "Secret token inválido";
       return response;
     }
 
@@ -131,7 +135,7 @@ public class TelegramWebhookController {
           CorrelatedLogging.context("tenantId", tenantId, "root", CorrelatedLogging.throwableSummary(ex)),
           ex);
       response.status = "IGNORED";
-      response.message = "Payload invalido";
+      response.message = "Payload inválido";
       return response;
     }
 
@@ -148,7 +152,7 @@ public class TelegramWebhookController {
     String providerMessageId = text(messageNode.path("message_id"));
     if (chatId == null || content == null) {
       response.status = "IGNORED";
-      response.message = "Mensagem sem chatId ou conteudo";
+      response.message = "Mensagem sem chatId ou conteúdo";
       return response;
     }
 
@@ -173,6 +177,20 @@ public class TelegramWebhookController {
       response.message = "Mensagem duplicada";
       return response;
     }
+    // "PARE" pelo Telegram: para as mensagens automaticas, como no WhatsApp. Nao vai ao assistente, e vale
+    // mesmo com a conversa em modo manual: o pedido e do titular, nao da conversa.
+    if (inbound.client != null && ServicoOptOutDoTitular.ehPedidoDeOptOut(content)) {
+      servicoOptOut.registrar(inbound.client, ServicoOptOutDoTitular.ORIGEM_TELEGRAM);
+      communicationChannelDispatcher.sendText(
+          new ChannelSendCommand(tenantId, ChatChannel.TELEGRAM, chatId, ServicoOptOutDoTitular.CONFIRMACAO));
+      LOG.info(
+          "telegramWebhook.optOut.completed {}",
+          CorrelatedLogging.context("tenantId", tenantId, "clientId", inbound.client.getId()));
+      response.status = "PROCESSED";
+      response.message = "opt-out registrado";
+      return response;
+    }
+
     if (inbound.manualModeEnabled) {
       response.status = "IGNORED";
       response.message = "Modo manual ativo";
@@ -253,9 +271,17 @@ public class TelegramWebhookController {
   private boolean isSecretTokenValid(TenantTelegramConfig config, String rawSecretToken) {
     if (config == null) return false;
     String expectedHash = normalize(config.getTelegramWebhookSecretTokenHash());
-    if (expectedHash == null) return true;
+    // Pentest 14/10/2026 (INT-020): sem segredo configurado o webhook aceitava QUALQUER chamada —
+    // so o tenantId do path separava um estranho de injetar mensagens como se fossem de clientes.
+    // Agora e fail-closed: o segredo e criado ao configurar ou testar o bot (ensureWebhookSecret).
+    // Em 14/10/2026, nenhum salao com Telegram ligado estava sem segredo.
+    if (expectedHash == null || rawSecretToken == null || rawSecretToken.isBlank()) return false;
     String candidateHash = webhookVerifyTokenHashService.hash(rawSecretToken);
-    return expectedHash.equals(candidateHash);
+    // SEG-024: comparacao em tempo constante.
+    return candidateHash != null
+        && java.security.MessageDigest.isEqual(
+            expectedHash.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+            candidateHash.getBytes(java.nio.charset.StandardCharsets.UTF_8));
   }
 
   private JsonNode firstMessageNode(JsonNode payload) {

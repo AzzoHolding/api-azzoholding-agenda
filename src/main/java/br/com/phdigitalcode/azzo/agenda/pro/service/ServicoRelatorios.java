@@ -101,19 +101,25 @@ public class ServicoRelatorios {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     LocalDate inicio = DataUtil.parseDataISO(from);
     LocalDate fim = DataUtil.parseDataISO(to);
-    if (fim.isBefore(inicio)) throw new IllegalArgumentException("Periodo invalido");
+    if (fim.isBefore(inicio)) throw new IllegalArgumentException("Período inválido");
 
     UUID profissionalId = parseProfessionalId(professionalId, professionalUserId);
 
-    List<Agendamento> agendamentos =
-        agendamentoRepository.listByTenantAndProfessional(tenantId, profissionalId, Pageable.unpaged());
-
+    // A receita que gerou a comissao: o que a comanda cobrou (ReceitaDeServicosSql). Antes eram
+    // TODOS os agendamentos do profissional carregados em memoria e filtrados em Java.
     BigDecimal receitaPeriodo =
-        agendamentos.stream()
-            .filter(a -> a.getDate() != null && !a.getDate().isBefore(inicio) && !a.getDate().isAfter(fim))
-            .filter(a -> a.getStatus() == StatusAgendamento.COMPLETED)
-            .map(Agendamento::resolveEffectiveTotalPrice)
-            .reduce(NumericUtil.zero(), NumericUtil::add);
+        bd(
+            entityManager
+                .createNativeQuery(
+                    "WITH " + br.com.phdigitalcode.azzo.agenda.pro.util.ReceitaDeServicosSql.CTE + """
+                    SELECT COALESCE(SUM(r.valor), 0) FROM receita_servicos r
+                    WHERE r.dia BETWEEN :from AND :to AND r.professional_id = :profId
+                    """)
+                .setParameter("tenantId", tenantId)
+                .setParameter("from", inicio)
+                .setParameter("to", fim)
+                .setParameter("profId", profissionalId)
+                .getSingleResult());
 
     List<CommissionEntry> entries =
         commissionEntryRepository.listByTenantAndProfessionalAndCreatedAtRange(
@@ -145,9 +151,9 @@ public class ServicoRelatorios {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     LocalDate inicio = DataUtil.parseDataISO(dataInicio);
     LocalDate fim = DataUtil.parseDataISO(dataFim);
-    if (inicio == null || fim == null) throw new IllegalArgumentException("Periodo obrigatorio");
-    if (fim.isBefore(inicio)) throw new IllegalArgumentException("Periodo invalido");
-    if (inicio.plusDays(370).isBefore(fim)) throw new IllegalArgumentException("Periodo maximo de 370 dias");
+    if (inicio == null || fim == null) throw new IllegalArgumentException("Período obrigatório");
+    if (fim.isBefore(inicio)) throw new IllegalArgumentException("Período inválido");
+    if (inicio.plusDays(370).isBefore(fim)) throw new IllegalArgumentException("Período máximo de 370 dias");
 
     UUID profissionalId = professionalId != null && !professionalId.isBlank() ? UUID.fromString(professionalId) : null;
 
@@ -393,21 +399,19 @@ public class ServicoRelatorios {
     LocalDate inicio = from != null && !from.isBlank() ? DataUtil.parseDataISO(from) : LocalDate.now().withDayOfMonth(1);
     LocalDate fim = to != null && !to.isBlank() ? DataUtil.parseDataISO(to) : LocalDate.now();
 
+    // Receita = o que a COMANDA cobrou, e nao o preco do agendamento (ver ReceitaDeServicosSql).
     StringBuilder sqlServicos =
         new StringBuilder(
-            """
+            "WITH " + br.com.phdigitalcode.azzo.agenda.pro.util.ReceitaDeServicosSql.CTE + """
             SELECT s.id::text, s.name,
-                   COUNT(DISTINCT a.id)::int AS total,
-                   COALESCE(SUM(ai.total_price), 0) AS receita
-            FROM appointments a
-            JOIN appointment_items ai ON ai.appointment_id = a.id AND ai.tenant_id = a.tenant_id
-            JOIN services s ON s.id = ai.service_id AND s.tenant_id = a.tenant_id
-            WHERE a.tenant_id = :tenantId
-              AND a.status = 'Concluido'
-              AND a.date BETWEEN :from AND :to
+                   COUNT(DISTINCT r.venda_id)::int AS total,
+                   COALESCE(SUM(r.valor), 0) AS receita
+            FROM receita_servicos r
+            JOIN services s ON s.id = r.service_id AND s.tenant_id = :tenantId
+            WHERE r.dia BETWEEN :from AND :to
             """);
     if (professionalId != null && !professionalId.isBlank()) {
-      sqlServicos.append(" AND a.professional_id = :profId");
+      sqlServicos.append(" AND r.professional_id = :profId");
     }
     sqlServicos.append(" GROUP BY s.id, s.name ORDER BY receita DESC LIMIT 20");
 
@@ -425,19 +429,16 @@ public class ServicoRelatorios {
 
     StringBuilder sqlProf =
         new StringBuilder(
-            """
+            "WITH " + br.com.phdigitalcode.azzo.agenda.pro.util.ReceitaDeServicosSql.CTE + """
             SELECT p.id::text, p.name,
-                   COUNT(DISTINCT a.id)::int AS total,
-                   COALESCE(SUM(ai.total_price), 0) AS receita
-            FROM appointments a
-            JOIN professionals p ON p.id = a.professional_id AND p.tenant_id = a.tenant_id
-            JOIN appointment_items ai ON ai.appointment_id = a.id AND ai.tenant_id = a.tenant_id
-            WHERE a.tenant_id = :tenantId
-              AND a.status = 'Concluido'
-              AND a.date BETWEEN :from AND :to
+                   COUNT(DISTINCT r.venda_id)::int AS total,
+                   COALESCE(SUM(r.valor), 0) AS receita
+            FROM receita_servicos r
+            JOIN professionals p ON p.id = r.professional_id AND p.tenant_id = :tenantId
+            WHERE r.dia BETWEEN :from AND :to
             """);
     if (professionalId != null && !professionalId.isBlank()) {
-      sqlProf.append(" AND a.professional_id = :profId");
+      sqlProf.append(" AND r.professional_id = :profId");
     }
     sqlProf.append(" GROUP BY p.id, p.name ORDER BY receita DESC LIMIT 20");
 
@@ -454,16 +455,13 @@ public class ServicoRelatorios {
 
     StringBuilder sqlSum =
         new StringBuilder(
-            """
-            SELECT COUNT(DISTINCT a.id)::int, COALESCE(SUM(ai.total_price), 0)
-            FROM appointments a
-            JOIN appointment_items ai ON ai.appointment_id = a.id AND ai.tenant_id = a.tenant_id
-            WHERE a.tenant_id = :tenantId
-              AND a.status = 'Concluido'
-              AND a.date BETWEEN :from AND :to
+            "WITH " + br.com.phdigitalcode.azzo.agenda.pro.util.ReceitaDeServicosSql.CTE + """
+            SELECT COUNT(DISTINCT r.venda_id)::int, COALESCE(SUM(r.valor), 0)
+            FROM receita_servicos r
+            WHERE r.dia BETWEEN :from AND :to
             """);
     if (professionalId != null && !professionalId.isBlank()) {
-      sqlSum.append(" AND a.professional_id = :profId");
+      sqlSum.append(" AND r.professional_id = :profId");
     }
     var qSum =
         entityManager
@@ -525,20 +523,18 @@ public class ServicoRelatorios {
     LocalDate inicio = from != null && !from.isBlank() ? DataUtil.parseDataISO(from) : LocalDate.now().minusDays(180);
     LocalDate fim = to != null && !to.isBlank() ? DataUtil.parseDataISO(to) : LocalDate.now();
 
+    // O que o cliente PAGOU e quando veio (ReceitaDeClientesSql), e nao o preco dos agendamentos.
     String sql =
-        """
+        "WITH " + br.com.phdigitalcode.azzo.agenda.pro.util.ReceitaDeClientesSql.CTE + """
         SELECT c.id::text, c.name, c.phone, c.email,
-               COUNT(a.id)::int AS total_visitas,
-               COALESCE(SUM(ai.total_price), 0) AS receita_total,
-               MAX(a.date)::text AS ultima_visita,
-               COALESCE(CURRENT_DATE - MAX(a.date), 999) AS dias_sem_visita
+               COUNT(DISTINCT v.visita_id)::int AS total_visitas,
+               COALESCE(SUM(v.valor), 0) AS receita_total,
+               MAX(v.dia)::text AS ultima_visita,
+               COALESCE(CURRENT_DATE - MAX(v.dia), 999) AS dias_sem_visita
         FROM clients c
-        LEFT JOIN appointments a
-          ON a.client_id = c.id
-         AND a.tenant_id = c.tenant_id
-         AND a.status = 'Concluido'
-         AND a.date BETWEEN :from AND :to
-        LEFT JOIN appointment_items ai ON ai.appointment_id = a.id AND ai.tenant_id = a.tenant_id
+        LEFT JOIN visitas_clientes v
+          ON v.client_id = c.id
+         AND v.dia BETWEEN :from AND :to
         WHERE c.tenant_id = :tenantId
         GROUP BY c.id, c.name, c.phone, c.email
         ORDER BY receita_total DESC, total_visitas DESC
@@ -627,20 +623,34 @@ public class ServicoRelatorios {
     int totalAgend = agendSumRow[0] != null ? ((Number) agendSumRow[0]).intValue() : 0;
     int concluidos = agendSumRow[1] != null ? ((Number) agendSumRow[1]).intValue() : 0;
     int cancelados = agendSumRow[2] != null ? ((Number) agendSumRow[2]).intValue() : 0;
-    BigDecimal receitaAgend = bd(agendSumRow[3]);
+    // A receita de servicos e a da comanda (ReceitaDeServicosSql); a contagem de agendamentos
+    // continua vindo da agenda.
+    Object[] receitaRow =
+        (Object[])
+            entityManager
+                .createNativeQuery(
+                    "WITH " + br.com.phdigitalcode.azzo.agenda.pro.util.ReceitaDeServicosSql.CTE + """
+                    SELECT COALESCE(SUM(r.valor), 0), COUNT(DISTINCT r.venda_id)::int
+                    FROM receita_servicos r
+                    WHERE r.dia BETWEEN :from AND :to
+                    """)
+                .setParameter("tenantId", tenantId)
+                .setParameter("from", inicio)
+                .setParameter("to", fim)
+                .getSingleResult();
+    BigDecimal receitaAgend = bd(receitaRow[0]);
+    int vendas = receitaRow[1] != null ? ((Number) receitaRow[1]).intValue() : 0;
 
     List<Object[]> topServRows =
         entityManager
             .createNativeQuery(
-                """
+                "WITH " + br.com.phdigitalcode.azzo.agenda.pro.util.ReceitaDeServicosSql.CTE + """
                 SELECT s.id::text, s.name,
-                       COUNT(DISTINCT a.id)::int,
-                       COALESCE(SUM(ai.total_price), 0)
-                FROM appointments a
-                JOIN appointment_items ai ON ai.appointment_id = a.id AND ai.tenant_id = a.tenant_id
-                JOIN services s ON s.id = ai.service_id AND s.tenant_id = a.tenant_id
-                WHERE a.tenant_id = :tenantId AND a.status = 'Concluido'
-                  AND a.date BETWEEN :from AND :to
+                       COUNT(DISTINCT r.venda_id)::int,
+                       COALESCE(SUM(r.valor), 0)
+                FROM receita_servicos r
+                JOIN services s ON s.id = r.service_id AND s.tenant_id = :tenantId
+                WHERE r.dia BETWEEN :from AND :to
                 GROUP BY s.id, s.name ORDER BY 4 DESC LIMIT 10
                 """)
             .setParameter("tenantId", tenantId)
@@ -651,15 +661,13 @@ public class ServicoRelatorios {
     List<Object[]> topProfRows =
         entityManager
             .createNativeQuery(
-                """
+                "WITH " + br.com.phdigitalcode.azzo.agenda.pro.util.ReceitaDeServicosSql.CTE + """
                 SELECT p.id::text, p.name,
-                       COUNT(DISTINCT a.id)::int,
-                       COALESCE(SUM(ai.total_price), 0)
-                FROM appointments a
-                JOIN professionals p ON p.id = a.professional_id AND p.tenant_id = a.tenant_id
-                JOIN appointment_items ai ON ai.appointment_id = a.id AND ai.tenant_id = a.tenant_id
-                WHERE a.tenant_id = :tenantId AND a.status = 'Concluido'
-                  AND a.date BETWEEN :from AND :to
+                       COUNT(DISTINCT r.venda_id)::int,
+                       COALESCE(SUM(r.valor), 0)
+                FROM receita_servicos r
+                JOIN professionals p ON p.id = r.professional_id AND p.tenant_id = :tenantId
+                WHERE r.dia BETWEEN :from AND :to
                 GROUP BY p.id, p.name ORDER BY 4 DESC LIMIT 10
                 """)
             .setParameter("tenantId", tenantId)
@@ -676,6 +684,7 @@ public class ServicoRelatorios {
                        COALESCE(SUM(amount) FILTER (WHERE type = 'EXPENSE'), 0) AS despesa
                 FROM transactions
                 WHERE tenant_id = :tenantId
+                  AND deleted_at IS NULL
                   AND date BETWEEN :from AND :to
                 GROUP BY 1 ORDER BY 1
                 """)
@@ -728,8 +737,12 @@ public class ServicoRelatorios {
     response.agendamentos.totalAgendamentos = totalAgend;
     response.agendamentos.agendamentosConcluidos = concluidos;
     response.agendamentos.agendamentosCancelados = cancelados;
+    // Ticket = receita / vendas, as duas pela data da venda — como no relatorio de Vendas. Dividir
+    // pelos concluidos (data do agendamento) misturava datas: no teste ponta a ponta de 21/10/2026
+    // o atendimento era de 22/10 e a venda de 21/10, e o Gerencial de 01 a 21/10 mostrou R$ 108,45
+    // de receita com ticket de R$ 0,00.
     response.agendamentos.ticketMedio =
-        concluidos > 0 ? receitaAgend.divide(BigDecimal.valueOf(concluidos), 2, RoundingMode.HALF_UP) : BigDecimal.ZERO;
+        vendas > 0 ? receitaAgend.divide(BigDecimal.valueOf(vendas), 2, RoundingMode.HALF_UP) : BigDecimal.ZERO;
 
     response.topServicos = new ArrayList<>();
     for (Object[] row : topServRows) {
@@ -793,12 +806,12 @@ public class ServicoRelatorios {
   private UUID parseProfessionalId(String professionalId, String professionalUserId) {
     String raw = !isBlank(professionalId) ? professionalId : professionalUserId;
     if (isBlank(raw)) {
-      throw new IllegalArgumentException("professionalId obrigatorio");
+      throw new IllegalArgumentException("professionalId obrigatório");
     }
     try {
       return UUID.fromString(raw.trim());
     } catch (Exception e) {
-      throw new IllegalArgumentException("professionalId invalido");
+      throw new IllegalArgumentException("professionalId inválido");
     }
   }
 

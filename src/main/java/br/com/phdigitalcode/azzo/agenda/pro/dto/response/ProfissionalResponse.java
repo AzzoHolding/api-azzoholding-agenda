@@ -19,6 +19,8 @@ public class ProfissionalResponse {
   public BigDecimal commissionRate;
   public List<WorkingHoursDto> workingHours;
   public boolean isActive;
+  /** Aparece para marcar horario (agenda, link publico, assistente). */
+  public boolean acceptsAppointments;
   public String createdAt;
 
   public static class SpecialidadeInfoDto {

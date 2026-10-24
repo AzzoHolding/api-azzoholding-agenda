@@ -29,7 +29,10 @@ import br.com.phdigitalcode.azzo.agenda.pro.service.FiscalAccessService;
 @Component
 public class MenuRouteCache {
 
+  // "/fiscal" (V89) e a entrada unificada do modulo. Sem ela aqui, o salao sem fiscal no plano via o
+  // item e caia no bloqueio do plano — e os perfis de acesso ofereciam "Fiscal" para distribuir.
   private static final Set<String> FISCAL_EXACT_ROUTES = Set.of(
+      "/fiscal",
       "/nota-fiscal",
       "/emitir-nota",
       "/apuracao-mensal");

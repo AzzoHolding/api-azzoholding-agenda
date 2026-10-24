@@ -8,6 +8,7 @@ import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import org.slf4j.Logger;
@@ -19,6 +20,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import br.com.phdigitalcode.azzo.agenda.pro.entity.Agendamento;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.Cliente;
+import br.com.phdigitalcode.azzo.agenda.pro.entity.WhatsAppTemplateEntity;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.TenantOperationalSettings;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.TenantTelegramConfig;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.TenantWhatsAppConfig;
@@ -54,12 +56,16 @@ public class ReminderProcessingService {
 
   private static final Logger LOG = LoggerFactory.getLogger(ReminderProcessingService.class);
   private static final ZoneId ZONE_BR = ZoneId.of("America/Sao_Paulo");
+  /** Data por extenso no template: o cliente le "23/09/2026", e nao "2026-09-23". */
+  private static final DateTimeFormatter DIA_BR = DateTimeFormatter.ofPattern("dd/MM/yyyy");
+
   private static final String CHANNEL_WHATSAPP_REMINDER = "WHATSAPP_REMINDER";
   private static final String CHANNEL_TELEGRAM_REMINDER = "TELEGRAM_REMINDER";
   private static final String CHANNEL_WHATSAPP_REMINDER_HOURS = "WHATSAPP_REMINDER_HOURS";
   private static final String CHANNEL_TELEGRAM_REMINDER_HOURS = "TELEGRAM_REMINDER_HOURS";
   private static final int MAX_HOURS_BEFORE = 12;
 
+  private final ServicoTemplatesDoWhatsapp servicoTemplates;
   private final AgendamentoRepository agendamentoRepository;
   private final TenantRepository tenantRepository;
   private final TenantWhatsAppConfigRepository tenantWhatsAppConfigRepository;
@@ -71,9 +77,12 @@ public class ReminderProcessingService {
   private final CommunicationChannelDispatcher communicationChannelDispatcher;
   private final CustomerCommunicationChannelResolver customerCommunicationChannelResolver;
   private final AssistantApiClient assistantApiClient;
+  private final ChatService chatService;
   private final TransactionTemplate requiresNewTransaction;
+  private final RegistroDeEnvioDoWhatsapp registroDeEnvio;
 
   public ReminderProcessingService(
+      ServicoTemplatesDoWhatsapp servicoTemplates,
       AgendamentoRepository agendamentoRepository,
       TenantRepository tenantRepository,
       TenantWhatsAppConfigRepository tenantWhatsAppConfigRepository,
@@ -85,7 +94,10 @@ public class ReminderProcessingService {
       CommunicationChannelDispatcher communicationChannelDispatcher,
       CustomerCommunicationChannelResolver customerCommunicationChannelResolver,
       AssistantApiClient assistantApiClient,
-      PlatformTransactionManager transactionManager) {
+      ChatService chatService,
+      PlatformTransactionManager transactionManager,
+      RegistroDeEnvioDoWhatsapp registroDeEnvio) {
+    this.servicoTemplates = servicoTemplates;
     this.agendamentoRepository = agendamentoRepository;
     this.tenantRepository = tenantRepository;
     this.tenantWhatsAppConfigRepository = tenantWhatsAppConfigRepository;
@@ -97,6 +109,8 @@ public class ReminderProcessingService {
     this.communicationChannelDispatcher = communicationChannelDispatcher;
     this.customerCommunicationChannelResolver = customerCommunicationChannelResolver;
     this.assistantApiClient = assistantApiClient;
+    this.chatService = chatService;
+    this.registroDeEnvio = registroDeEnvio;
     this.requiresNewTransaction = new TransactionTemplate(transactionManager);
     this.requiresNewTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
   }
@@ -194,11 +208,13 @@ public class ReminderProcessingService {
 
   private int enviarLembrete(
       Agendamento appointment, Cliente client, String canalWhatsapp, String canalTelegram, String message) {
+    Map<String, String> valoresDoTemplate = valoresDoLembrete(appointment, client);
     ReminderRoute route = resolveReminderRoute(appointment.getTenantId(), client);
     if (!isChannelEnabledForReminders(appointment.getTenantId(), route.channel())) return 0;
 
-    // Gate LGPD atual: opt-out somente para WhatsApp.
-    if (route.channel() == ChatChannel.WHATSAPP && Boolean.TRUE.equals(client.getWhatsappOptOut())) {
+    // Gate LGPD: opt-out vale em qualquer canal (ate 2026-10-13, so no WhatsApp — o Telegram
+    // continuava recebendo). O campo se chama whatsappOptOut por historia.
+    if (Boolean.TRUE.equals(client.getWhatsappOptOut())) {
       LOG.debug("Lembrete WhatsApp ignorado: cliente={} optou por nao receber mensagens", client.getId());
       return 0;
     }
@@ -209,7 +225,14 @@ public class ReminderProcessingService {
 
     try {
       ChannelSendResult sendResult =
-          sendReminderMessage(appointment.getTenantId(), route.channel(), route.destination(), message);
+          sendReminderMessage(
+              appointment.getTenantId(), route.channel(), route.destination(), message,
+              valoresDoTemplate);
+      if (route.channel() == ChatChannel.WHATSAPP) {
+        registroDeEnvio.registrar(
+            appointment.getTenantId(), appointment.getId(), RegistroDeEnvioDoWhatsapp.LEMBRETE,
+            route.destination(), message, sendResult);
+      }
       if (!sendResult.success()) {
         throw new IllegalStateException(firstNonBlank(
             sendResult.providerErrorMessage(), sendResult.providerErrorCode(), "Falha ao enviar lembrete"));
@@ -217,6 +240,7 @@ public class ReminderProcessingService {
       notificationStatus = StatusNotification.SENT;
       sentAt = Instant.now();
       seedAssistantContext(appointment, client, route.destination());
+      registrarNoChat(appointment, client, route, message, sendResult.providerMessageId());
     } catch (RuntimeException e) {
       notificationStatus = StatusNotification.FAILED;
       errorMessage = sanitizeErrorMessage(e.getMessage());
@@ -257,8 +281,48 @@ public class ReminderProcessingService {
     }
   }
 
+  /**
+   * Manda o lembrete pelo TEMPLATE aprovado do salao, e so cai no texto livre quando nao da.
+   *
+   * <p>Texto livre so e entregue a quem escreveu para o salao nas ultimas 24h. Um lembrete de
+   * cliente novo esta sempre fora dessa janela: a Cloud API aceita, devolve o wamid e descarta —
+   * visto em producao em 2026-09-22, tres envios "com sucesso" e nenhum entregue. Era por isso que
+   * o lembrete nao chegava a quem nunca tinha escrito.
+   *
+   * <p>O texto continua valendo como equivalente: e o que vai pelo Telegram, onde template nao
+   * existe, e o que sobra quando o salao ainda nao tem template aprovado.
+   */
   ChannelSendResult sendReminderMessage(UUID tenantId, ChatChannel channel, String destination, String message) {
     return communicationChannelDispatcher.sendText(new ChannelSendCommand(tenantId, channel, destination, message));
+  }
+
+  ChannelSendResult sendReminderMessage(
+      UUID tenantId,
+      ChatChannel channel,
+      String destination,
+      String message,
+      Map<String, String> valores) {
+    return servicoTemplates.enviar(
+        tenantId, WhatsAppTemplateEntity.LEMBRETE, channel, destination, valores, message);
+  }
+
+  /**
+   * Os valores das variaveis do template.
+   *
+   * <p>{@code servico} e {@code profissional} ainda NAO sao preenchidos aqui: o agendamento nao
+   * carrega o nome do servico, e buscar exigiria outra consulta por lembrete. Enquanto isso, um
+   * salao que usar {servico} no texto do lembrete cai no texto livre — e o log diz qual variavel
+   * faltou, em vez de mandar a mensagem com um buraco onde estaria o nome do servico.
+   */
+  private Map<String, String> valoresDoLembrete(Agendamento appointment, Cliente client) {
+    Map<String, String> valores = new java.util.LinkedHashMap<>();
+    valores.put("cliente", client.getName());
+    valores.put("data", appointment.getDate() == null ? "" : DIA_BR.format(appointment.getDate()));
+    valores.put("hora", appointment.getStartTime() == null ? "" : appointment.getStartTime());
+    tenantRepository
+        .findById(appointment.getTenantId())
+        .ifPresent(tenant -> valores.put("salao", tenant.getName()));
+    return valores;
   }
 
   ReminderRoute resolveReminderRoute(UUID tenantId, Cliente client) {
@@ -270,9 +334,27 @@ public class ReminderProcessingService {
 
     String whatsAppDestination = normalizeDigits(resolvedChannel.externalContactId());
     if (whatsAppDestination.length() < 10) {
-      throw new IllegalArgumentException("Cliente sem telefone valido para lembrete via WhatsApp.");
+      throw new IllegalArgumentException("Cliente sem telefone válido para lembrete via WhatsApp.");
     }
     return new ReminderRoute(ChatChannel.WHATSAPP, whatsAppDestination);
+  }
+
+  /**
+   * O lembrete aparece no chat da conversa do cliente. Melhor esforco: o lembrete ja saiu, e uma
+   * falha aqui nao pode marca-lo como nao enviado nem gerar reenvio.
+   */
+  private void registrarNoChat(
+      Agendamento appointment, Cliente client, ReminderRoute route, String message, String providerMessageId) {
+    try {
+      chatService.registrarMensagemAutomatica(
+          appointment.getTenantId(), client, route.channel(), route.destination(), message, providerMessageId);
+    } catch (RuntimeException e) {
+      LOG.warn(
+          "Lembrete enviado mas nao registrado no chat: appointment={} tenant={}",
+          appointment.getId(),
+          appointment.getTenantId(),
+          e);
+    }
   }
 
   private void seedAssistantContext(Agendamento appointment, Cliente client, String userIdentifier) {

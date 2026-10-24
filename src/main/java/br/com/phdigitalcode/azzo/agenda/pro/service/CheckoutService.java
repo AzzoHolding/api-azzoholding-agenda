@@ -9,6 +9,7 @@ import java.util.UUID;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -57,6 +58,7 @@ public class CheckoutService {
   private final AuthenticatedUser authenticatedUser;
   private final JsonUtil jsonUtil;
   private final ContextoTenant contextoTenant;
+  private final boolean stubHabilitado;
 
   public CheckoutService(
       ProductRepository productRepository,
@@ -65,7 +67,8 @@ public class CheckoutService {
       CheckoutOrderRepository checkoutOrderRepository,
       AuthenticatedUser authenticatedUser,
       JsonUtil jsonUtil,
-      ContextoTenant contextoTenant) {
+      ContextoTenant contextoTenant,
+      @Value("${app.checkout.stub-enabled:false}") boolean stubHabilitado) {
     this.productRepository = productRepository;
     this.productCapabilityRepository = productCapabilityRepository;
     this.checkoutIntentRepository = checkoutIntentRepository;
@@ -73,6 +76,25 @@ public class CheckoutService {
     this.authenticatedUser = authenticatedUser;
     this.jsonUtil = jsonUtil;
     this.contextoTenant = contextoTenant;
+    this.stubHabilitado = stubHabilitado;
+  }
+
+  /**
+   * {@code POST /checkout/intents} e {@code /confirm} confirmam a compra com
+   * {@link #processarPagamentoStub} — um pagamento de mentira — e gravam um {@code CheckoutOrder}
+   * CONFIRMADO, que o {@code LicenseStatusService} trata como plano pago valendo. Ligado, qualquer
+   * OWNER ativa um plano sem pagar nada.
+   *
+   * <p>Por isso nasce DESLIGADO ({@code app.checkout.stub-enabled}): o pagamento de verdade e o
+   * {@code POST /billing/subscriptions}, que cobra pelo Asaas. Desligado, responde 404 como rota
+   * que nao existe — antes de ler ou gravar qualquer coisa. O catalogo ({@link #listarProdutos})
+   * continua aberto: e dele que a tela de licenca tira os planos.
+   */
+  private void exigirStubHabilitado() {
+    if (!stubHabilitado) {
+      LOG.warn(CorrelatedLogging.context("Checkout direto recusado", "reason", "stub_desabilitado"));
+      throw new ApiClientErrorException("Recurso não encontrado", 404);
+    }
   }
 
   /** Planos exclusivos de venda interna nao aparecem na contratacao publica. */
@@ -118,6 +140,7 @@ public class CheckoutService {
 
   @Transactional
   public CheckoutDtos.CreateIntentResponse criarIntent(CheckoutDtos.CreateIntentRequest request) {
+    exigirStubHabilitado();
     validateQuantity(request.quantity);
     UUID tenantId = obterTenantIdClaim();
     UUID userId = obterUserIdClaim();
@@ -129,7 +152,7 @@ public class CheckoutService {
     // interna sao tratados como inexistentes no checkout publico, mesmo que o frontend envie o
     // productId.
     if (!isContratavelPublicamente(product)) {
-      throw new ApiClientErrorException("Produto nao encontrado", 404);
+      throw new ApiClientErrorException("Produto não encontrado", 404);
     }
 
     BigDecimal totalCents = calcularTotal(product.getPriceCents(), request.quantity);
@@ -162,10 +185,11 @@ public class CheckoutService {
 
   @Transactional
   public CheckoutDtos.ConfirmIntentResponse confirmarIntent(UUID intentId) {
+    exigirStubHabilitado();
     CheckoutIntent intent =
         checkoutIntentRepository
             .findByIdForUpdate(intentId)
-            .orElseThrow(() -> new ApiClientErrorException("Intent nao encontrada", 404));
+            .orElseThrow(() -> new ApiClientErrorException("Intent não encontrada", 404));
 
     validarOwnershipTenant(intent);
 
@@ -184,7 +208,7 @@ public class CheckoutService {
     }
 
     if (!STATUS_PENDING.equals(intent.getStatus())) {
-      throw new ApiClientErrorException("Intent em status invalido para confirmacao", 409);
+      throw new ApiClientErrorException("Intent em status inválido para confirmacao", 409);
     }
 
     Product product = productRepository.findById(intent.getProductId()).orElse(null);
@@ -197,7 +221,7 @@ public class CheckoutService {
           "tenantId", intent.getTenantId(),
           "productId", intent.getProductId(),
           "reason", "produto_indisponivel"));
-      throw new ApiClientErrorException("Produto nao disponivel", 422);
+      throw new ApiClientErrorException("Produto não disponível", 422);
     }
 
     // O preco e recalculado na confirmacao: o snapshot da criacao nao vale se o catalogo mudou.
@@ -248,7 +272,7 @@ public class CheckoutService {
     try {
       return unitPriceCents.multiply(BigDecimal.valueOf(quantity));
     } catch (ArithmeticException e) {
-      throw new ApiClientErrorException("Total invalido", 422);
+      throw new ApiClientErrorException("Total inválido", 422);
     }
   }
 
@@ -272,7 +296,7 @@ public class CheckoutService {
       throw new ApiClientErrorException("Intent pertence a outro tenant", 403);
     }
     if (intent.getUserId() != null && (userId == null || !intent.getUserId().equals(userId))) {
-      throw new ApiClientErrorException("Intent pertence a outro usuario", 403);
+      throw new ApiClientErrorException("Intent pertence a outro usuário", 403);
     }
   }
 
@@ -366,7 +390,7 @@ public class CheckoutService {
           "userId", userId,
           "reason", "invalid_auth_context"));
       throw new ApiClientErrorException(
-          "Checkout requer usuario autenticado com tenant valido", 403);
+          "Checkout requer usuário autenticado com tenant válido", 403);
     }
   }
 

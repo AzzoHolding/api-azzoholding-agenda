@@ -13,8 +13,6 @@ import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Propagation;
-import org.springframework.transaction.annotation.Transactional;
 
 import br.com.phdigitalcode.azzo.agenda.pro.dto.assistant.AssistantReactivationSeedRequest;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.ChatConversationEntity;
@@ -29,6 +27,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.ChatChannel;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.ChatMessageStatus;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.AssistantApiClient;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.ChatConversationRepository;
+import br.com.phdigitalcode.azzo.agenda.pro.repository.ChatMessageRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.ClienteRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.ReactivationSendLogRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.TenantReactivationConfigRepository;
@@ -67,6 +66,7 @@ public class WhatsAppBookingReactivationSchedulerService {
   private final TenantReactivationConfigRepository tenantReactivationConfigRepository;
   private final ReactivationSendLogRepository reactivationSendLogRepository;
   private final AssistantApiClient assistantApiClient;
+  private final ChatMessageRepository chatMessageRepository;
 
   public WhatsAppBookingReactivationSchedulerService(
       WhatsAppBookingReactivationService whatsAppBookingReactivationService,
@@ -81,7 +81,9 @@ public class WhatsAppBookingReactivationSchedulerService {
       TenantOperationalSettingsService tenantOperationalSettingsService,
       TenantReactivationConfigRepository tenantReactivationConfigRepository,
       ReactivationSendLogRepository reactivationSendLogRepository,
-      AssistantApiClient assistantApiClient) {
+      AssistantApiClient assistantApiClient,
+      ChatMessageRepository chatMessageRepository) {
+    this.chatMessageRepository = chatMessageRepository;
     this.whatsAppBookingReactivationService = whatsAppBookingReactivationService;
     this.cycleRepository = cycleRepository;
     this.tenantWhatsAppConfigRepository = tenantWhatsAppConfigRepository;
@@ -106,13 +108,23 @@ public class WhatsAppBookingReactivationSchedulerService {
     LOG.info("WhatsAppBookingReactivation iniciado. cycles={}", cycleIds.size());
     int processed = 0;
     for (UUID cycleId : cycleIds) {
-      processed += processCycle(cycleId);
+      // Um ciclo com problema (ex.: telefone invalido) nao pode impedir os outros de rodar.
+      try {
+        processed += processCycle(cycleId);
+      } catch (RuntimeException e) {
+        LOG.error("reactivation_cycle_failed cycleId={}", cycleId, e);
+      }
     }
     LOG.info("WhatsAppBookingReactivation finalizado. cyclesProcessados={}", processed);
     return processed;
   }
 
-  @Transactional(propagation = Propagation.REQUIRES_NEW)
+  /**
+   * Sem transacao propria de proposito (INT-001): o {@code @Transactional(REQUIRES_NEW)} que havia
+   * aqui nunca valia, porque {@link #processDueCycles()} chama por auto-invocacao. Cada passo grava
+   * sozinho (os {@code mark*}/{@code cancelCycle} fazem {@code save}), e o envio ja feito nao e
+   * desfeito por uma falha depois dele, o que uma transacao unica faria (e a mensagem sairia de novo).
+   */
   public int processCycle(UUID cycleId) {
     WhatsAppBookingReactivationCycleEntity cycle = cycleRepository.findById(cycleId).orElse(null);
     if (cycle == null || cycle.getTenantId() == null) return 0;
@@ -161,8 +173,8 @@ public class WhatsAppBookingReactivationSchedulerService {
       return 1;
     }
 
-    // Gate LGPD 1: opt-out atual somente para WhatsApp
-    if (route.channel() == ChatChannel.WHATSAPP && Boolean.TRUE.equals(client.getWhatsappOptOut())) {
+    // Gate LGPD 1: opt-out vale em qualquer canal (ate 2026-10-13, so no WhatsApp)
+    if (Boolean.TRUE.equals(client.getWhatsappOptOut())) {
       whatsAppBookingReactivationService.cancelCycle(cycle, "OPT_OUT");
       return 1;
     }
@@ -208,6 +220,18 @@ public class WhatsAppBookingReactivationSchedulerService {
       } else {
         whatsAppBookingReactivationService.cancelCycle(cycle, "FUTURE_APPOINTMENT_FOUND");
       }
+      return 1;
+    }
+
+    // INT-002: a reativacao sai por TEXTO LIVRE, e fora da janela de 24 h a Meta aceita, devolve um
+    // wamid e descarta. A tentativa ia para SENT, entrava no log e gastava o limite mensal sem o
+    // cliente receber nada. Sem template de reativacao aprovado, nao envia: encerra o ciclo dizendo
+    // o motivo, em vez de fingir que entregou.
+    if (route.channel() == ChatChannel.WHATSAPP && !dentroDaJanelaDeAtendimento(cycle.getTenantId(), client.getId())) {
+      LOG.info(
+          "Reativacao: fora da janela de 24h do WhatsApp, ciclo encerrado cycleId={} tentativa={} tenantId={}",
+          cycleId, cycle.getNextAttemptNumber(), cycle.getTenantId());
+      whatsAppBookingReactivationService.cancelCycle(cycle, MOTIVO_FORA_DA_JANELA);
       return 1;
     }
 
@@ -275,6 +299,22 @@ public class WhatsAppBookingReactivationSchedulerService {
     return 1;
   }
 
+  /** Motivo gravado no ciclo encerrado por estar fora da janela de 24 h do WhatsApp. */
+  static final String MOTIVO_FORA_DA_JANELA = "OUT_OF_24H_WINDOW";
+
+  /**
+   * A Meta conta 24 h desde a ultima mensagem DO CLIENTE; usamos 23 h para nao apostar no limite
+   * (a mensagem pode chegar na Meta depois do relogio daqui). Sem nenhuma mensagem dele, fechada.
+   */
+  static final java.time.Duration JANELA_DE_ATENDIMENTO = java.time.Duration.ofHours(23);
+
+  private boolean dentroDaJanelaDeAtendimento(UUID tenantId, UUID clientId) {
+    return chatMessageRepository
+        .ultimaMensagemRecebidaNoWhatsApp(tenantId, clientId)
+        .map(ultima -> ultima.isAfter(Instant.now().minus(JANELA_DE_ATENDIMENTO)))
+        .orElse(false);
+  }
+
   ReactivationRoute resolveReactivationRoute(
       UUID tenantId, Cliente client, WhatsAppBookingReactivationCycleEntity cycle, ChatConversationEntity currentConversation) {
     CustomerCommunicationChannelResolver.ResolvedChannel resolvedChannel =
@@ -286,7 +326,7 @@ public class WhatsAppBookingReactivationSchedulerService {
 
     String whatsAppDestination = normalizeDigits(resolvedChannel.externalContactId());
     if (whatsAppDestination.length() < 10) {
-      throw new IllegalArgumentException("Cliente sem telefone valido para reativacao via WhatsApp.");
+      throw new IllegalArgumentException("Cliente sem telefone válido para reativacao via WhatsApp.");
     }
     return new ReactivationRoute(ChatChannel.WHATSAPP, whatsAppDestination, resolvedChannel.conversation());
   }

@@ -9,5 +9,6 @@ package br.com.phdigitalcode.azzo.agenda.pro.entity.enums;
  */
 public enum EmailJobType {
   PASSWORD_RESET,
+  EMAIL_VERIFICATION,
   LICENSE_EXPIRING_SOON
 }

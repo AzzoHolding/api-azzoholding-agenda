@@ -7,6 +7,13 @@ public class TransacaoResponse {
   public String id;
   public String tenantId;
   public String appointmentId;
+
+  /**
+   * A comanda que gerou este lancamento, quando veio de uma venda. Lancamento de comanda nao se
+   * edita nem se exclui (2026-09-16): a tela precisa saber disso para nao oferecer o que o servidor
+   * recusa.
+   */
+  public String comandaId;
   public String professionalId;
   public String productId;
   public String productCategory;

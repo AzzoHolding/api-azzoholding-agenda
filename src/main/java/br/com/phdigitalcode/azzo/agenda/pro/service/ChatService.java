@@ -100,7 +100,7 @@ public class ChatService {
       ChatRealtimePublisher chatRealtimePublisher,
       WhatsAppBookingReactivationService whatsAppBookingReactivationService,
       PlatformTransactionManager transactionManager,
-      @Value("${app.chat.retention.days.completed:1}") int retentionCompletedDays,
+      @Value("${app.chat.retention.days.completed:2}") int retentionCompletedDays,
       @Value("${app.chat.retention.days.canceled:2}") int retentionCanceledDays,
       @Value("${app.chat.retention.days.default:5}") int retentionDefaultDays,
       @Value("${app.chat.manual-mode.duration-hours:24}") int manualModeDurationHours) {
@@ -197,17 +197,17 @@ public class ChatService {
   @Transactional
   public ChatDtos.SendMessageResponse sendMessage(ChatDtos.SendMessageRequest request) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
-    if (request == null) throw new IllegalArgumentException("Payload de envio obrigatorio.");
+    if (request == null) throw new IllegalArgumentException("Payload de envio obrigatório.");
     UUID clientId = parseUuid(request.clientId, "clientId invalido.");
     String content = normalize(request.content);
-    if (content == null || content.isBlank()) throw new IllegalArgumentException("Conteudo da mensagem obrigatorio.");
+    if (content == null || content.isBlank()) throw new IllegalArgumentException("Conteúdo da mensagem obrigatório.");
 
     Cliente client = clienteRepository.findByIdAndTenantId(clientId, tenantId).orElse(null);
     if (client == null) throw notFound("Cliente nao encontrado.");
     // Gate LGPD: nao enviar mensagem a cliente com opt-out registrado
     if (Boolean.TRUE.equals(client.getWhatsappOptOut())) {
       throw new ApiClientErrorException(
-          "Cliente optou por nao receber mensagens pelo WhatsApp.", HttpStatus.UNPROCESSABLE_ENTITY.value());
+          "Cliente optou por não receber mensagens pelo WhatsApp.", HttpStatus.UNPROCESSABLE_ENTITY.value());
     }
     OutboundRoute outboundRoute = resolveOutboundRoute(tenantId, client);
     String destination = outboundRoute.destination();
@@ -296,7 +296,7 @@ public class ChatService {
   @Transactional
   public ChatDtos.UpdateMarkerResponse updateMarker(String conversationId, ChatDtos.UpdateMarkerRequest request) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
-    if (request == null) throw new IllegalArgumentException("Payload de marcador obrigatorio.");
+    if (request == null) throw new IllegalArgumentException("Payload de marcador obrigatório.");
     UUID convId = parseUuid(conversationId, "conversationId invalido.");
     ChatConversationEntity conversation = chatConversationRepository.findByTenantAndId(tenantId, convId)
         .orElseThrow(() -> notFound("Conversa nao encontrada."));
@@ -402,7 +402,7 @@ public class ChatService {
         || normalizedExternalContactId.isBlank()
         || normalizedContent == null
         || normalizedContent.isBlank()) {
-      throw new IllegalArgumentException("Mensagem inbound invalida para processamento.");
+      throw new IllegalArgumentException("Mensagem inbound inválida para processamento.");
     }
 
     String normalizedProviderMessageId = normalize(providerMessageId);
@@ -546,6 +546,27 @@ public class ChatService {
     return result;
   }
 
+  /** Motivo do modo manual quando o proprio cliente pediu uma pessoa no WhatsApp. */
+  public static final String MOTIVO_CLIENTE_PEDIU_ATENDENTE = "CLIENTE_PEDIU_ATENDENTE";
+
+  /**
+   * O cliente pediu uma pessoa: o assistente para de responder nesta conversa (modo manual) e o
+   * chat recebe o evento {@code HUMAN_REQUESTED}, que a tela usa para tocar o alerta e marcar a
+   * conversa. Teste de dialogos de 23/10/2026: o assistente dizia "eu sou a atendente" e ninguem
+   * da equipe ficava sabendo.
+   */
+  public void marcarPedidoDeAtendente(UUID tenantId, UUID conversationId) {
+    requiresNewTransaction.executeWithoutResult(txStatus -> {
+      ChatConversationEntity conversation = chatConversationRepository
+          .findByTenantAndId(tenantId, conversationId)
+          .orElse(null);
+      if (conversation == null) return;
+      enableManualMode(conversation, null, MOTIVO_CLIENTE_PEDIU_ATENDENTE);
+      chatConversationRepository.save(conversation);
+      chatRealtimePublisher.publishChatUpdate(tenantId, conversation.getId(), conversation.getClientId(), "HUMAN_REQUESTED");
+    });
+  }
+
   public ChatMessageEntity registerOutboundAssistantMessage(
       UUID tenantId,
       UUID conversationId,
@@ -559,6 +580,21 @@ public class ChatService {
         tenantId, conversationId, clientId, content, providerMessageId, status, providerErrorCode, providerErrorMessage));
   }
 
+  /**
+   * Mensagem automatica do salao (lembrete) enviada fora do chat: entra no historico da conversa,
+   * criando a conversa se o cliente ainda nao tem uma. Sem isto o lembrete saia pelo WhatsApp e o
+   * chat nao mostrava nada — e a resposta "CONFIRMAR" chegava sem contexto para a equipe.
+   */
+  public void registrarMensagemAutomatica(
+      UUID tenantId, Cliente client, ChatChannel channel, String externalContactId, String content,
+      String providerMessageId) {
+    requiresNewTransaction.executeWithoutResult(txStatus -> {
+      ChatConversationEntity conversation = resolveOrCreateConversation(tenantId, client, channel, externalContactId);
+      registerOutboundAssistantMessageInternal(
+          tenantId, conversation.getId(), client.getId(), content, providerMessageId, ChatMessageStatus.SENT, null, null);
+    });
+  }
+
   private ChatMessageEntity registerOutboundAssistantMessageInternal(
       UUID tenantId,
       UUID conversationId,
@@ -570,7 +606,7 @@ public class ChatService {
       String providerErrorMessage) {
     String normalizedContent = normalize(content);
     if (tenantId == null || conversationId == null || clientId == null || normalizedContent == null) {
-      throw new IllegalArgumentException("Mensagem outbound invalida para persistencia.");
+      throw new IllegalArgumentException("Mensagem outbound inválida para persistencia.");
     }
     ChatConversationEntity conversation = chatConversationRepository.findByTenantAndId(tenantId, conversationId)
         .orElseThrow(() -> notFound("Conversa nao encontrada para persistencia outbound."));
@@ -714,7 +750,7 @@ public class ChatService {
 
     String whatsAppDestination = normalizeDigits(resolvedChannel.externalContactId());
     if (whatsAppDestination.length() < 10) {
-      throw new IllegalArgumentException("Cliente sem telefone valido para WhatsApp.");
+      throw new IllegalArgumentException("Cliente sem telefone válido para WhatsApp.");
     }
     return new OutboundRoute(ChatChannel.WHATSAPP, whatsAppDestination, resolvedChannel.conversation());
   }
@@ -741,6 +777,7 @@ public class ChatService {
     dto.updatedAt = r.updatedAt() != null ? r.updatedAt().toString() : null;
     dto.manualModeUntil = r.manualModeUntil() != null ? r.manualModeUntil().toString() : null;
     dto.manualModeEnabled = r.manualModeUntil() != null && r.manualModeUntil().isAfter(Instant.now());
+    dto.humanRequested = dto.manualModeEnabled && MOTIVO_CLIENTE_PEDIU_ATENDENTE.equals(r.manualModeReason());
     return dto;
   }
 

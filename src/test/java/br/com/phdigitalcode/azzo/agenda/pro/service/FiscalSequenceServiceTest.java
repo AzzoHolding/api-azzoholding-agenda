@@ -104,13 +104,13 @@ class FiscalSequenceServiceTest {
   void rejeitaArgumentosObrigatoriosAusentes() {
     assertThatThrownBy(() -> service.nextNumber(null, "55", 1, "PRODUCAO"))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("tenantId obrigatorio");
+        .hasMessage("tenantId obrigatório");
     assertThatThrownBy(() -> service.nextNumber(tenantId, "  ", 1, "PRODUCAO"))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("modelo obrigatorio");
+        .hasMessage("modelo obrigatório");
     assertThatThrownBy(() -> service.nextNumber(tenantId, "55", 1, "  "))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("ambiente obrigatorio");
+        .hasMessage("ambiente obrigatório");
     assertThatThrownBy(() -> service.nextNumber(tenantId, "55", 0, "PRODUCAO"))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessage("serie deve ser maior que zero");

@@ -31,6 +31,7 @@ class LgpdRetentionServiceTest {
   private TenantSpecialClosureDateRepository closureDateRepository;
   private ReactivationSendLogRepository reactivationSendLogRepository;
   private LgpdRetentionService service;
+  private ProcessadorImportacaoClientesService processadorImportacaoClientes;
 
   @BeforeEach
   void setUp() throws SQLException {
@@ -39,7 +40,9 @@ class LgpdRetentionServiceTest {
     statement = mock(PreparedStatement.class);
     closureDateRepository = mock(TenantSpecialClosureDateRepository.class);
     reactivationSendLogRepository = mock(ReactivationSendLogRepository.class);
-    service = new LgpdRetentionService(dataSource, closureDateRepository, reactivationSendLogRepository);
+    processadorImportacaoClientes = mock(ProcessadorImportacaoClientesService.class);
+    service = new LgpdRetentionService(
+        dataSource, closureDateRepository, reactivationSendLogRepository, processadorImportacaoClientes);
 
     when(dataSource.getConnection()).thenReturn(connection);
     when(connection.prepareStatement(org.mockito.ArgumentMatchers.anyString())).thenReturn(statement);
@@ -53,9 +56,32 @@ class LgpdRetentionServiceTest {
 
     service.purgarDadosExpirados();
 
-    verify(connection, times(2)).prepareStatement(any());
+    // webhooks, whatsapp, notificacoes, e-mails, linhas de erro da importacao e senhas de certificado
+    verify(connection, times(6)).prepareStatement(any());
     verify(closureDateRepository).deleteByClosureDateBefore(any(LocalDate.class));
     verify(reactivationSendLogRepository).deleteExpired(any(Instant.class));
+    verify(processadorImportacaoClientes).limparArquivosDeJobsFinalizados();
+  }
+
+  @Test
+  void dadosSemPrazoGanhamPrazo() throws SQLException {
+    org.mockito.ArgumentCaptor<String> sql = org.mockito.ArgumentCaptor.forClass(String.class);
+    when(statement.executeUpdate()).thenReturn(0);
+
+    service.purgarDadosSemPrazo();
+
+    verify(connection, times(4)).prepareStatement(sql.capture());
+    assertThat(sql.getAllValues())
+        .anyMatch(s -> s.contains("FROM notifications") && s.contains("180 days"))
+        .anyMatch(s -> s.contains("FROM email_jobs") && s.contains("'PROCESSED', 'FAILED'"))
+        .anyMatch(s -> s.contains("FROM importacao_cliente_erro_linha"))
+        .anyMatch(s -> s.contains("nfse_certificate_unlock_sessions") && s.contains("password_enc = NULL"));
+  }
+
+  @Test
+  void falhaAoLimparPlanilhasNaoDerrubaAPurga() {
+    when(processadorImportacaoClientes.limparArquivosDeJobsFinalizados()).thenThrow(new IllegalStateException("minio"));
+    service.purgarDadosSemPrazo();
   }
 
   @Test

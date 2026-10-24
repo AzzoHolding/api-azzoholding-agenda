@@ -186,7 +186,7 @@ public class SpecialClosureService {
     TenantSpecialClosureDate entity =
         closureRepository
             .findByIdAndTenantId(id, tenantId)
-            .orElseThrow(() -> new IllegalArgumentException("Fechamento nao encontrado"));
+            .orElseThrow(() -> new IllegalArgumentException("Fechamento não encontrado"));
     validarTipo(dto.closureType);
     validarDatas(dto);
 
@@ -216,7 +216,7 @@ public class SpecialClosureService {
     TenantSpecialClosureDate entity =
         closureRepository
             .findByIdAndTenantId(id, tenantId)
-            .orElseThrow(() -> new IllegalArgumentException("Fechamento nao encontrado"));
+            .orElseThrow(() -> new IllegalArgumentException("Fechamento não encontrado"));
     LOG.info(
         "[SpecialClosure] Fechamento removido (id={}, closureDate={}, tenantId={})",
         id,
@@ -239,6 +239,21 @@ public class SpecialClosureService {
     if (from == null) from = LocalDate.now();
     if (to == null) to = from.plusMonths(3);
     return closureRepository.listDistinctDatesInRange(tenantId, from, to);
+  }
+
+  /**
+   * Trechos fechados de uma data (fechamento de parte do dia), do salao e deste profissional, como
+   * pares {inicio, fim}. O motor de horarios desconta estes trechos: antes so o dia inteiro era
+   * descontado, e o assistente oferecia 14:30 num fechamento de 14h as 16h que a criacao recusava
+   * (teste de dialogos de 24/10/2026).
+   */
+  public List<java.time.LocalTime[]> trechosFechados(UUID tenantId, UUID professionalId, LocalDate date) {
+    if (tenantId == null || date == null) return List.of();
+    return closureRepository.findByTenantIdAndClosureDateAndAllDayFalse(tenantId, date).stream()
+        .filter(e -> e.getStartTime() != null && e.getEndTime() != null)
+        .filter(e -> e.getProfessionalId() == null || e.getProfessionalId().equals(professionalId))
+        .map(e -> new java.time.LocalTime[] {e.getStartTime(), e.getEndTime()})
+        .toList();
   }
 
   /** Verifica se o salao esta fechado na data (fechamento {@code all_day} sem profissional). */
@@ -537,18 +552,18 @@ public class SpecialClosureService {
         && !closureType.isBlank()
         && !TIPOS_VALIDOS.contains(closureType.toUpperCase(Locale.ROOT))) {
       throw new IllegalArgumentException(
-          "Tipo de fechamento invalido. Valores aceitos: " + String.join(", ", TIPOS_VALIDOS));
+          "Tipo de fechamento inválido. Valores aceitos: " + String.join(", ", TIPOS_VALIDOS));
     }
   }
 
   private void validarDatas(SpecialClosureDto dto) {
     if (dto.closureDate == null) {
-      throw new IllegalArgumentException("Data de fechamento obrigatoria");
+      throw new IllegalArgumentException("Data de fechamento obrigatória");
     }
     if (!dto.allDay) {
       if (dto.startTime == null || dto.endTime == null) {
         throw new IllegalArgumentException(
-            "Para fechamento parcial, startTime e endTime sao obrigatorios");
+            "Para fechamento parcial, startTime e endTime são obrigatórios");
       }
       if (!dto.startTime.isBefore(dto.endTime)) {
         throw new IllegalArgumentException(

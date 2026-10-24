@@ -50,6 +50,12 @@ public final class SalonDtos {
     public String zipCode;
     public List<BusinessHour> businessHours = new ArrayList<>();
     public List<SpecialClosureDate> specialClosureDates = new ArrayList<>();
+
+    /** So leitura: quantas trocas de CPF/CNPJ o salao ainda pode fazer. Ignorado na gravacao. */
+    public int documentChangesRemaining;
+
+    /** So leitura: o limite total de trocas. Ignorado na gravacao. */
+    public int documentChangeLimit;
   }
 
   public static class PublicSalonProfile {

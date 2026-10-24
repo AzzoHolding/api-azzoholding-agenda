@@ -63,6 +63,40 @@ public class TenantWhatsAppConfig {
   @Column(name = "embedded_signup_completed_at")
   private Instant embeddedSignupCompletedAt;
 
+  /**
+   * Quem autorizou o app na Meta no cadastro embutido ({@code user_id} do {@code debug_token}).
+   * E por ele que os callbacks de exclusao de dados e de desautorizacao chegam ao salao (SEG-014).
+   */
+  @Column(name = "meta_user_id", length = 64)
+  private String metaUserId;
+
+  /**
+   * PIN de 6 digitos usado no registro do numero no Cloud API, criptografado.
+   *
+   * <p>No modelo de provedor, quem define o PIN de um numero novo e o Azzo — e guardar e
+   * obrigatorio: sem ele o numero nao pode ser re-registrado nem migrado para outro provedor. O
+   * dono le o valor na tela, como ja acontece com o verify token do webhook.
+   */
+  @Column(name = "whatsapp_registration_pin_enc")
+  private String whatsappRegistrationPinEnc;
+
+  /** Quando o numero foi registrado no Cloud API. Nulo significa que ele NAO envia mensagem. */
+  @Column(name = "whatsapp_registered_at")
+  private Instant whatsappRegisteredAt;
+
+  /**
+   * Template aprovado na Meta para a confirmacao de agendamento.
+   *
+   * <p>Nulo significa que a confirmacao <b>nao chega a cliente novo</b>: sem template, so texto
+   * livre, e texto livre exige que o cliente tenha escrito para o salao nas ultimas 24h.
+   */
+  @Column(name = "confirmation_template_name", length = 120)
+  private String confirmationTemplateName;
+
+  /** Idioma do template, como cadastrado na Meta (ex.: {@code pt_BR}). */
+  @Column(name = "confirmation_template_language", length = 12)
+  private String confirmationTemplateLanguage;
+
   @Column(name = "embedded_signup_last_error", length = 500)
   private String embeddedSignupLastError;
 

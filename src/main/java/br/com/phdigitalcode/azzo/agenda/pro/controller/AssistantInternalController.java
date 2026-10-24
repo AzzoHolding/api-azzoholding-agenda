@@ -86,6 +86,8 @@ public class AssistantInternalController {
   private final TenantWhatsAppConfigRepository tenantWhatsAppConfigRepository;
   private final ContextoTenant contextoTenant;
   private final TenantOperationalSettingsService tenantOperationalSettingsService;
+  private final br.com.phdigitalcode.azzo.agenda.pro.repository.TenantAddressRepository tenantAddressRepository;
+  private final br.com.phdigitalcode.azzo.agenda.pro.service.SpecialClosureService specialClosureService;
 
   public AssistantInternalController(
       TenantRepository tenantRepository,
@@ -101,7 +103,9 @@ public class AssistantInternalController {
       ProfissionalRepository profissionalRepository,
       TenantWhatsAppConfigRepository tenantWhatsAppConfigRepository,
       ContextoTenant contextoTenant,
-      TenantOperationalSettingsService tenantOperationalSettingsService) {
+      TenantOperationalSettingsService tenantOperationalSettingsService,
+      br.com.phdigitalcode.azzo.agenda.pro.repository.TenantAddressRepository tenantAddressRepository,
+      br.com.phdigitalcode.azzo.agenda.pro.service.SpecialClosureService specialClosureService) {
     this.tenantRepository = tenantRepository;
     this.servicoService = servicoService;
     this.profissionalService = profissionalService;
@@ -116,6 +120,8 @@ public class AssistantInternalController {
     this.tenantWhatsAppConfigRepository = tenantWhatsAppConfigRepository;
     this.contextoTenant = contextoTenant;
     this.tenantOperationalSettingsService = tenantOperationalSettingsService;
+    this.tenantAddressRepository = tenantAddressRepository;
+    this.specialClosureService = specialClosureService;
   }
 
   // ─── Info do Tenant ───────────────────────────────────────────────────────
@@ -127,13 +133,35 @@ public class AssistantInternalController {
     if (tenant == null) {
       return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
     }
-    return ResponseEntity.ok(new TenantInfoResponse(tenant.getName(), tenant.getDescription()));
+    TenantInfoResponse info = new TenantInfoResponse(tenant.getName(), tenant.getDescription());
+    // O assistente responde "qual o endereco?" com isto (teste de dialogos de 23/10/2026: a pergunta
+    // caia em "nao encontrei agendamentos pra remarcar").
+    info.phone = tenant.getPhone();
+    info.address = tenantAddressRepository.findById(tid).map(AssistantInternalController::enderecoEmTexto).orElse(null);
+    return ResponseEntity.ok(info);
   }
 
   /**
    * Retorna os horarios de funcionamento do salao para o assistente virtual. Usa o mesmo
    * armazenamento do painel de configuracoes.
    */
+  /**
+   * Dias em que o salao inteiro fica fechado (Configuracoes > Horarios > Dias de inatividade, dia
+   * inteiro). O assistente usa para nao oferecer nem dizer que abre num feriado cadastrado: antes so
+   * olhava o horario semanal (teste de dialogos de 24/10/2026).
+   */
+  @GetMapping("/tenant/closed-dates")
+  public List<String> listarDiasFechados(
+      @RequestParam("tenantId") String tenantId,
+      @RequestParam(value = "from", required = false) String from,
+      @RequestParam(value = "to", required = false) String to) {
+    LocalDate de = from != null && !from.isBlank() ? LocalDate.parse(from) : null;
+    LocalDate ate = to != null && !to.isBlank() ? LocalDate.parse(to) : null;
+    return specialClosureService.listarDatasIndisponiveis(UUID.fromString(tenantId), de, ate).stream()
+        .map(LocalDate::toString)
+        .toList();
+  }
+
   @GetMapping("/tenant/business-hours")
   public List<SalonDtos.BusinessHour> obterHorariosFuncionamento(@RequestParam("tenantId") String tenantId) {
     UUID tid = UUID.fromString(tenantId);
@@ -160,7 +188,9 @@ public class AssistantInternalController {
       @RequestParam(value = "serviceId", required = false) String serviceId) {
     contextoTenant.definirTenantId(UUID.fromString(tenantId));
     try {
-      return profissionalService.listar(serviceId);
+      // O assistente so oferece quem aceita agendamento: a recepcao continua na equipe, mas nao
+      // e opcao para o cliente marcar.
+      return profissionalService.listar(serviceId, true);
     } finally {
       contextoTenant.limparTenantIdOverride();
     }
@@ -468,9 +498,26 @@ public class AssistantInternalController {
     public int totalVisits;
   }
 
+  /** "Rua X, 10, ap 2 - Bairro, Cidade/UF, CEP 00000-000", sem as partes vazias; null sem rua. */
+  static String enderecoEmTexto(br.com.phdigitalcode.azzo.agenda.pro.entity.TenantAddress a) {
+    if (a == null || a.getStreet() == null || a.getStreet().isBlank()) return null;
+    StringBuilder s = new StringBuilder(a.getStreet().trim());
+    if (a.getNumber() != null && !a.getNumber().isBlank()) s.append(", ").append(a.getNumber().trim());
+    if (a.getComplement() != null && !a.getComplement().isBlank()) s.append(", ").append(a.getComplement().trim());
+    if (a.getNeighborhood() != null && !a.getNeighborhood().isBlank()) s.append(" - ").append(a.getNeighborhood().trim());
+    if (a.getCity() != null && !a.getCity().isBlank()) {
+      s.append(", ").append(a.getCity().trim());
+      if (a.getState() != null && !a.getState().isBlank()) s.append("/").append(a.getState().trim());
+    }
+    if (a.getZipCode() != null && !a.getZipCode().isBlank()) s.append(", CEP ").append(a.getZipCode().trim());
+    return s.toString();
+  }
+
   public static class TenantInfoResponse {
     public String name;
     public String description;
+    public String address;
+    public String phone;
 
     public TenantInfoResponse() {}
 

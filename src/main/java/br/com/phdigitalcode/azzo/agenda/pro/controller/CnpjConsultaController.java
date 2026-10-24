@@ -18,7 +18,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.util.CnpjValidator;
  */
 @RestController
 @RequestMapping("/api/v1/cnpj")
-@PreAuthorize("hasAnyRole('OWNER', 'PROFESSIONAL')")
+@PreAuthorize("hasAnyRole('OWNER', 'PROFESSIONAL', 'STAFF')")
 public class CnpjConsultaController {
 
   private final CnpjConsultaService cnpjConsultaService;
@@ -31,7 +31,7 @@ public class CnpjConsultaController {
   public CnpjConsultaResponse consultar(@PathVariable String cnpj) {
     String sanitized = CnpjValidator.sanitize(cnpj);
     if (!CnpjValidator.isValid(sanitized)) {
-      throw new IllegalArgumentException("CNPJ invalido. Informe os 14 digitos corretamente.");
+      throw new IllegalArgumentException("CNPJ inválido. Informe os 14 digitos corretamente.");
     }
     return cnpjConsultaService.consultar(sanitized);
   }

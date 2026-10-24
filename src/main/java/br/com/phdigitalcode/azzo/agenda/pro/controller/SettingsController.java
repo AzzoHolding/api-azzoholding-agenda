@@ -49,7 +49,7 @@ public class SettingsController {
   // ---- Leitura geral (OWNER e PROFESSIONAL podem ler) ----
 
   @GetMapping
-  @PreAuthorize("hasAnyRole('OWNER', 'PROFESSIONAL')")
+  @PreAuthorize("hasAnyRole('OWNER', 'PROFESSIONAL', 'STAFF')")
   public SettingsDtos.SettingsResponse obter() {
     return servicoSettings.obter();
   }
@@ -78,7 +78,7 @@ public class SettingsController {
   // ---- Horarios de funcionamento — tabela relacional ----
 
   @GetMapping("/business-hours/table")
-  @PreAuthorize("hasAnyRole('OWNER', 'PROFESSIONAL')")
+  @PreAuthorize("hasAnyRole('OWNER', 'PROFESSIONAL', 'STAFF')")
   public List<SettingsDtos.BusinessHoursItemResponse> obterBusinessHoursTabela() {
     return servicoSettings.obterBusinessHoursTabela();
   }
@@ -152,6 +152,25 @@ public class SettingsController {
   public SettingsDtos.CancellationPolicyResponse atualizarCancellationPolicy(
       @Valid @RequestBody SettingsDtos.CancellationPolicyRequest request) {
     return servicoSettings.atualizarCancellationPolicy(request);
+  }
+
+  // ---- Teto de desconto do PDV — V131 ----
+
+  /**
+   * A LEITURA do teto e aberta a quem opera o PDV (OWNER, PROFESSIONAL, STAFF): a tela da comanda
+   * precisa dizer o limite ANTES de a pessoa digitar um desconto que o servidor vai recusar.
+   * Escrever continua so do dono — e o dono que decide quanto a equipe pode dar.
+   */
+  @GetMapping("/discount-policy")
+  @PreAuthorize("hasAnyRole('OWNER', 'PROFESSIONAL', 'STAFF')")
+  public SettingsDtos.DiscountPolicyResponse obterDiscountPolicy() {
+    return servicoSettings.obterDiscountPolicy();
+  }
+
+  @PutMapping("/discount-policy")
+  public SettingsDtos.DiscountPolicyResponse atualizarDiscountPolicy(
+      @Valid @RequestBody SettingsDtos.DiscountPolicyRequest request) {
+    return servicoSettings.atualizarDiscountPolicy(request);
   }
 
   // ---- Regua de lembretes de agendamento — F03 ----

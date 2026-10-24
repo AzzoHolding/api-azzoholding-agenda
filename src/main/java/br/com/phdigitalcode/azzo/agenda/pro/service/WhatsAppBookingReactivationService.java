@@ -301,6 +301,7 @@ public class WhatsAppBookingReactivationService {
     attempt.setProviderMessageId(safeText(providerMessageId, 120));
 
     advanceCycleAfterAttempt(cycle);
+    salvar(cycle, attempt);
     observabilityService.logAttemptSent(cycle, attempt);
   }
 
@@ -313,6 +314,7 @@ public class WhatsAppBookingReactivationService {
     attempt.setErrorMessage(safeText(errorMessage, 255));
 
     advanceCycleAfterAttempt(cycle);
+    salvar(cycle, attempt);
     observabilityService.logAttemptFailed(cycle, attempt, errorMessage);
   }
 
@@ -344,6 +346,7 @@ public class WhatsAppBookingReactivationService {
       cycle.setCancelReason(safeText(reason, 60));
       cycle.setNextAttemptAt(null);
     }
+    salvar(cycle, attempt);
     observabilityService.logAttemptCancelled(cycle, attempt, reason);
     observabilityService.logCycleCancelled(cycle, reason);
   }
@@ -356,6 +359,7 @@ public class WhatsAppBookingReactivationService {
     cycle.setAppointmentIdCreatedAfterAbandonment(appointmentId);
     cycle.setNextAttemptAt(null);
     cycle.setCancelReason(null);
+    salvar(cycle, null);
     observabilityService.logCycleConverted(cycle);
   }
 
@@ -365,7 +369,21 @@ public class WhatsAppBookingReactivationService {
     cycle.setStatus(WhatsAppBookingReactivationStatus.CANCELLED);
     cycle.setCancelReason(safeText(reason, 60));
     cycle.setNextAttemptAt(null);
+    salvar(cycle, null);
     observabilityService.logCycleCancelled(cycle, reason);
+  }
+
+  /**
+   * INT-001: quem chama costuma ter a entidade DESANEXADA (o agendador da reativacao le o ciclo
+   * por {@code findById} fora de transacao, com open-in-view desligado), entao so mudar os campos
+   * nao grava nada: o ciclo seguia ACTIVE com a tentativa vencida e a mesma mensagem saia de novo
+   * depois do intervalo minimo. O {@code save} explicito grava nos dois casos (desanexada: merge;
+   * gerenciada: sem efeito extra).
+   */
+  private void salvar(
+      WhatsAppBookingReactivationCycleEntity cycle, WhatsAppBookingReactivationAttemptEntity attempt) {
+    if (cycle != null) cycleRepository.save(cycle);
+    if (attempt != null) attemptRepository.save(attempt);
   }
 
   public AssistantReactivationSeedRequest toAssistantSeedRequest(WhatsAppBookingReactivationCycleEntity cycle) {

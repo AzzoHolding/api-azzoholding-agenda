@@ -25,7 +25,7 @@ class StatusAgendamentoTest {
     assertThat(StatusAgendamento.fromValue("   ")).isNull();
     assertThatThrownBy(() -> StatusAgendamento.fromValue("ARQUIVADO"))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("Status de agendamento invalido");
+        .hasMessageContaining("Status de agendamento inválido");
   }
 
   @Test
@@ -67,11 +67,11 @@ class StatusAgendamentoTest {
     assertThatThrownBy(
             () -> StatusAgendamento.validarTransicao(StatusAgendamento.CANCELLED, StatusAgendamento.CONFIRMED))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Transicao de status invalida: CANCELLED -> CONFIRMED");
+        .hasMessage("Transicao de status inválida: CANCELLED -> CONFIRMED");
 
     assertThatThrownBy(() -> StatusAgendamento.validarTransicao(null, StatusAgendamento.CONFIRMED))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Status de agendamento obrigatorio");
+        .hasMessage("Status de agendamento obrigatório");
 
     assertDoesNotThrow(
         () -> StatusAgendamento.validarTransicao(StatusAgendamento.PENDING, StatusAgendamento.CANCELLED));

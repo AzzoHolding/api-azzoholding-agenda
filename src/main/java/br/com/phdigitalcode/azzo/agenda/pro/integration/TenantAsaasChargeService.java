@@ -82,7 +82,7 @@ public class TenantAsaasChargeService {
               "externalReference", externalReference,
               "status", e.getStatusCode().value()));
       throw new IllegalStateException(
-          "Nao foi possivel gerar a cobranca Pix. Tente novamente em instantes.", e);
+          "Não foi possível gerar a cobranca Pix. Tente novamente em instantes.", e);
     }
 
     AsaasDtos.PixQrCodeResponse pix = asaasClient.getPixQrCode(apiKey, payment.id);
@@ -105,22 +105,28 @@ public class TenantAsaasChargeService {
         tenantPaymentSettingsRepository.findByTenantId(tenantId).orElse(null);
     if (config == null || !config.isAtivo() || trimToNull(config.getApiKeyEnc()) == null) {
       throw new IllegalStateException(
-          "O salao ainda nao configurou a conta de recebimento (Asaas) em Configuracoes.");
+          "O salão ainda não configurou a conta de recebimento (Asaas) em Configurações.");
     }
     String apiKey = trimToNull(encryptionService.decrypt(config.getApiKeyEnc()));
     if (apiKey == null) {
       throw new IllegalStateException(
-          "Chave de recebimento do salao invalida. Contate o estabelecimento.");
+          "Chave de recebimento do salão inválida. Contate o estabelecimento.");
     }
     return apiKey;
   }
 
   /** @throws IllegalArgumentException cliente sem CPF/CNPJ na primeira cobranca (exigido pelo Asaas). */
   public void ensureAsaasCustomer(String apiKey, Cliente cliente) {
+    // Titular anonimizado (LGPD) nao se cobra. Vem ANTES do atalho do id existente: um cliente
+    // anonimizado antes de a rotina soltar o vinculo ainda pode ter `asaas_customer_id`. E sem esta
+    // trava, um pedido de assinatura com CPF novo criaria no Asaas um cliente "[ANONIMIZADO]".
+    if (cliente.getAnonymizedAt() != null) {
+      throw new IllegalArgumentException("Cliente anonimizado não pode ser cobrado.");
+    }
     if (trimToNull(cliente.getAsaasCustomerId()) != null) return;
     if (trimToNull(cliente.getCpfCnpj()) == null) {
       throw new IllegalArgumentException(
-          "CPF/CNPJ do cliente e obrigatorio para gerar a cobranca Pix.");
+          "CPF/CNPJ do cliente é obrigatório para gerar a cobranca Pix.");
     }
     AsaasDtos.CreateCustomerRequest request = new AsaasDtos.CreateCustomerRequest();
     request.name = cliente.getName();

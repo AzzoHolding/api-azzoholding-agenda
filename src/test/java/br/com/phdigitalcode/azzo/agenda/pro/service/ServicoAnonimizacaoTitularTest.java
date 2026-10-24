@@ -13,11 +13,13 @@ import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.web.server.ResponseStatusException;
 
 import br.com.phdigitalcode.azzo.agenda.pro.entity.AppointmentCustomerNote;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.Cliente;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.LgpdDataSubjectRequest;
+import br.com.phdigitalcode.azzo.agenda.pro.entity.LgpdDataSubjectRequestEvent;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditEventCommand;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditService;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.AppointmentCustomerNoteRepository;
@@ -40,6 +42,7 @@ class ServicoAnonimizacaoTitularTest {
   private AppointmentCustomerNoteRepository noteRepository;
   private LgpdDataSubjectRequestRepository requestRepository;
   private LgpdDataSubjectRequestEventRepository eventRepository;
+  private RastrosDoTitular rastrosDoTitular;
   private AuditService auditService;
   private ServicoAnonimizacaoTitular service;
 
@@ -51,9 +54,12 @@ class ServicoAnonimizacaoTitularTest {
     noteRepository = mock(AppointmentCustomerNoteRepository.class);
     requestRepository = mock(LgpdDataSubjectRequestRepository.class);
     eventRepository = mock(LgpdDataSubjectRequestEventRepository.class);
+    rastrosDoTitular = mock(RastrosDoTitular.class);
+    when(rastrosDoTitular.limpar(any())).thenReturn(new RastrosDoTitular.Resultado(1, 2, 3, 4, 5));
     auditService = mock(AuditService.class);
     service = new ServicoAnonimizacaoTitular(
-        contextoTenant, authenticatedUser, clienteRepository, noteRepository, requestRepository, eventRepository, auditService);
+        contextoTenant, authenticatedUser, clienteRepository, noteRepository, requestRepository,
+        eventRepository, rastrosDoTitular, auditService);
 
     when(contextoTenant.obterTenantIdOuFalhar()).thenReturn(tenantId);
     when(authenticatedUser.idOuNulo()).thenReturn(userId);
@@ -106,6 +112,41 @@ class ServicoAnonimizacaoTitularTest {
   }
 
   @Test
+  void anonimizarSoltaOVinculoComOAsaas() {
+    Cliente cliente = buildCliente();
+    cliente.setAsaasCustomerId("cus_000123");
+    when(clienteRepository.findByIdAndTenantId(clientId, tenantId)).thenReturn(Optional.of(cliente));
+
+    service.anonimizar(clientId);
+
+    assertThat(cliente.getAsaasCustomerId()).isNull();
+  }
+
+  @Test
+  void anonimizarRedigeAAuditoriaDoClienteEAnotaNoEvento() {
+    when(clienteRepository.findByIdAndTenantId(clientId, tenantId)).thenReturn(Optional.of(buildCliente()));
+    when(auditService.redigirDadosPessoaisDoCliente(tenantId, clientId)).thenReturn(3);
+
+    service.anonimizar(clientId);
+
+    verify(auditService).redigirDadosPessoaisDoCliente(tenantId, clientId);
+    ArgumentCaptor<LgpdDataSubjectRequestEvent> evento =
+        ArgumentCaptor.forClass(LgpdDataSubjectRequestEvent.class);
+    verify(eventRepository).save(evento.capture());
+    assertThat(evento.getValue().getEventNote()).contains("3 evento(s) de auditoria redigidos");
+  }
+
+  @Test
+  void anonimizarFalhaSeNaoConseguirRedigirAAuditoria() {
+    when(clienteRepository.findByIdAndTenantId(clientId, tenantId)).thenReturn(Optional.of(buildCliente()));
+    when(auditService.redigirDadosPessoaisDoCliente(tenantId, clientId))
+        .thenThrow(new IllegalStateException("json invalido"));
+
+    // Engolir deixaria o dado pessoal na trilha e a anonimizacao diria que terminou.
+    assertThatThrownBy(() -> service.anonimizar(clientId)).isInstanceOf(IllegalStateException.class);
+  }
+
+  @Test
   void anonimizarLimpaNotasDeAtendimentoAssociadas() {
     when(clienteRepository.findByIdAndTenantId(clientId, tenantId)).thenReturn(Optional.of(buildCliente()));
     AppointmentCustomerNote note = new AppointmentCustomerNote();
@@ -150,5 +191,32 @@ class ServicoAnonimizacaoTitularTest {
     ServicoAnonimizacaoTitular.AnonimizacaoResponse response = service.anonimizar(clientId);
 
     assertThat(response).isNotNull();
+  }
+
+  /**
+   * O dado pessoal do titular nao mora so na ficha dele.
+   *
+   * Ate 2026-09-20 a anonimizacao parava no cliente e nas notas: o telefone continuava no chat,
+   * nas notificacoes, no log do WhatsApp e na fila de reativacao — pedido de exclusao atendido
+   * pela metade.
+   */
+  @Test
+  void anonimizarAlcancaChatNotificacoesEReativacao() {
+    Cliente cliente = buildCliente();
+    when(clienteRepository.findByIdAndTenantId(clientId, tenantId)).thenReturn(Optional.of(cliente));
+
+    // Os rastros sao limpos com o telefone ainda na ficha: e por ele que se acham.
+    when(rastrosDoTitular.limpar(cliente)).thenAnswer(invocacao -> {
+      assertThat(((Cliente) invocacao.getArgument(0)).getPhone()).isEqualTo("+5511999999999");
+      return new RastrosDoTitular.Resultado(1, 2, 3, 4, 5);
+    });
+
+    service.anonimizar(clientId);
+
+    verify(rastrosDoTitular).limpar(cliente);
+    ArgumentCaptor<LgpdDataSubjectRequestEvent> evento =
+        ArgumentCaptor.forClass(LgpdDataSubjectRequestEvent.class);
+    verify(eventRepository).save(evento.capture());
+    assertThat(evento.getValue().getEventNote()).contains("1 conversa(s)").contains("5 ciclo(s)");
   }
 }

@@ -10,6 +10,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import br.com.phdigitalcode.azzo.agenda.pro.service.LgpdRetentionService;
+import br.com.phdigitalcode.azzo.agenda.pro.service.ServicoEliminacaoFimDeContrato;
 
 /**
  * Espelha {@code scheduler/LgpdRetentionScheduler.java}: chama {@code logDadosExpirados} antes de
@@ -18,12 +19,14 @@ import br.com.phdigitalcode.azzo.agenda.pro.service.LgpdRetentionService;
 class LgpdRetentionSchedulerTest {
 
   private LgpdRetentionService lgpdRetentionService;
+  private ServicoEliminacaoFimDeContrato eliminacao;
   private LgpdRetentionScheduler scheduler;
 
   @BeforeEach
   void setUp() {
     lgpdRetentionService = mock(LgpdRetentionService.class);
-    scheduler = new LgpdRetentionScheduler(lgpdRetentionService);
+    eliminacao = mock(ServicoEliminacaoFimDeContrato.class);
+    scheduler = new LgpdRetentionScheduler(lgpdRetentionService, eliminacao);
   }
 
   @Test
@@ -33,6 +36,7 @@ class LgpdRetentionSchedulerTest {
     org.mockito.InOrder ordem = org.mockito.Mockito.inOrder(lgpdRetentionService);
     ordem.verify(lgpdRetentionService, times(1)).logDadosExpirados();
     ordem.verify(lgpdRetentionService, times(1)).purgarDadosExpirados();
+    verify(eliminacao).executar();
   }
 
   @Test

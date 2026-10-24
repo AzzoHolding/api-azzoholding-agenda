@@ -117,6 +117,17 @@ public class TenantOperationalSettings {
   @Column(name = "cancellation_fee_percent", nullable = false)
   private int cancellationFeePercent = 0;
 
+  // Teto de desconto do PDV (V131)
+
+  /**
+   * Quanto de desconto a EQUIPE pode dar sozinha, em %. O dono nao e limitado.
+   *
+   * <p>Padrao 100 = sem teto, que e como o sistema se comportava antes da V131 — ligar o teto e
+   * uma decisao do salao, e ninguem perde o desconto que ja dava por causa de um deploy.
+   */
+  @Column(name = "pos_max_discount_percent", nullable = false)
+  private int posMaxDiscountPercent = 100;
+
   @Column(name = "created_at", nullable = false)
   private Instant createdAt;
 
@@ -141,6 +152,7 @@ public class TenantOperationalSettings {
       businessHoursJson = "[]";
     }
     if (reminderHours <= 0) reminderHours = 24;
+    if (posMaxDiscountPercent < 0 || posMaxDiscountPercent > 100) posMaxDiscountPercent = 100;
     if (d1ReminderHora == null || d1ReminderHora.isBlank()) d1ReminderHora = "18:00";
   }
 

@@ -49,10 +49,15 @@ import br.com.phdigitalcode.azzo.agenda.pro.service.NfseService;
  * <p><b>Rate limiting nao portado</b> — mesma lacuna sinalizada em {@link FiscalController}
  * (o original tem {@code @RateLimited(bucket = "fiscal-api")} de classe via Quarkiverse Bucket4j,
  * sem equivalente declarativo no Spring deste projeto).
+ *
+ * <p><b>Perfis de acesso (V128)</b> — as mesmas tres faixas de {@link FiscalController}: leitura
+ * com {@code fiscal:view} (inclusive config e capacidades, que a emissao le), operacao com
+ * {@code fiscal:manage} (rascunho, emitir, cancelar, destravar o certificado) e escrita de
+ * configuracao so do dono.
  */
 @RestController
 @RequestMapping("/api/v1/fiscal/nfse")
-@PreAuthorize("hasRole('OWNER')")
+@PreAuthorize(FiscalController.LEITURA)
 public class NfseController {
 
   private final NfseService nfseService;
@@ -93,6 +98,7 @@ public class NfseController {
   }
 
   @PutMapping("/config")
+  @PreAuthorize(FiscalController.CONFIGURACAO)
   public NfseDtos.Config salvarConfig(@RequestBody NfseDtos.Config request) {
     validarAcessoFiscalAtual();
     return nfseConfigService.salvarConfig(request);
@@ -114,6 +120,7 @@ public class NfseController {
   }
 
   @PostMapping("/invoices")
+  @PreAuthorize(FiscalController.OPERACAO)
   public ResponseEntity<NfseDtos.Invoice> criarRascunho(
       @RequestBody(required = false) NfseDtos.Invoice request,
       @RequestHeader(value = "X-Idempotency-Key", required = false) String key) {
@@ -129,6 +136,7 @@ public class NfseController {
   }
 
   @PutMapping("/invoices/{id}")
+  @PreAuthorize(FiscalController.OPERACAO)
   public NfseDtos.Invoice atualizarRascunho(
       @PathVariable String id,
       @RequestBody(required = false) NfseDtos.Invoice request,
@@ -149,6 +157,7 @@ public class NfseController {
   }
 
   @PostMapping("/invoices/{id}/authorize")
+  @PreAuthorize(FiscalController.OPERACAO)
   public ResponseEntity<NfseDtos.Invoice> autorizar(
       @PathVariable String id,
       @RequestBody(required = false) NfseDtos.AuthorizeRequest request,
@@ -165,6 +174,7 @@ public class NfseController {
   }
 
   @PostMapping("/invoices/{id}/cancel")
+  @PreAuthorize(FiscalController.OPERACAO)
   public ResponseEntity<NfseDtos.Invoice> cancelar(
       @PathVariable String id,
       @RequestBody(required = false) NfseDtos.CancelRequest request,
@@ -220,6 +230,7 @@ public class NfseController {
   }
 
   @PutMapping("/provider-capabilities")
+  @PreAuthorize(FiscalController.CONFIGURACAO)
   public NfseDtos.ProviderCapabilities salvarProviderCapabilities(
       @RequestBody NfseDtos.ProviderCapabilities request) {
     validarAcessoFiscalAtual();
@@ -257,6 +268,7 @@ public class NfseController {
   }
 
   @PostMapping("/certificate-unlock")
+  @PreAuthorize(FiscalController.OPERACAO)
   public NfseDtos.CertificateUnlockStatusResponse createUnlockSession(
       @RequestBody(required = false) NfseDtos.CertificateUnlockRequest request) {
     validarAcessoFiscalAtual();
@@ -270,6 +282,7 @@ public class NfseController {
   }
 
   @DeleteMapping("/certificate-unlock")
+  @PreAuthorize(FiscalController.OPERACAO)
   public ResponseEntity<Void> revokeUnlockSession() {
     validarAcessoFiscalAtual();
     nfseCertificateUnlockService.revokeCurrentSession();

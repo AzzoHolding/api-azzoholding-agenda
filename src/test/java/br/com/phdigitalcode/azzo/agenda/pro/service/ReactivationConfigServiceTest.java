@@ -158,7 +158,7 @@ class ReactivationConfigServiceTest {
 
     assertThatThrownBy(() -> service.registrarOptOut(tenantId, clientId, actorUserId, "OWNER"))
         .isInstanceOf(ResponseStatusException.class)
-        .hasMessageContaining("Cliente nao encontrado");
+        .hasMessageContaining("Cliente não encontrado");
   }
 
   @Test
@@ -169,7 +169,7 @@ class ReactivationConfigServiceTest {
 
     assertThatThrownBy(() -> service.registrarOptOut(tenantId, cliente.getId(), actorUserId, "OWNER"))
         .isInstanceOf(ResponseStatusException.class)
-        .hasMessageContaining("ja possui opt-out");
+        .hasMessageContaining("já possui opt-out");
   }
 
   @Test
@@ -297,7 +297,7 @@ class ReactivationConfigServiceTest {
 
     assertThatThrownBy(() -> service.cancelCycleById(tenantId, cycleId))
         .isInstanceOf(ResponseStatusException.class)
-        .hasMessageContaining("Ciclo nao encontrado");
+        .hasMessageContaining("Ciclo não encontrado");
   }
 
   @Test
@@ -310,7 +310,7 @@ class ReactivationConfigServiceTest {
 
     assertThatThrownBy(() -> service.cancelCycleById(tenantId, cycle.getId()))
         .isInstanceOf(ResponseStatusException.class)
-        .hasMessageContaining("Ciclo nao encontrado");
+        .hasMessageContaining("Ciclo não encontrado");
     verify(reactivationService, never()).cancelCycle(any(), any());
   }
 
@@ -324,7 +324,7 @@ class ReactivationConfigServiceTest {
 
     assertThatThrownBy(() -> service.cancelCycleById(tenantId, cycle.getId()))
         .isInstanceOf(ResponseStatusException.class)
-        .hasMessageContaining("nao pode ser cancelado");
+        .hasMessageContaining("não pode ser cancelado");
   }
 
   @Test

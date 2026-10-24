@@ -103,7 +103,7 @@ public class MenuOverrideService {
   @Transactional
   public Map<String, Object> aplicarOverridesEmLote(BulkMenuOverrideRequest request) {
     if (request == null || request.items == null || request.items.isEmpty()) {
-      throw new IllegalArgumentException("Lista de overrides obrigatoria");
+      throw new IllegalArgumentException("Lista de overrides obrigatória");
     }
     int updated = 0;
     for (BulkMenuOverrideRequest.MenuOverrideItem item : request.items) {
@@ -131,7 +131,7 @@ public class MenuOverrideService {
   @Transactional
   @SuppressWarnings("unchecked")
   public MenuRoleRoutesResponse listarRotasPorRole(String role, String scope, String tenantId) {
-    if (role == null || role.isBlank()) throw new IllegalArgumentException("Role obrigatoria");
+    if (role == null || role.isBlank()) throw new IllegalArgumentException("Role obrigatória");
     boolean globalScope = isGlobalScope(scope);
     UUID targetTenantId = globalScope ? null : resolveTargetTenantId(tenantId);
     String normalizedRole = role.trim().toUpperCase();
@@ -229,7 +229,7 @@ public class MenuOverrideService {
         .getResultStream()
         .findFirst()
         .orElse(null);
-    if (value == null) throw new IllegalArgumentException("Role nao encontrada");
+    if (value == null) throw new IllegalArgumentException("Role não encontrada");
     return UUID.fromString(value.toString());
   }
 
@@ -401,7 +401,7 @@ public class MenuOverrideService {
   }
 
   private String normalizeRoute(String route) {
-    if (route == null || route.isBlank()) throw new IllegalArgumentException("Route obrigatoria");
+    if (route == null || route.isBlank()) throw new IllegalArgumentException("Route obrigatória");
     String trimmed = route.trim();
     return trimmed.startsWith("/") ? trimmed : "/" + trimmed;
   }
@@ -426,11 +426,11 @@ public class MenuOverrideService {
     try {
       UUID parsed = UUID.fromString(tenantId.trim());
       if (tenantRepository.findById(parsed).isEmpty()) {
-        throw new ApiClientErrorException("Tenant nao encontrado", 404);
+        throw new ApiClientErrorException("Tenant não encontrado", 404);
       }
       return parsed;
     } catch (IllegalArgumentException e) {
-      throw new IllegalArgumentException("tenantId invalido");
+      throw new IllegalArgumentException("tenantId inválido");
     }
   }
 

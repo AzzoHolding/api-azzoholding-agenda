@@ -87,13 +87,13 @@ class AddressServiceTest {
   void cepComTamanhoInvalidoEhRejeitado() {
     assertThatThrownBy(() -> service.buscarPorCep("123"))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("CEP invalido");
+        .hasMessageContaining("CEP inválido");
   }
 
   @Test
   void cepNuloEhRejeitado() {
     assertThatThrownBy(() -> service.buscarPorCep(null))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("CEP invalido");
+        .hasMessageContaining("CEP inválido");
   }
 }

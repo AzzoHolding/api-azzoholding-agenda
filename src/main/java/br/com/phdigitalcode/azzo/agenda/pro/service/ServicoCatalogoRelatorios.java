@@ -94,7 +94,7 @@ public class ServicoCatalogoRelatorios {
           "XLSX");
     }
     if (!"csv".equals(normalizedFormat)) {
-      throw new IllegalArgumentException("Formato invalido. Use csv ou xlsx.");
+      throw new IllegalArgumentException("Formato inválido. Use csv ou xlsx.");
     }
     return new ExportedReport(
         toCsv(definition, rows).getBytes(StandardCharsets.UTF_8),
@@ -155,8 +155,8 @@ public class ServicoCatalogoRelatorios {
   }
 
   private static void validatePeriod(LocalDate inicio, LocalDate fim) {
-    if (fim.isBefore(inicio)) throw new IllegalArgumentException("Periodo invalido");
-    if (inicio.plusDays(370).isBefore(fim)) throw new IllegalArgumentException("Periodo maximo de 370 dias");
+    if (fim.isBefore(inicio)) throw new IllegalArgumentException("Período inválido");
+    if (inicio.plusDays(370).isBefore(fim)) throw new IllegalArgumentException("Período máximo de 370 dias");
   }
 
   ReportDefinition definition(String rawKey) {
@@ -165,20 +165,18 @@ public class ServicoCatalogoRelatorios {
       case "faturamento-servico" -> new ReportDefinition(
           key,
           "Faturamento por servico",
-          List.of("agenda"),
+          List.of("comanda", "agenda"),
           List.of("servico_id", "servico", "quantidade", "receita", "ticket_medio"),
           true,
-          """
-          SELECT s.id::text, s.name, COUNT(DISTINCT a.id)::int,
-                 COALESCE(SUM(ai.total_price), 0),
-                 CASE WHEN COUNT(DISTINCT a.id) > 0 THEN ROUND(COALESCE(SUM(ai.total_price), 0) / COUNT(DISTINCT a.id), 2) ELSE 0 END
-          FROM appointments a
-          JOIN appointment_items ai ON ai.appointment_id = a.id AND ai.tenant_id = a.tenant_id
-          JOIN services s ON s.id = ai.service_id AND s.tenant_id = a.tenant_id
-          WHERE a.tenant_id = :tenantId
-            AND a.date BETWEEN :dataInicio AND :dataFim
-            AND a.status = 'Concluido'
-            AND (CAST(:professionalId AS uuid) IS NULL OR a.professional_id = CAST(:professionalId AS uuid))
+          // Receita = o que a COMANDA cobrou (ReceitaDeServicosSql), e nao o preco do agendamento.
+          "WITH " + br.com.phdigitalcode.azzo.agenda.pro.util.ReceitaDeServicosSql.CTE + """
+          SELECT s.id::text, s.name, COUNT(DISTINCT r.venda_id)::int,
+                 COALESCE(SUM(r.valor), 0),
+                 CASE WHEN COUNT(DISTINCT r.venda_id) > 0 THEN ROUND(COALESCE(SUM(r.valor), 0) / COUNT(DISTINCT r.venda_id), 2) ELSE 0 END
+          FROM receita_servicos r
+          JOIN services s ON s.id = r.service_id AND s.tenant_id = :tenantId
+          WHERE r.dia BETWEEN :dataInicio AND :dataFim
+            AND (CAST(:professionalId AS uuid) IS NULL OR r.professional_id = CAST(:professionalId AS uuid))
           GROUP BY s.id, s.name
           ORDER BY 4 DESC
           LIMIT :limit OFFSET :offset
@@ -186,17 +184,20 @@ public class ServicoCatalogoRelatorios {
       case "faturamento-profissional" -> new ReportDefinition(
           key,
           "Faturamento por profissional",
-          List.of("agenda", "comissoes"),
+          List.of("comanda", "agenda", "comissoes"),
           List.of("profissional_id", "profissional", "quantidade", "receita", "comissao_gerada"),
           true,
-          """
-          SELECT p.id::text, p.name, COUNT(DISTINCT a.id)::int,
-                 COALESCE(SUM(ai.total_price), 0),
+          "WITH " + br.com.phdigitalcode.azzo.agenda.pro.util.ReceitaDeServicosSql.CTE + """
+          SELECT p.id::text, p.name, COALESCE(MAX(pp.quantidade), 0)::int,
+                 COALESCE(MAX(pp.receita), 0),
                  COALESCE(MAX(ce.comissao), 0)
           FROM professionals p
-          LEFT JOIN appointments a ON a.professional_id = p.id AND a.tenant_id = p.tenant_id
-            AND a.date BETWEEN :dataInicio AND :dataFim AND a.status = 'Concluido'
-          LEFT JOIN appointment_items ai ON ai.appointment_id = a.id AND ai.tenant_id = a.tenant_id
+          LEFT JOIN (
+            SELECT r.professional_id, COUNT(DISTINCT r.venda_id) AS quantidade, SUM(r.valor) AS receita
+            FROM receita_servicos r
+            WHERE r.dia BETWEEN :dataInicio AND :dataFim
+            GROUP BY r.professional_id
+          ) pp ON pp.professional_id = p.id
           LEFT JOIN (
             SELECT professional_id, SUM(total_amount_cents) / 100.0 AS comissao
             FROM commission_entries
@@ -246,17 +247,17 @@ public class ServicoCatalogoRelatorios {
       case "clientes-inativos" -> definitionSimple(
           key,
           "Clientes inativos",
-          List.of("clientes", "agenda"),
+          List.of("clientes", "comanda", "agenda"),
           List.of("cliente_id", "cliente", "telefone", "ultima_visita", "valor_historico"),
-          """
-          SELECT c.id::text, c.name, c.phone, MAX(a.date)::text, COALESCE(SUM(ai.total_price), 0)
+          // Visita e valor pelo que o cliente PAGOU (ReceitaDeClientesSql).
+          "WITH " + br.com.phdigitalcode.azzo.agenda.pro.util.ReceitaDeClientesSql.CTE + """
+          SELECT c.id::text, c.name, c.phone, MAX(v.dia)::text, COALESCE(SUM(v.valor), 0)
           FROM clients c
-          LEFT JOIN appointments a ON a.client_id = c.id AND a.tenant_id = c.tenant_id AND a.status = 'Concluido'
-          LEFT JOIN appointment_items ai ON ai.appointment_id = a.id AND ai.tenant_id = a.tenant_id
+          LEFT JOIN visitas_clientes v ON v.client_id = c.id
           WHERE c.tenant_id = :tenantId
           GROUP BY c.id, c.name, c.phone
-          HAVING MAX(a.date) IS NULL OR MAX(a.date) <= (:dataFim - (:inactiveDays || ' days')::interval)::date
-          ORDER BY MAX(a.date) NULLS FIRST, c.name
+          HAVING MAX(v.dia) IS NULL OR MAX(v.dia) <= (:dataFim - (:inactiveDays || ' days')::interval)::date
+          ORDER BY MAX(v.dia) NULLS FIRST, c.name
           LIMIT :limit OFFSET :offset
           """);
       case "taxa-retorno" -> definitionSimple(
@@ -369,15 +370,13 @@ public class ServicoCatalogoRelatorios {
       case "curva-abc-clientes" -> definitionSimple(
           key,
           "Curva ABC de clientes",
-          List.of("clientes", "agenda"),
+          List.of("clientes", "comanda", "agenda"),
           List.of("cliente_id", "cliente", "valor_gasto", "percentual_acumulado", "classe"),
-          """
-          WITH receita AS (
-            SELECT c.id, c.name, COALESCE(SUM(ai.total_price), 0) AS valor
+          "WITH " + br.com.phdigitalcode.azzo.agenda.pro.util.ReceitaDeClientesSql.CTE + """
+          , receita AS (
+            SELECT c.id, c.name, COALESCE(SUM(v.valor), 0) AS valor
             FROM clients c
-            JOIN appointments a ON a.client_id = c.id AND a.tenant_id = c.tenant_id
-              AND a.status = 'Concluido' AND a.date BETWEEN :dataInicio AND :dataFim
-            JOIN appointment_items ai ON ai.appointment_id = a.id AND ai.tenant_id = a.tenant_id
+            JOIN visitas_clientes v ON v.client_id = c.id AND v.dia BETWEEN :dataInicio AND :dataFim
             WHERE c.tenant_id = :tenantId
             GROUP BY c.id, c.name
           ), ranked AS (
@@ -391,20 +390,42 @@ public class ServicoCatalogoRelatorios {
           ORDER BY valor DESC
           LIMIT :limit OFFSET :offset
           """);
+      // Uma LINHA POR CONTA, e nao o total por motivo (2026-09-16).
+      //
+      // O agregado dizia "R$ 2.400 em 'cortesia'" e escondia justamente o que o dono precisa
+      // olhar: QUAL conta, de QUAL cliente, por QUEM, e se a conta foi ZERADA. Cortesia de 100%
+      // e a forma mais limpa de atender de graca quem se quer agradar — ou de cobrar por fora —,
+      // entao ela vem marcada e o relatorio ordena pelo desconto maior.
       case "descontos" -> definitionSimple(
           key,
-          "Descontos concedidos",
+          "Descontos e cortesias",
           List.of("comanda"),
-          List.of("operador_id", "motivo", "quantidade", "valor_desconto"),
+          List.of(
+              "data",
+              "cliente",
+              "operador",
+              "subtotal",
+              "valor_desconto",
+              "percentual",
+              "cortesia",
+              "motivo"),
           """
-          SELECT c.fechada_por::text, COALESCE(NULLIF(c.desconto_motivo, ''), 'Sem motivo'), COUNT(*)::int, COALESCE(SUM(c.desconto), 0)
+          SELECT c.closed_at::date::text,
+                 COALESCE(cl.name, 'Venda avulsa'),
+                 COALESCE(u.name, 'Nao identificado'),
+                 c.subtotal,
+                 c.desconto,
+                 ROUND(c.desconto * 100.0 / NULLIF(c.subtotal, 0), 2),
+                 CASE WHEN c.desconto >= c.subtotal THEN 'Sim' ELSE 'Nao' END,
+                 COALESCE(NULLIF(c.desconto_motivo, ''), 'Sem motivo')
           FROM comandas c
+          LEFT JOIN clients cl ON cl.id = c.client_id AND cl.tenant_id = c.tenant_id
+          LEFT JOIN users u ON u.id = COALESCE(c.fechada_por, c.aberta_por)
           WHERE c.tenant_id = :tenantId
             AND c.status = 'FECHADA'
             AND c.closed_at::date BETWEEN :dataInicio AND :dataFim
             AND c.desconto > 0
-          GROUP BY c.fechada_por, COALESCE(NULLIF(c.desconto_motivo, ''), 'Sem motivo')
-          ORDER BY 4 DESC
+          ORDER BY c.desconto DESC, c.closed_at DESC
           LIMIT :limit OFFSET :offset
           """);
       case "comissoes-periodo" -> definitionSimple(
@@ -477,7 +498,7 @@ public class ServicoCatalogoRelatorios {
           ORDER BY EXTRACT(DAY FROM c.birth_date), c.name
           LIMIT :limit OFFSET :offset
           """);
-      default -> throw new IllegalArgumentException("Relatorio nao suportado: " + rawKey);
+      default -> throw new IllegalArgumentException("Relatório não suportado: " + rawKey);
     };
   }
 
@@ -534,7 +555,7 @@ public class ServicoCatalogoRelatorios {
       workbook.write(output);
       return output.toByteArray();
     } catch (Exception ex) {
-      throw new IllegalStateException("Falha ao gerar XLSX do relatorio.", ex);
+      throw new IllegalStateException("Falha ao gerar XLSX do relatório.", ex);
     }
   }
 

@@ -63,7 +63,7 @@ class ChatControllerTest {
   void classeMantemRolesPermitidasDoOriginal() {
     PreAuthorize preAuthorize = ChatController.class.getAnnotation(PreAuthorize.class);
     assertThat(preAuthorize).isNotNull();
-    assertThat(preAuthorize.value()).isEqualTo("hasAnyRole('OWNER', 'PROFESSIONAL')");
+    assertThat(preAuthorize.value()).isEqualTo("hasAnyRole('OWNER', 'PROFESSIONAL', 'STAFF')");
   }
 
   @Test

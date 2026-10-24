@@ -32,6 +32,9 @@ import br.com.phdigitalcode.azzo.agenda.pro.security.AuthCookieService;
 import br.com.phdigitalcode.azzo.agenda.pro.security.JwtPrincipal;
 import br.com.phdigitalcode.azzo.agenda.pro.security.RefreshTokenService;
 import br.com.phdigitalcode.azzo.agenda.pro.mapper.UsuarioMapper;
+import br.com.phdigitalcode.azzo.agenda.pro.service.ServicoConfirmacaoDeEmail;
+import br.com.phdigitalcode.azzo.agenda.pro.service.VerificacaoDoDocumentoNoCadastro;
+import br.com.phdigitalcode.azzo.agenda.pro.dto.request.ConfirmEmailRequest;
 import br.com.phdigitalcode.azzo.agenda.pro.service.AuthService;
 import br.com.phdigitalcode.azzo.agenda.pro.util.CorrelatedLogging;
 import jakarta.servlet.http.HttpServletRequest;
@@ -63,18 +66,24 @@ public class AuthController {
   private final RefreshTokenService refreshTokenService;
   private final UsuarioRepository usuarioRepository;
   private final UsuarioMapper usuarioMapper;
+  private final VerificacaoDoDocumentoNoCadastro verificacaoDoDocumento;
+  private final ServicoConfirmacaoDeEmail confirmacaoDeEmail;
 
   public AuthController(
       AuthService authService,
       AuthCookieService authCookieService,
       RefreshTokenService refreshTokenService,
       UsuarioRepository usuarioRepository,
-      UsuarioMapper usuarioMapper) {
+      UsuarioMapper usuarioMapper,
+      VerificacaoDoDocumentoNoCadastro verificacaoDoDocumento,
+      ServicoConfirmacaoDeEmail confirmacaoDeEmail) {
     this.authService = authService;
     this.authCookieService = authCookieService;
     this.refreshTokenService = refreshTokenService;
     this.usuarioRepository = usuarioRepository;
     this.usuarioMapper = usuarioMapper;
+    this.verificacaoDoDocumento = verificacaoDoDocumento;
+    this.confirmacaoDeEmail = confirmacaoDeEmail;
   }
 
   @PostMapping("/login")
@@ -84,7 +93,7 @@ public class AuthController {
   }
 
   @PostMapping("/register")
-  public ResponseEntity<AuthResponse> register(
+  public GenericMessageResponse register(
       @Valid @RequestBody RegisterRequest request, HttpServletRequest servletRequest) {
     String requestId = firstNonBlank(
         servletRequest.getHeader("X-Request-Id"), servletRequest.getHeader("x-request-id"));
@@ -95,13 +104,26 @@ public class AuthController {
       ipAddress = firstNonBlank(servletRequest.getHeader("X-Real-IP"), servletRequest.getHeader("x-real-ip"));
     }
 
-    AuthResponse authResponse = authService.registrar(request, requestId, ipAddress);
-    return buildCookieAuthResponse(authResponse);
+    // Chamada HTTP a Receita: fica FORA da transacao do cadastro.
+    verificacaoDoDocumento.verificarOuFalhar(request.cpfCnpj);
+    // Sem sessao: a conta so entra depois de confirmar o e-mail (ver ServicoConfirmacaoDeEmail).
+    authService.registrar(request, requestId, ipAddress);
+    return new GenericMessageResponse(ServicoConfirmacaoDeEmail.MENSAGEM_DO_CADASTRO);
   }
 
   @PostMapping("/forgot-password")
   public GenericMessageResponse forgotPassword(@Valid @RequestBody ForgotPasswordRequest request) {
     return authService.requestPasswordReset(request.email);
+  }
+
+  @PostMapping("/confirm-email")
+  public GenericMessageResponse confirmEmail(@Valid @RequestBody ConfirmEmailRequest request) {
+    return confirmacaoDeEmail.confirmar(request.token);
+  }
+
+  @PostMapping("/resend-email-confirmation")
+  public GenericMessageResponse resendEmailConfirmation(@Valid @RequestBody ForgotPasswordRequest request) {
+    return confirmacaoDeEmail.reenviar(request.email);
   }
 
   @PostMapping("/reset-password")
@@ -127,6 +149,7 @@ public class AuthController {
       return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
           .header(HttpHeaders.SET_COOKIE, authCookieService.clearAccessTokenCookie().toString())
           .header(HttpHeaders.SET_COOKIE, authCookieService.clearRefreshTokenCookie().toString())
+          .header(HttpHeaders.SET_COOKIE, authCookieService.clearSessionHintCookie().toString())
           .body(Map.of("message", "Sessao expirada. Faca login novamente."));
     }
   }
@@ -138,6 +161,7 @@ public class AuthController {
     return ResponseEntity.noContent()
         .header(HttpHeaders.SET_COOKIE, authCookieService.clearAccessTokenCookie().toString())
         .header(HttpHeaders.SET_COOKIE, authCookieService.clearRefreshTokenCookie().toString())
+        .header(HttpHeaders.SET_COOKIE, authCookieService.clearSessionHintCookie().toString())
         .build();
   }
 
@@ -145,11 +169,11 @@ public class AuthController {
   public UsuarioResponse me() {
     Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
     if (!(authentication != null && authentication.getPrincipal() instanceof JwtPrincipal jwtPrincipal)) {
-      throw new ApiClientErrorException("Nao autenticado", 401);
+      throw new ApiClientErrorException("Não autenticado", 401);
     }
     return usuarioRepository.findById(jwtPrincipal.userId())
         .map(usuarioMapper::toResponse)
-        .orElseThrow(() -> new ApiClientErrorException("Usuario nao encontrado", 401));
+        .orElseThrow(() -> new ApiClientErrorException("Usuário não encontrado", 401));
   }
 
   private String firstIp(String forwardedFor) {
@@ -189,6 +213,11 @@ public class AuthController {
     return ResponseEntity.ok()
         .header(HttpHeaders.SET_COOKIE, accessCookie.toString())
         .header(HttpHeaders.SET_COOKIE, refreshCookie.toString())
+        .header(
+            HttpHeaders.SET_COOKIE,
+            authCookieService
+                .buildSessionHintCookie(refreshTokenService.refreshTokenExpiresInSeconds())
+                .toString())
         .body(payload);
   }
 }

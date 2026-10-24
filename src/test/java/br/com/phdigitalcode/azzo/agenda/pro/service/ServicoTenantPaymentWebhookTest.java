@@ -86,7 +86,7 @@ class ServicoTenantPaymentWebhookTest {
 
     assertThatThrownBy(() -> service.receber(TOKEN, payload("PAYMENT_CONFIRMED", "pay_1", null)))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("Token de webhook invalido")
+        .hasMessage("Token de webhook inválido")
         .extracting(e -> ((ApiClientErrorException) e).getStatus())
         .isEqualTo(401);
 
@@ -101,12 +101,12 @@ class ServicoTenantPaymentWebhookTest {
 
     assertThatThrownBy(() -> service.receber(TOKEN, payload("   ", "pay_1", null)))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("Payload de webhook invalido")
+        .hasMessage("Payload de webhook inválido")
         .extracting(e -> ((ApiClientErrorException) e).getStatus())
         .isEqualTo(400);
     assertThatThrownBy(() -> service.receber(TOKEN, null))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("Payload de webhook invalido");
+        .hasMessage("Payload de webhook inválido");
   }
 
   @Test
@@ -294,6 +294,38 @@ class ServicoTenantPaymentWebhookTest {
   }
 
   // ---------- helpers ----------
+
+  /**
+   * Pentest 14/10/2026 (INT-005): com o token do PROPRIO salao, mandar o id do sinal, do Pix ou da
+   * assinatura de OUTRO salao confirmava o pagamento dele sem dinheiro nenhum.
+   */
+  @Test
+  @DisplayName("INT-005: confirmacao de registro de outro salao e ignorada")
+  void registroDeOutroSalaoEIgnorado() {
+    prepararEventoNovo();
+    UUID outroSalao = UUID.randomUUID();
+    AppointmentDeposit sinalAlheio = new AppointmentDeposit();
+    sinalAlheio.setTenantId(outroSalao);
+    sinalAlheio.setAppointmentId(UUID.randomUUID());
+    sinalAlheio.setStatus(AppointmentDeposit.STATUS_PENDING);
+    ComandaPagamento pixAlheio = new ComandaPagamento();
+    pixAlheio.setTenantId(outroSalao);
+    pixAlheio.setStatus(ComandaPagamento.STATUS_PENDENTE);
+    ClientMembership assinaturaAlheia = membership(Instant.now(), false);
+    assinaturaAlheia.setTenantId(outroSalao);
+    assinaturaAlheia.setStatus(ClientMembership.STATUS_INADIMPLENTE);
+    when(appointmentDepositRepository.findByAsaasPaymentIdSeguro("pay_1")).thenReturn(Optional.of(sinalAlheio));
+    when(comandaPagamentoRepository.findByAsaasPaymentId("pay_1")).thenReturn(Optional.of(pixAlheio));
+    when(clientMembershipRepository.findByAsaasSubscriptionId("sub_1")).thenReturn(Optional.of(assinaturaAlheia));
+
+    service.receber(TOKEN, payload("PAYMENT_CONFIRMED", "pay_1", "sub_1"));
+
+    assertThat(sinalAlheio.getStatus()).isEqualTo(AppointmentDeposit.STATUS_PENDING);
+    assertThat(sinalAlheio.getPaidAt()).isNull();
+    assertThat(pixAlheio.getStatus()).isEqualTo(ComandaPagamento.STATUS_PENDENTE);
+    assertThat(assinaturaAlheia.getStatus()).isEqualTo(ClientMembership.STATUS_INADIMPLENTE);
+    verify(agendamentoRepository, never()).findById(any());
+  }
 
   private void prepararEventoNovo() {
     when(tenantPaymentSettingsRepository.findByWebhookToken(TOKEN))

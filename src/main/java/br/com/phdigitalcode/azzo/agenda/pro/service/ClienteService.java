@@ -19,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.request.ClienteRequest;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.response.ClienteAddressDto;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.response.ClienteDetailResponse;
+import br.com.phdigitalcode.azzo.agenda.pro.dto.response.ClienteIndicadoresResponse;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.response.ClienteListResponse;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.response.ClienteStatsDto;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.response.ClienteTopServiceDto;
@@ -35,6 +36,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.security.ContextoTenant;
 import br.com.phdigitalcode.azzo.agenda.pro.security.JwtPrincipal;
 import br.com.phdigitalcode.azzo.agenda.pro.util.CorrelatedLogging;
 import br.com.phdigitalcode.azzo.agenda.pro.util.DataUtil;
+import br.com.phdigitalcode.azzo.agenda.pro.util.IndicadoresDoCliente;
 
 /**
  * Espelha {@code modules/customers/application/ServicoClientes.java}.
@@ -56,6 +58,14 @@ public class ClienteService {
   private final ContextoTenant contextoTenant;
   private final AuditService auditService;
   private final MinioStorageService minioStorageService;
+
+  /** O que prende o cliente e impede de exclui-lo (analise de 2026-09-16, A6). */
+  @org.springframework.beans.factory.annotation.Autowired
+  private VinculosDeExclusao vinculosDeExclusao;
+
+  /** Chat, notificacoes, reativacao e foto: o que a linha do cliente nao leva junto ao sair. */
+  @org.springframework.beans.factory.annotation.Autowired
+  private RastrosDoTitular rastrosDoTitular;
 
   public ClienteService(
       ClienteRepository clienteRepository,
@@ -111,10 +121,37 @@ public class ClienteService {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Cliente cliente = clienteRepository.findByIdAndTenantId(id, tenantId).orElseThrow(() -> {
       LOG.warn("customers.getById.notFound {}", CorrelatedLogging.context("tenantId", tenantId, "clientId", id));
-      return new IllegalArgumentException("Cliente nao encontrado");
+      return new IllegalArgumentException("Cliente não encontrado");
     });
     LOG.info("customers.getById.completed {}", CorrelatedLogging.context("tenantId", tenantId, "clientId", id));
     return toDetailResponse(cliente, clienteStatsRepository.findStatsByTenantAndClient(tenantId, cliente.getId()), List.of());
+  }
+
+  /** Indicadores da ficha: frequencia, retorno previsto, comparecimento e gasto em 12 meses. */
+  @Transactional(readOnly = true)
+  public ClienteIndicadoresResponse indicadores(UUID id) {
+    UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    Cliente cliente = clienteRepository.findByIdAndTenantId(id, tenantId).orElseThrow(() -> {
+      LOG.warn("customers.indicators.notFound {}", CorrelatedLogging.context("tenantId", tenantId, "clientId", id));
+      return new IllegalArgumentException("Cliente não encontrado");
+    });
+    java.time.LocalDate hoje = java.time.LocalDate.now(java.time.ZoneId.of("America/Sao_Paulo"));
+    java.time.LocalDate desde = hoje.minusMonths(12);
+    var brutos = clienteStatsRepository.findIndicadoresBrutos(tenantId, cliente.getId(), desde, hoje);
+
+    ClienteIndicadoresResponse r = new ClienteIndicadoresResponse();
+    r.since = desde.toString();
+    r.averageIntervalDays = IndicadoresDoCliente.intervaloMedioEmDias(brutos.diasDeVisita());
+    if (r.averageIntervalDays != null) {
+      java.time.LocalDate ultima = brutos.diasDeVisita().stream().max(java.time.LocalDate::compareTo).orElseThrow();
+      r.expectedReturn = ultima.plusDays(r.averageIntervalDays).toString();
+    }
+    r.attended = brutos.concluidos();
+    r.noShows = brutos.faltas();
+    r.cancelled = brutos.cancelados();
+    r.attendanceRate = IndicadoresDoCliente.taxaDeComparecimento(brutos.concluidos(), brutos.faltas());
+    r.spentLast12Months = brutos.gastoDesde();
+    return r;
   }
 
   @Transactional
@@ -140,7 +177,7 @@ public class ClienteService {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Cliente c = clienteRepository.findByIdAndTenantId(id, tenantId).orElseThrow(() -> {
       LOG.warn("customers.update.notFound {}", CorrelatedLogging.context("tenantId", tenantId, "clientId", id));
-      return new IllegalArgumentException("Cliente nao encontrado");
+      return new IllegalArgumentException("Cliente não encontrado");
     });
 
     ClienteStats beforeStats = clienteStatsRepository.findStatsByTenantAndClient(tenantId, c.getId());
@@ -164,13 +201,33 @@ public class ClienteService {
     Cliente before = clienteRepository.findByIdAndTenantId(id, tenantId).orElse(null);
     if (before == null) {
       LOG.warn("customers.delete.notFound {}", CorrelatedLogging.context("tenantId", tenantId, "clientId", id));
-      throw new IllegalArgumentException("Cliente nao encontrado");
+      throw new IllegalArgumentException("Cliente não encontrado");
     }
+    // Cliente com historico nao se apaga: o banco levava junto os pacotes COMPRADOS e as
+    // assinaturas (dinheiro recebido, sessoes devidas), e o resto estourava como "erro
+    // inesperado". Para tirar os dados pessoais, o caminho e a anonimizacao da LGPD, que mantem o
+    // historico sem dono identificavel (analise de 2026-09-16, A6).
+    List<String> vinculos = vinculosDeExclusao.doCliente(tenantId, id);
+    if (!vinculos.isEmpty()) {
+      LOG.warn("customers.delete.blocked {}", CorrelatedLogging.context(
+          "tenantId", tenantId, "clientId", id, "vinculos", vinculos));
+      throw new IllegalArgumentException(
+          "Este cliente tem " + String.join(", ", vinculos)
+              + " e não pode ser excluído. Para remover os dados pessoais, use a anonimizacao"
+              + " (LGPD).");
+    }
+
     ClienteStats stats = clienteStatsRepository.findStatsByTenantAndClient(tenantId, before.getId());
     Map<String, Object> snapshot = resumoCliente(before, stats);
+    // Antes do delete: depois dele o ciclo de reativacao perde o client_id (SET NULL) e a conversa
+    // fica orfa, com o telefone, sem ninguem que a alcance.
+    rastrosDoTitular.limpar(before);
     clienteRepository.delete(before);
 
     auditar(tenantId, "CLIENT_DELETE", snapshot, null, id);
+    // Sem historico (checado acima), nao ha venda a preservar: a linha do cliente saiu, entao o
+    // retrato na auditoria seria o unico resto do dado pessoal. Sem try/catch: se falhar, desfaz.
+    auditService.redigirDadosPessoaisDoCliente(tenantId, id);
     LOG.info("customers.delete.completed {}", CorrelatedLogging.context("tenantId", tenantId, "clientId", id));
   }
 
@@ -179,7 +236,7 @@ public class ClienteService {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Cliente cliente = clienteRepository.findByIdAndTenantId(id, tenantId).orElseThrow(() -> {
       LOG.warn("customers.avatar.update.notFound {}", CorrelatedLogging.context("tenantId", tenantId, "clientId", id));
-      return new IllegalArgumentException("Cliente nao encontrado");
+      return new IllegalArgumentException("Cliente não encontrado");
     });
 
     String avatarAnterior = cliente.getAvatar();
@@ -203,7 +260,7 @@ public class ClienteService {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Cliente cliente = clienteRepository.findByIdAndTenantId(id, tenantId).orElseThrow(() -> {
       LOG.warn("customers.avatar.remove.notFound {}", CorrelatedLogging.context("tenantId", tenantId, "clientId", id));
-      return new IllegalArgumentException("Cliente nao encontrado");
+      return new IllegalArgumentException("Cliente não encontrado");
     });
 
     String avatarAnterior = cliente.getAvatar();
@@ -231,7 +288,7 @@ public class ClienteService {
   private void aplicar(ClienteRequest req, Cliente c) {
     c.setName(normalizeText(req.name));
     c.setEmail(normalizeEmail(req.email));
-    c.setPhone(normalizeDigits(req.phone));
+    c.setPhone(br.com.phdigitalcode.azzo.agenda.pro.util.TelefoneBr.normalizarSeMudou(req.phone, c.getPhone()));
     c.setBirthDate(DataUtil.parseDataISO(req.birthDate));
     c.setNotes(normalizeText(req.notes));
     c.setCpfCnpj(normalizeDigits(req.cpfCnpj));

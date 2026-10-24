@@ -7,7 +7,7 @@
   <parent>
     <groupId>org.springframework.boot</groupId>
     <artifactId>spring-boot-starter-parent</artifactId>
-    <version>4.1.0</version>
+    <version>4.1.1</version>
     <relativePath/>
   </parent>
 
@@ -22,13 +22,18 @@
 
   <properties>
     <java.version>25</java.version>
+    <!-- Pentest 14/10/2026 (SCA): por cima da Boot 4.1.1, que ainda fixa Tomcat 11.0.24 e Jackson 3.1.5/2.21.5
+         (CVE-2026-65182 critica; CVE-2026-89425/89407/91777/91776/68497 altas). -->
+    <tomcat.version>11.0.25</tomcat.version>
+    <jackson-bom.version>3.1.7</jackson-bom.version>
+    <jackson-2-bom.version>2.21.7</jackson-2-bom.version>
     <bcrypt.version>0.10.2</bcrypt.version>
     <bucket4j.version>8.10.1</bucket4j.version>
     <jjwt.version>0.12.6</jjwt.version>
     <springdoc.version>2.8.6</springdoc.version>
     <!-- Mesmas versoes do pom do Quarkus original (importacao em massa de estoque). -->
-    <minio.version>8.5.12</minio.version>
-    <poi.version>5.3.0</poi.version>
+    <minio.version>8.6.0</minio.version>
+    <poi.version>5.4.0</poi.version>
     <openpdf.version>1.3.39</openpdf.version>
     <spring-dotenv.version>5.0.1</spring-dotenv.version>
     <!--
@@ -38,7 +43,7 @@
       transitiva (via jjwt-jackson/minio/springdoc). Fixamos aqui como dependencia direta + o bean
       em config/JacksonLegacyConfig.java para nao depender de transitividade fragil.
     -->
-    <jackson2.version>2.21.4</jackson2.version>
+    <jackson2.version>2.21.7</jackson2.version>
   </properties>
 
   <dependencies>
@@ -60,9 +65,15 @@
     </dependency>
 
     <!-- Flyway -->
+    <!-- ATENCAO: usar o STARTER, nao apenas org.flywaydb:flyway-core. No Spring Boot 4 a
+         autoconfiguracao do Flyway foi movida para o modulo dedicado spring-boot-flyway
+         (org.springframework.boot.flyway.autoconfigure.FlywayAutoConfiguration). Declarar so a
+         lib crua faz o Flyway simplesmente NUNCA rodar no boot — sem erro, sem log, sem aviso.
+         Com ddl-auto=none e 124 migrations, isso significa schema nunca criado nem atualizado.
+         Diagnosticado em 2026-08-19 comparando com o api_assistant, que ja usava o starter. -->
     <dependency>
-      <groupId>org.flywaydb</groupId>
-      <artifactId>flyway-core</artifactId>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-flyway</artifactId>
     </dependency>
     <dependency>
       <groupId>org.flywaydb</groupId>
@@ -138,6 +149,32 @@
       <groupId>io.micrometer</groupId>
       <artifactId>micrometer-registry-prometheus</artifactId>
     </dependency>
+    <!-- Traces (OpenTelemetry -> Tempo por OTLP): caminho de cada requisicao, e o traceId no log
+         e na resposta de erro. Ver management.opentelemetry em application*.yml. -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-opentelemetry</artifactId>
+      <exclusions>
+        <!-- O exportador padrao usa okhttp 5, que conflita com o okhttp 4 + okio 3.6 do cliente do
+             MinIO (NoSuchMethodError okio.Okio.socket ao enviar os traces). Envio pelo HttpClient
+             do proprio JDK, abaixo — sem mexer no MinIO. -->
+        <exclusion>
+          <groupId>io.opentelemetry</groupId>
+          <artifactId>opentelemetry-exporter-sender-okhttp</artifactId>
+        </exclusion>
+      </exclusions>
+    </dependency>
+    <dependency>
+      <groupId>io.opentelemetry</groupId>
+      <artifactId>opentelemetry-exporter-sender-jdk</artifactId>
+    </dependency>
+    <!-- Consultas SQL dentro do trace (texto e tempo de cada uma, e a espera por conexao do pool).
+         Os VALORES dos parametros ficam de fora — ver jdbc.* em application.yml. -->
+    <dependency>
+      <groupId>net.ttddyy.observation</groupId>
+      <artifactId>datasource-micrometer-spring-boot</artifactId>
+      <version>2.3.0</version>
+    </dependency>
 
     <!-- OpenAPI -->
     <dependency>
@@ -151,6 +188,14 @@
       <groupId>io.minio</groupId>
       <artifactId>minio</artifactId>
       <version>${minio.version}</version>
+    </dependency>
+    <!-- MinIO 8.6 usa okhttp 5, que e Kotlin Multiplatform: no Maven o artefato "okhttp" so traz os
+         metadados, e as classes JVM ficam em okhttp-jvm (o Gradle resolve sozinho, o Maven nao).
+         Sem isto: "cannot access okhttp3.HttpUrl" na compilacao. -->
+    <dependency>
+      <groupId>com.squareup.okhttp3</groupId>
+      <artifactId>okhttp-jvm</artifactId>
+      <version>5.1.0</version>
     </dependency>
 
     <!-- Planilhas XLSX: modelo de importacao e parse do arquivo enviado -->
@@ -255,6 +300,13 @@
 
   <dependencyManagement>
     <dependencies>
+      <!-- Pentest 14/10/2026 (SCA): o MinIO 8.6.0 traz a BouncyCastle 1.81, ainda com
+           CVE-2026-8763 (critica) e CVE-2026-13506 (alta), corrigidas na 1.85. -->
+      <dependency>
+        <groupId>org.bouncycastle</groupId>
+        <artifactId>bcprov-jdk18on</artifactId>
+        <version>1.86</version>
+      </dependency>
       <dependency>
         <groupId>org.testcontainers</groupId>
         <artifactId>testcontainers-bom</artifactId>

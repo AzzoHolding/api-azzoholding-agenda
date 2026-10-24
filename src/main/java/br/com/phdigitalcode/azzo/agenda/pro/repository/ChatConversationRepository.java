@@ -41,6 +41,24 @@ public interface ChatConversationRepository extends JpaRepository<ChatConversati
       nativeQuery = true)
   int clearUnreadRaw(@Param("tenantId") UUID tenantId, @Param("id") UUID id);
 
+  /**
+   * Apaga do chat o que identifica o titular anonimizado.
+   *
+   * O {@code external_contact_id} e o TELEFONE de quem escreveu, e a previa guarda um pedaco da
+   * ultima mensagem: anonimizar so a ficha do cliente deixava o numero e o texto intactos aqui.
+   * Zerar o contato tambem faz a proxima mensagem daquele numero abrir uma conversa nova, que e o
+   * comportamento certo depois de um pedido de exclusao.
+   */
+  @Modifying
+  @Transactional
+  @Query(
+      value =
+          "UPDATE chat_conversations SET external_contact_id = NULL, last_message_preview = NULL, "
+              + "manual_mode_reason = NULL, updated_at = NOW() "
+              + "WHERE tenant_id = :tenantId AND client_id = :clientId",
+      nativeQuery = true)
+  int anonimizarPorClienteRaw(@Param("tenantId") UUID tenantId, @Param("clientId") UUID clientId);
+
   Optional<ChatConversationEntity> findByTenantIdAndId(UUID tenantId, UUID id);
 
   Optional<ChatConversationEntity> findByTenantIdAndClientIdAndChannel(
@@ -256,6 +274,12 @@ public interface ChatConversationRepository extends JpaRepository<ChatConversati
       if (o instanceof Instant i) return i;
       if (o instanceof Timestamp ts) return ts.toInstant();
       if (o instanceof OffsetDateTime odt) return odt.toInstant();
+      // manual_mode_until e "timestamp without time zone": a consulta nativa devolve LocalDateTime.
+      // Sem isto a lista do chat lia o modo manual sempre desligado — nem "Voce esta respondendo"
+      // nem "Pediu atendente" apareciam (24/10/2026). O valor chega ja no fuso da JVM: o banco tem
+      // 17:40 (UTC) e a linha traz 14:40 com a JVM em America/Sao_Paulo. Ler como UTC adiantava o
+      // fim do modo manual em 3h (conferido em producao no mesmo dia).
+      if (o instanceof java.time.LocalDateTime ldt) return ldt.atZone(java.time.ZoneId.systemDefault()).toInstant();
       return null;
     }
 

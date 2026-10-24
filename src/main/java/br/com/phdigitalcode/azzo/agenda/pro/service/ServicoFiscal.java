@@ -165,7 +165,7 @@ public class ServicoFiscal {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     FiscalDtos.Invoice atual = fiscalProvider.obterInvoice(tenantId, id);
     if (atual == null) {
-      throw new IllegalArgumentException("Invoice nao encontrada para atualizacao.");
+      throw new IllegalArgumentException("Invoice não encontrada para atualizacao.");
     }
     if (!"DRAFT".equalsIgnoreCase(atual.status)) {
       throw new IllegalArgumentException("Somente invoices em rascunho podem ser alteradas.");
@@ -365,7 +365,7 @@ public class ServicoFiscal {
 
     if (!fiscalDocumentStateMachine.canReach(from.get(), to.get())) {
       throw new FiscalStateTransitionException(
-          String.format("Transicao fiscal invalida: %s -> %s (%s)", from.get(), to.get(), operacao));
+          String.format("Transicao fiscal inválida: %s -> %s (%s)", from.get(), to.get(), operacao));
     }
   }
 
@@ -449,22 +449,22 @@ public class ServicoFiscal {
     if (status.isPresent()
         && status.get() == FiscalDocumentStatus.AUTHORIZED
         && (invoice.authorizationProtocol == null || invoice.authorizationProtocol.isBlank())) {
-      throw new FiscalStateTransitionException("Documento fiscal nao pode ficar AUTHORIZED sem protocolo SEFAZ");
+      throw new FiscalStateTransitionException("Documento fiscal não pode ficar AUTHORIZED sem protocolo SEFAZ");
     }
   }
 
   private void validarEstruturaMinimaAntesDeAssinar(FiscalDtos.Invoice invoice) {
     if (invoice == null) {
-      throw new IllegalArgumentException("Invoice fiscal nao encontrada para autorizacao.");
+      throw new IllegalArgumentException("Invoice fiscal não encontrada para autorização.");
     }
     if (invoice.customer == null) {
-      throw new IllegalArgumentException("Invoice sem destinatario/cliente para autorizacao.");
+      throw new IllegalArgumentException("Invoice sem destinatario/cliente para autorização.");
     }
     if (invoice.items == null || invoice.items.isEmpty()) {
-      throw new IllegalArgumentException("Invoice sem itens para autorizacao.");
+      throw new IllegalArgumentException("Invoice sem itens para autorização.");
     }
     if (invoice.type == null || invoice.type.isBlank()) {
-      throw new IllegalArgumentException("Invoice sem modelo fiscal definido para autorizacao.");
+      throw new IllegalArgumentException("Invoice sem modelo fiscal definido para autorização.");
     }
   }
 
@@ -472,7 +472,7 @@ public class ServicoFiscal {
       FiscalDtos.Invoice atual, FiscalDtos.CancelInvoiceRequest request) {
     String motivo = request != null ? request.reason : null;
     if (motivo == null || motivo.isBlank()) {
-      throw new IllegalArgumentException("Motivo de cancelamento obrigatorio.");
+      throw new IllegalArgumentException("Motivo de cancelamento obrigatório.");
     }
 
     if (atual == null || atual.status == null || atual.status.isBlank()) {
@@ -481,7 +481,7 @@ public class ServicoFiscal {
 
     var statusAtual = FiscalDocumentStatus.tryParse(atual.status);
     if (statusAtual.isEmpty()) {
-      throw new FiscalStateTransitionException("Status fiscal invalido para cancelamento: " + atual.status);
+      throw new FiscalStateTransitionException("Status fiscal inválido para cancelamento: " + atual.status);
     }
 
     boolean permitido =

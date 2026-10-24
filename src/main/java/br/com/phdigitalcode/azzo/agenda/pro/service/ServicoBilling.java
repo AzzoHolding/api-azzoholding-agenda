@@ -125,7 +125,7 @@ public class ServicoBilling {
         paymentHandlers.stream()
             .filter(h -> h.supports(normalizedRequest.billingType))
             .findFirst()
-            .orElseThrow(() -> new IllegalArgumentException("Forma de pagamento nao suportada"));
+            .orElseThrow(() -> new IllegalArgumentException("Forma de pagamento não suportada"));
     LOG.info(
         CorrelatedLogging.context(
             "Criacao de assinatura iniciada",
@@ -188,7 +188,7 @@ public class ServicoBilling {
           CorrelatedLogging.context(
               "Troca de plano bloqueada", "tenantId", tenantId, "reason", "valid_until_missing"));
       throw new ApiClientErrorException(
-          "Troca de plano so e permitida no trial ou nos ultimos 10 dias antes do vencimento.",
+          "Troca de plano só é permitida no trial ou nos ultimos 10 dias antes do vencimento.",
           422);
     }
 
@@ -313,7 +313,7 @@ public class ServicoBilling {
    */
   private Product resolvePlanoAtivo(BillingDtos.CreateSubscriptionRequest request) {
     if (request == null) {
-      throw new IllegalArgumentException("request obrigatorio");
+      throw new IllegalArgumentException("request obrigatório");
     }
 
     String rawProductId = request.productId;
@@ -325,13 +325,13 @@ public class ServicoBilling {
     }
 
     if (rawProductId == null || rawProductId.isBlank()) {
-      throw new IllegalArgumentException("productId obrigatorio");
+      throw new IllegalArgumentException("productId obrigatório");
     }
 
     Product product = productRepository.findActivePaidByIdentifier(rawProductId).orElse(null);
     if (product == null) {
       throw new IllegalArgumentException(
-          "Plano nao encontrado ou inativo (use productId/planCode de plano pago ativo)");
+          "Plano não encontrado ou inativo (use productId/planCode de plano pago ativo)");
     }
 
     return product;
@@ -435,7 +435,7 @@ public class ServicoBilling {
               "tenantId", tenantId,
               "subscriptionId", subscription.getAsaasSubscriptionId(),
               "reason", "already_cancelled"));
-      throw new ApiClientErrorException("A assinatura ja foi cancelada.", 409);
+      throw new ApiClientErrorException("A assinatura já foi cancelada.", 409);
     }
 
     asaasService.cancelarAssinaturaAtiva(subscription.getAsaasSubscriptionId());
@@ -455,7 +455,7 @@ public class ServicoBilling {
     response.status = subscription.getStatus().name();
     response.cancelledAt = subscription.getCancelledAt().toString();
     response.message =
-        "Assinatura cancelada. Seu acesso permanece ate o vencimento do periodo atual.";
+        "Assinatura cancelada. Seu acesso permanece até o vencimento do período atual.";
     LOG.info(
         CorrelatedLogging.context(
             "Cancelamento de assinatura concluido",

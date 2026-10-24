@@ -57,8 +57,8 @@ public class FiscalIdempotencyService {
       String idempotencyKey,
       Supplier<T> supplier,
       Class<T> responseType) {
-    if (supplier == null) throw new IllegalArgumentException("supplier obrigatorio");
-    if (responseType == null) throw new IllegalArgumentException("responseType obrigatorio");
+    if (supplier == null) throw new IllegalArgumentException("supplier obrigatório");
+    if (responseType == null) throw new IllegalArgumentException("responseType obrigatório");
     if (tenantId == null
         || operation == null
         || operation.isBlank()

@@ -42,4 +42,8 @@ public interface ImportacaoClienteJobRepository extends JpaRepository<Importacao
       """)
   List<UUID> listarIdsPendentes(
       @Param("statuses") List<StatusImportacaoCliente> statuses, Pageable pageable);
+
+  /** Jobs que ja terminaram e ainda tem a planilha no storage (limpeza LGPD). */
+  List<ImportacaoClienteJob> findByStatusNotInAndArquivoStorageKeyIsNotNull(
+      List<StatusImportacaoCliente> statuses);
 }

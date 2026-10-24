@@ -21,4 +21,6 @@ public class ProfissionalRequest {
   @Min(0) public BigDecimal commissionRate;
   public List<WorkingHoursDto> workingHours;
   public boolean isActive = true;
+  /** Aparece para marcar horario. Ausente: no cadastro vale {@code true}; na edicao, mantem. */
+  public Boolean acceptsAppointments;
 }

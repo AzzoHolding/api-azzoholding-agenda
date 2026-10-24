@@ -39,6 +39,22 @@ public interface AuditEventRepository
       @Param("entityId") String entityId,
       Limit limit);
 
+  /** Os eventos da entidade que ainda guardam o conteudo original (para a redacao de LGPD). */
+  @Query(
+      "select e from AuditEvent e where e.tenantId = :tenantId and e.entityType = :entityType "
+          + "and e.entityId = :entityId and e.redactedAt is null")
+  List<AuditEvent> findNaoRedigidosDaEntidade(
+      @Param("tenantId") UUID tenantId,
+      @Param("entityType") String entityType,
+      @Param("entityId") String entityId);
+
+  /**
+   * Liga, SO nesta transacao, a excecao do gatilho de {@code audit_events} que permite a redacao.
+   * Sem isto o UPDATE e recusado ("append-only table").
+   */
+  @Query(value = "select set_config('app.audit_redaction', 'on', true)", nativeQuery = true)
+  String habilitarRedacaoNestaTransacao();
+
   /**
    * Guardas de entrada e normalizacao do original: argumento nulo/em branco devolve lista vazia sem
    * tocar no banco, {@code limit <= 0} vira 100 e o teto e 200.
@@ -129,8 +145,11 @@ public interface AuditEventRepository
           WHERE tenant_id = :tenantId
             AND module <> :systemModule
             AND actor_user_id IS NOT NULL
-            AND (:from IS NULL OR created_at >= :from)
-            AND (:to IS NULL OR created_at <= :to)
+            -- CAST obrigatorio: em `:from IS NULL` o Postgres nao tem como deduzir o tipo do
+            -- parametro e recusa a consulta inteira ("could not determine data type of parameter"),
+            -- com ou sem valor. A tela de auditoria ficava sem os filtros (achado de 2026-09-20).
+            AND (CAST(:from AS timestamptz) IS NULL OR created_at >= CAST(:from AS timestamptz))
+            AND (CAST(:to AS timestamptz) IS NULL OR created_at <= CAST(:to AS timestamptz))
           ORDER BY module, status, action, entity_type, source_channel
           """,
       nativeQuery = true)

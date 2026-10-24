@@ -29,7 +29,7 @@ public class FiscalXmlBuilderService {
   private static final String XSD_RESOURCE = "/fiscal/xsd/fiscal-invoice-minimal.xsd";
 
   public String buildAndValidate(FiscalDtos.Invoice invoice) {
-    if (invoice == null) throw new IllegalArgumentException("Invoice obrigatoria para gerar XML fiscal.");
+    if (invoice == null) throw new IllegalArgumentException("Invoice obrigatória para gerar XML fiscal.");
     String xml = build(invoice);
     validate(xml);
     return xml;
@@ -60,10 +60,10 @@ public class FiscalXmlBuilderService {
       Validator validator = schema.newValidator();
       validator.validate(new StreamSource(new StringReader(xml)));
     } catch (SAXException e) {
-      throw new IllegalArgumentException("XML fiscal invalido para o schema MVP.", e);
+      throw new IllegalArgumentException("XML fiscal inválido para o schema MVP.", e);
     } catch (Exception e) {
       LOG.error("Falha ao validar XML fiscal contra schema MVP.");
-      throw new IllegalStateException("Falha na validacao estrutural de XML fiscal.", e);
+      throw new IllegalStateException("Falha na validação estrutural de XML fiscal.", e);
     }
   }
 

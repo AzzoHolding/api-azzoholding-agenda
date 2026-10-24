@@ -64,6 +64,24 @@ public class EmailJobService {
   }
 
   @Transactional
+  public void enqueueEmailVerification(
+      Usuario usuario,
+      br.com.phdigitalcode.azzo.agenda.pro.entity.EmailVerificationToken token,
+      String confirmUrl) {
+    EmailJob job = new EmailJob();
+    job.setTenantId(usuario.getTenantId());
+    job.setUserId(usuario.getId());
+    job.setRelatedEntityType("EMAIL_VERIFICATION_TOKEN");
+    job.setRelatedEntityId(token.getId());
+    job.setEmailType(EmailJobType.EMAIL_VERIFICATION);
+    job.setRecipientEmail(usuario.getEmail());
+    job.setRecipientName(usuario.getName());
+    job.setPayloadJson(toJson(new EmailVerificationEmailPayload(confirmUrl, token.getId())));
+    job.setStatus(EmailJobStatus.NEW);
+    emailJobRepository.save(job);
+  }
+
+  @Transactional
   public int processPendingJobsAsync(Runnable onComplete) {
     List<EmailJob> jobs = emailJobRepository.findNextNewBatch(Math.max(batchSize, 1));
     if (jobs.isEmpty()) return 0;

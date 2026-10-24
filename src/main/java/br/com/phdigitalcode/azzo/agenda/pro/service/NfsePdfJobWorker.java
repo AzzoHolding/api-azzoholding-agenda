@@ -99,7 +99,7 @@ public class NfsePdfJobWorker {
       NfseInvoiceEntity invoice =
           nfseInvoiceRepository
               .findById(job.getInvoiceId())
-              .orElseThrow(() -> new ApiClientErrorException("NFS-e nao encontrada para processamento do PDF.", 404));
+              .orElseThrow(() -> new ApiClientErrorException("NFS-e não encontrada para processamento do PDF.", 404));
       invoice.setOperationalStatus(NfseOperationalStatus.PROCESSING_PDF);
       List<NfseInvoiceItemEntity> items =
           nfseInvoiceItemRepository.listByTenantAndInvoice(job.getTenantId(), job.getInvoiceId());

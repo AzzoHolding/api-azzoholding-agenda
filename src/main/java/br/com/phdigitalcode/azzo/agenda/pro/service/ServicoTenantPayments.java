@@ -78,7 +78,7 @@ public class ServicoTenantPayments {
 
     String apiKey = trimToNull(request.apiKey);
     if (apiKey == null) {
-      throw new IllegalArgumentException("Chave de API do Asaas e obrigatoria.");
+      throw new IllegalArgumentException("Chave de API do Asaas é obrigatória.");
     }
     validarChaveNoAsaas(apiKey);
 
@@ -106,7 +106,7 @@ public class ServicoTenantPayments {
           Map.of("success", false, "status", e.getStatusCode().value()),
           false);
       throw new IllegalArgumentException(
-          "Nao foi possivel validar a chave de API informada junto ao Asaas. Revise a chave e o"
+          "Não foi possível validar a chave de API informada junto ao Asaas. Revise a chave e o"
               + " ambiente selecionado.",
           e);
     }

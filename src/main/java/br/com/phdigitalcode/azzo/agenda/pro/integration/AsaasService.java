@@ -139,7 +139,7 @@ public class AsaasService {
       LOG.info("Asaas desabilitado por configuracao; customer nao sera provisionado");
       return;
     }
-    if (tenant == null) throw new IllegalArgumentException("Tenant invalido para billing");
+    if (tenant == null) throw new IllegalArgumentException("Tenant inválido para billing");
     if (tenant.getAsaasCustomerId() != null && !tenant.getAsaasCustomerId().isBlank()) return;
 
     AsaasDtos.CreateCustomerRequest req = new AsaasDtos.CreateCustomerRequest();
@@ -201,7 +201,7 @@ public class AsaasService {
           CorrelatedLogging.traceId(),
           tenant.getId(),
           e);
-      throw new AsaasException("Falha de integracao com Asaas", 502, e);
+      throw new AsaasException("Falha de integração com Asaas", 502, e);
     }
   }
 
@@ -209,11 +209,11 @@ public class AsaasService {
   public BillingDtos.SubscriptionResponse createMonthlySubscriptionForCurrentTenant(
       BillingDtos.CreateSubscriptionRequest request, String remoteIp) {
     if (!asaasEnabled) {
-      throw new IllegalStateException("Integracao Asaas desabilitada");
+      throw new IllegalStateException("Integração Asaas desabilitada");
     }
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Tenant tenant = tenantRepository.findById(tenantId).orElse(null);
-    if (tenant == null) throw new IllegalArgumentException("Tenant nao encontrado");
+    if (tenant == null) throw new IllegalArgumentException("Tenant não encontrado");
 
     ensureCustomerForTenant(tenant, request.cpfCnpj);
 
@@ -236,7 +236,7 @@ public class AsaasService {
     asaasRequest.remoteIp = remoteIp;
     if ("CREDIT_CARD".equals(request.billingType)) {
       if (request.creditCard == null || request.creditCardHolderInfo == null) {
-        throw new IllegalArgumentException("Dados de cartao sao obrigatorios para CREDIT_CARD");
+        throw new IllegalArgumentException("Dados de cartão são obrigatórios para CREDIT_CARD");
       }
       asaasRequest.creditCard = new AsaasDtos.CreditCard();
       asaasRequest.creditCard.holderName = request.creditCard.holderName;
@@ -332,7 +332,7 @@ public class AsaasService {
               CorrelatedLogging.traceId(),
               tenantId,
               retryEx);
-          throw new AsaasException("Falha de integracao com Asaas", 502, retryEx);
+          throw new AsaasException("Falha de integração com Asaas", 502, retryEx);
         }
       } else {
         persistIntegrationLog(
@@ -370,7 +370,7 @@ public class AsaasService {
           CorrelatedLogging.traceId(),
           tenantId,
           e);
-      throw new AsaasException("Falha de integracao com Asaas", 502, e);
+      throw new AsaasException("Falha de integração com Asaas", 502, e);
     }
 
     Subscription subscription = new Subscription();
@@ -509,7 +509,7 @@ public class AsaasService {
       return;
     }
     if (payload == null || payload.event == null || payload.event.isBlank()) {
-      throw new IllegalArgumentException("Webhook Asaas invalido");
+      throw new IllegalArgumentException("Webhook Asaas inválido");
     }
     if (!SUPPORTED_EVENTS.contains(payload.event)) {
       LOG.info("Webhook Asaas ignorado por evento nao mapeado: {}", payload.event);
@@ -528,7 +528,7 @@ public class AsaasService {
     UUID tenantId = tenant != null ? tenant.getId() : null;
     if (tenantId == null && payload.payment != null) {
       throw new IllegalArgumentException(
-          "Nao foi possivel identificar tenant para o webhook Asaas");
+          "Não foi possível identificar tenant para o webhook Asaas");
     }
     LOG.info(
         CorrelatedLogging.context(
@@ -824,12 +824,12 @@ public class AsaasService {
 
   private void validateWebhookToken(String providedToken) {
     if (webhookToken == null || webhookToken.isBlank() || "__unset__".equals(webhookToken)) {
-      throw new ApiClientErrorException("ASAAS_WEBHOOK_TOKEN nao configurado", 401);
+      throw new ApiClientErrorException("ASAAS_WEBHOOK_TOKEN não configurado", 401);
     }
     byte[] expected = safeTokenBytes(webhookToken);
     byte[] provided = safeTokenBytes(providedToken);
     if (expected.length == 0 || !MessageDigest.isEqual(expected, provided)) {
-      throw new ApiClientErrorException("Token de webhook invalido", 401);
+      throw new ApiClientErrorException("Token de webhook inválido", 401);
     }
   }
 
@@ -979,7 +979,7 @@ public class AsaasService {
 
   private String requiredApiKey() {
     if (asaasApiKey == null || asaasApiKey.isBlank() || "__unset__".equals(asaasApiKey)) {
-      throw new IllegalStateException("ASAAS_API_KEY nao configurada");
+      throw new IllegalStateException("ASAAS_API_KEY não configurada");
     }
     return asaasApiKey.trim();
   }

@@ -12,12 +12,12 @@ public enum ChatMessageStatus {
 
   public static ChatMessageStatus from(String value) {
     if (value == null || value.isBlank()) {
-      throw new IllegalArgumentException("Status da mensagem obrigatorio.");
+      throw new IllegalArgumentException("Status da mensagem obrigatório.");
     }
     try {
       return ChatMessageStatus.valueOf(value.trim().toUpperCase(Locale.ROOT));
     } catch (IllegalArgumentException e) {
-      throw new IllegalArgumentException("Status da mensagem invalido: " + value);
+      throw new IllegalArgumentException("Status da mensagem inválido: " + value);
     }
   }
 }

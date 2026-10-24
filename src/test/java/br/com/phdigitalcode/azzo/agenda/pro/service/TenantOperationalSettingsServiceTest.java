@@ -416,6 +416,55 @@ class TenantOperationalSettingsServiceTest {
   }
 
   @Test
+  @DisplayName("teto de desconto: padrao 100 (sem teto) e grava o que o dono escolheu")
+  void tetoDeDescontoGravaEDefaultEhSemTeto() {
+    TenantOperationalSettings entidade = novaEntidade();
+    when(repository.findById(tenantId)).thenReturn(Optional.of(entidade));
+
+    assertThat(service.getDiscountPolicy(tenantId).maxDiscountPercent).isEqualTo(100);
+
+    SettingsDtos.DiscountPolicyRequest request = new SettingsDtos.DiscountPolicyRequest();
+    request.maxDiscountPercent = 15;
+    assertThat(service.updateDiscountPolicy(tenantId, request).maxDiscountPercent).isEqualTo(15);
+    assertThat(entidade.getPosMaxDiscountPercent()).isEqualTo(15);
+  }
+
+  /**
+   * Fora de 0..100 o pedido e RECUSADO, e nao ignorado como nos campos antigos daqui: um teto que a
+   * tela acha que salvou e o servidor descartou seria pior que nao ter teto.
+   */
+  @Test
+  @DisplayName("teto de desconto fora de 0..100 e recusado")
+  void tetoDeDescontoForaDaFaixaEhRecusado() {
+    TenantOperationalSettings entidade = novaEntidade();
+    entidade.setPosMaxDiscountPercent(15);
+    when(repository.findById(tenantId)).thenReturn(Optional.of(entidade));
+    SettingsDtos.DiscountPolicyRequest request = new SettingsDtos.DiscountPolicyRequest();
+    request.maxDiscountPercent = 150;
+
+    assertThatThrownBy(() -> service.updateDiscountPolicy(tenantId, request))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("0% a 100%");
+    assertThat(entidade.getPosMaxDiscountPercent()).isEqualTo(15);
+  }
+
+  /** Nome de campo errado chegava como nulo e a tela achava que tinha salvo (2026-09-17). */
+  @Test
+  @DisplayName("teto de desconto sem o campo e recusado, e o teto atual fica")
+  void tetoDeDescontoSemOCampoEhRecusado() {
+    TenantOperationalSettings entidade = novaEntidade();
+    entidade.setPosMaxDiscountPercent(15);
+    lenient().when(repository.findById(tenantId)).thenReturn(Optional.of(entidade));
+
+    assertThatThrownBy(() -> service.updateDiscountPolicy(tenantId, new SettingsDtos.DiscountPolicyRequest()))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("maxDiscountPercent");
+    assertThatThrownBy(() -> service.updateDiscountPolicy(tenantId, null))
+        .isInstanceOf(IllegalArgumentException.class);
+    assertThat(entidade.getPosMaxDiscountPercent()).isEqualTo(15);
+  }
+
+  @Test
   @DisplayName("regua de lembretes valida HH:mm e a faixa 1..12 de horasAntes")
   void reminderSettingsValidaFormatoEFaixa() {
     TenantOperationalSettings entidade = novaEntidade();
@@ -496,7 +545,7 @@ class TenantOperationalSettingsServiceTest {
   void tipoDeTemplateDesconhecido() {
     assertThatThrownBy(() -> service.getEmailTemplate(tenantId, "INEXISTENTE"))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Tipo de template invalido: INEXISTENTE");
+        .hasMessage("Tipo de template inválido: INEXISTENTE");
   }
 
   // ---------- fechamentos especiais (visao legada do salao) ----------
@@ -530,13 +579,13 @@ class TenantOperationalSettingsServiceTest {
     SalonDtos.SpecialClosureDate semData = new SalonDtos.SpecialClosureDate();
     assertThatThrownBy(() -> service.updateSpecialClosureDates(tenantId, List.of(semData)))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Data especial de fechamento obrigatoria");
+        .hasMessage("Data especial de fechamento obrigatória");
 
     SalonDtos.SpecialClosureDate dataRuim = new SalonDtos.SpecialClosureDate();
     dataRuim.date = "25/12/2026";
     assertThatThrownBy(() -> service.updateSpecialClosureDates(tenantId, List.of(dataRuim)))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Data especial de fechamento invalida");
+        .hasMessage("Data especial de fechamento inválida");
   }
 
   @Test
@@ -578,5 +627,38 @@ class TenantOperationalSettingsServiceTest {
     hours.setCloseTime(LocalTime.parse(close));
     hours.setEnabled(enabled);
     return hours;
+  }
+
+  // ─── Leitura de salao novo nao grava (2026-09-18) ──────────────────────────
+
+  /**
+   * Salao sem configuracao salva: dentro de uma LEITURA (readOnly), o padrao vem em memoria. Antes
+   * gravava e o Postgres recusava ("cannot execute INSERT in a read-only transaction"), quebrando
+   * o perfil do salao, a vitrine publica e os horarios livres.
+   */
+  @Test
+  @DisplayName("horario de funcionamento de salao novo, numa leitura, nao grava nada")
+  void horarioDeSalaoNovoNumaLeituraNaoGrava() {
+    when(repository.findById(tenantId)).thenReturn(Optional.empty());
+    org.springframework.transaction.support.TransactionSynchronizationManager
+        .setCurrentTransactionReadOnly(true);
+    try {
+      assertThat(service.getBusinessHours(tenantId)).isNotEmpty();
+    } finally {
+      org.springframework.transaction.support.TransactionSynchronizationManager
+          .setCurrentTransactionReadOnly(false);
+    }
+    verify(repository, never()).saveAndFlush(any());
+  }
+
+  @Test
+  @DisplayName("fora de uma leitura, o salao novo ganha a linha de configuracao")
+  void horarioDeSalaoNovoForaDeLeituraGrava() {
+    when(repository.findById(tenantId)).thenReturn(Optional.empty());
+    when(repository.saveAndFlush(any())).thenAnswer(inv -> inv.getArgument(0));
+
+    assertThat(service.getBusinessHours(tenantId)).isNotEmpty();
+
+    verify(repository).saveAndFlush(any());
   }
 }

@@ -91,16 +91,16 @@ class GlobalExceptionHandlerTest {
 
   @Test
   void illegalArgumentSemCodigoFuncionalRecebeSufixoCorretivo() {
-    IllegalArgumentException ex = new IllegalArgumentException("Email obrigatorio");
+    IllegalArgumentException ex = new IllegalArgumentException("Email obrigatório");
     ResponseEntity<ErrorResponse> response = handler.handleGeneric(ex);
 
-    assertThat(response.getBody().message).isEqualTo("Email obrigatorio Revise os dados informados e tente novamente.");
+    assertThat(response.getBody().message).isEqualTo("Email obrigatório Revise os dados informados e tente novamente.");
     assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
   }
 
   @Test
   void mensagemComPalavraCredenciaisResultaEmStatus401() {
-    IllegalArgumentException ex = new IllegalArgumentException("Credenciais invalidas");
+    IllegalArgumentException ex = new IllegalArgumentException("Credenciais inválidas");
     ResponseEntity<ErrorResponse> response = handler.handleGeneric(ex);
 
     assertThat(response.getStatusCode().value()).isEqualTo(401);
@@ -129,5 +129,18 @@ class GlobalExceptionHandlerTest {
 
     assertThat(response.getStatusCode().value()).isEqualTo(429);
     assertThat(response.getBody().message).contains("Muitas tentativas em pouco tempo");
+  }
+
+  /** Pentest 14/10/2026 (SEG-013): falha inesperada era 400 e o 401 dependia de uma palavra na mensagem. */
+  @Test
+  void falhaInesperadaE500EUnicaFalhaDeLoginE401() {
+    assertThat(handler.handleGeneric(new NullPointerException("x")).getStatusCode().value()).isEqualTo(500);
+    assertThat(handler.handleGeneric(new IllegalArgumentException("Credenciais inválidas")).getStatusCode().value())
+        .isEqualTo(401);
+    assertThat(handler.handleGeneric(
+            new IllegalArgumentException("Atualize as credenciais da integracao")).getStatusCode().value())
+        .isEqualTo(400);
+    assertThat(handler.handleGeneric(new IllegalArgumentException("Nome obrigatorio")).getStatusCode().value())
+        .isEqualTo(400);
   }
 }

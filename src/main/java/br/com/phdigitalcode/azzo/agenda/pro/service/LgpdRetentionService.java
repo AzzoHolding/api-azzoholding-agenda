@@ -25,14 +25,17 @@ public class LgpdRetentionService {
   private final DataSource dataSource;
   private final TenantSpecialClosureDateRepository tenantSpecialClosureDateRepository;
   private final ReactivationSendLogRepository reactivationSendLogRepository;
+  private final ProcessadorImportacaoClientesService processadorImportacaoClientes;
 
   public LgpdRetentionService(
       DataSource dataSource,
       TenantSpecialClosureDateRepository tenantSpecialClosureDateRepository,
-      ReactivationSendLogRepository reactivationSendLogRepository) {
+      ReactivationSendLogRepository reactivationSendLogRepository,
+      ProcessadorImportacaoClientesService processadorImportacaoClientes) {
     this.dataSource = dataSource;
     this.tenantSpecialClosureDateRepository = tenantSpecialClosureDateRepository;
     this.reactivationSendLogRepository = reactivationSendLogRepository;
+    this.processadorImportacaoClientes = processadorImportacaoClientes;
   }
 
   public void purgarDadosExpirados() {
@@ -40,6 +43,7 @@ public class LgpdRetentionService {
     int whatsapp = purgar("DELETE FROM whatsapp_message_log WHERE expires_at < NOW()");
     LOG.info("LGPD purge concluido: {} webhook_event_logs, {} whatsapp_message_log removidos", webhooks, whatsapp);
     purgarLogsReativacao();
+    purgarDadosSemPrazo();
 
     long fechamentos = purgarFechamentosAntigos();
     LOG.info("Purga LGPD: {} fechamentos especiais com data anterior a 2 anos removidos", fechamentos);
@@ -63,6 +67,33 @@ public class LgpdRetentionService {
     if (deleted > 0) {
       LOG.info("LGPD: {} registros de log de reativacao purgados", deleted);
     }
+  }
+
+  /**
+   * O que nao tinha prazo nenhum ate 2026-10-13 (analise LGPD): notificacoes (telefone e texto com
+   * o nome do cliente), e-mails de senha/confirmacao (e-mail, nome e link com token), linhas com
+   * erro da importacao de clientes (o valor original da planilha) e as proprias planilhas.
+   * Os prazos estao na Politica de Privacidade.
+   */
+  void purgarDadosSemPrazo() {
+    int notificacoes = purgar("DELETE FROM notifications WHERE created_at < NOW() - INTERVAL '180 days'");
+    int emails = purgar(
+        "DELETE FROM email_jobs WHERE status IN ('PROCESSED', 'FAILED') AND created_at < NOW() - INTERVAL '30 days'");
+    int errosDeImportacao = purgar(
+        "DELETE FROM importacao_cliente_erro_linha WHERE created_at < NOW() - INTERVAL '30 days'");
+    // INT-025: senha do certificado A1 em sessao que ja acabou (inclusive as que venceram sem ninguem
+    // consultar, que continuam com status ACTIVE).
+    purgar("UPDATE nfse_certificate_unlock_sessions SET password_enc = NULL "
+        + "WHERE password_enc IS NOT NULL AND (status <> 'ACTIVE' OR expires_at <= NOW())");
+    int planilhas = 0;
+    try {
+      planilhas = processadorImportacaoClientes.limparArquivosDeJobsFinalizados();
+    } catch (RuntimeException e) {
+      LOG.error("LGPD purge falhou ao limpar planilhas de importacao de clientes", e);
+    }
+    LOG.info(
+        "LGPD purge: {} notifications, {} email_jobs, {} linhas de erro de importacao, {} planilhas removidas",
+        notificacoes, emails, errosDeImportacao, planilhas);
   }
 
   public void logDadosExpirados() {

@@ -76,10 +76,13 @@ class FiscalControllerTest {
   }
 
   @Test
-  void classeMantemRolePermitidaDoOriginal() {
+  void classeMantemODonoEAceitaQuemRecebeuOFiscalNumPerfil() {
+    // O original era so OWNER; desde a V128 a classe tambem aceita fiscal:view. As faixas de
+    // operacao e de configuracao estao em FiscalGatesTest.
     PreAuthorize preAuthorize = FiscalController.class.getAnnotation(PreAuthorize.class);
     assertThat(preAuthorize).isNotNull();
-    assertThat(preAuthorize.value()).isEqualTo("hasRole('OWNER')");
+    assertThat(preAuthorize.value())
+        .isEqualTo("hasRole('OWNER') or @permissionService.possuiPermissao('fiscal:view')");
   }
 
   @Test

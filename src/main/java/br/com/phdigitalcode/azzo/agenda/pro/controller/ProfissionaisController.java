@@ -1,6 +1,7 @@
 package br.com.phdigitalcode.azzo.agenda.pro.controller;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -35,7 +36,7 @@ import jakarta.validation.Valid;
 /** Espelha {@code modules/professionals/api/ProfissionaisResource.java}. */
 @RestController
 @RequestMapping("/api/v1/professionals")
-@PreAuthorize("hasAnyRole('OWNER', 'PROFESSIONAL')")
+@PreAuthorize("hasAnyRole('OWNER', 'PROFESSIONAL', 'STAFF')")
 public class ProfissionaisController {
 
   private final ProfissionalService profissionalService;
@@ -47,7 +48,27 @@ public class ProfissionaisController {
   @GetMapping
   @RequiresPermission("professional:read")
   public List<ProfissionalResponse> listar(@RequestParam(name = "serviceId", required = false) String serviceId) {
-    return profissionalService.listar(serviceId);
+    List<ProfissionalResponse> equipe = profissionalService.listar(serviceId);
+    Set<String> grupos = rolesDoUsuarioAutenticado();
+    boolean isProfessionalOnly =
+        grupos.contains("PROFESSIONAL") && !grupos.contains("OWNER") && !grupos.contains("ADMIN");
+    return isProfessionalOnly ? semDadosDosColegas(equipe, userIdAutenticadoOuFalhar()) : equipe;
+  }
+
+  /**
+   * Pentest 14/10/2026 (AGD-016): o GET /{id} ja limitava o PROFESSIONAL ao proprio cadastro, mas a
+   * LISTA entregava a comissao, o e-mail e o telefone de toda a equipe. Ele continua vendo nome,
+   * especialidades e jornada dos colegas (a agenda precisa); comissao e contato, so os proprios.
+   */
+  static List<ProfissionalResponse> semDadosDosColegas(List<ProfissionalResponse> equipe, UUID eu) {
+    String meuId = eu == null ? null : eu.toString();
+    for (ProfissionalResponse p : equipe) {
+      if (meuId != null && meuId.equals(p.userId)) continue;
+      p.commissionRate = null;
+      p.email = null;
+      p.phone = null;
+    }
+    return equipe;
   }
 
   @GetMapping("/limits")
@@ -71,6 +92,16 @@ public class ProfissionaisController {
       profissionalService.validarAcessoProprio(id, userIdAutenticadoOuFalhar());
     }
     return profissionalService.obterPorId(id);
+  }
+
+  /**
+   * Quantos atendimentos por vir (pendentes e confirmados) estao com o profissional. A tela usa ao
+   * desligar "aceita agendamento": os ja marcados continuam, e o dono ve quantos sao.
+   */
+  @GetMapping("/{id}/upcoming-appointments")
+  @RequiresPermission("professional:read")
+  public Map<String, Long> contarAgendamentosFuturos(@PathVariable UUID id) {
+    return Map.of("count", profissionalService.contarAgendamentosFuturos(id));
   }
 
   @PostMapping
@@ -120,6 +151,6 @@ public class ProfissionaisController {
         && jwtPrincipal.userId() != null) {
       return jwtPrincipal.userId();
     }
-    throw new ApiClientErrorException("Nao autenticado", 401);
+    throw new ApiClientErrorException("Não autenticado", 401);
   }
 }

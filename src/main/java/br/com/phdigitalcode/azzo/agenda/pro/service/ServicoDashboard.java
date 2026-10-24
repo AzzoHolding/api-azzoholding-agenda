@@ -129,7 +129,7 @@ public class ServicoDashboard {
     LocalDate inicio = start == null || start.isBlank() ? hoje.withDayOfMonth(1) : DataUtil.parseDataISO(start);
     LocalDate fim = end == null || end.isBlank() ? hoje : DataUtil.parseDataISO(end);
     if (inicio.isAfter(fim)) {
-      throw new IllegalArgumentException("Data inicial nao pode ser maior que data final.");
+      throw new IllegalArgumentException("Data inicial não pode ser maior que data final.");
     }
 
     UUID professionalUuid = (professionalId == null || professionalId.isBlank()) ? null : UUID.fromString(professionalId);
@@ -155,7 +155,7 @@ public class ServicoDashboard {
     LocalDate inicio = start == null || start.isBlank() ? hoje.withDayOfMonth(1) : DataUtil.parseDataISO(start);
     LocalDate fim = end == null || end.isBlank() ? hoje : DataUtil.parseDataISO(end);
     if (inicio.isAfter(fim)) {
-      throw new IllegalArgumentException("Data inicial nao pode ser maior que data final.");
+      throw new IllegalArgumentException("Data inicial não pode ser maior que data final.");
     }
 
     UUID professionalUuid = (professionalId == null || professionalId.isBlank()) ? null : UUID.fromString(professionalId);
@@ -197,7 +197,7 @@ public class ServicoDashboard {
     LocalDate inicio = start == null || start.isBlank() ? hoje.withDayOfMonth(1) : DataUtil.parseDataISO(start);
     LocalDate fim = end == null || end.isBlank() ? hoje : DataUtil.parseDataISO(end);
     if (inicio.isAfter(fim)) {
-      throw new IllegalArgumentException("Data inicial nao pode ser maior que data final.");
+      throw new IllegalArgumentException("Data inicial não pode ser maior que data final.");
     }
 
     DashboardCustomerRankingResponse response = new DashboardCustomerRankingResponse();

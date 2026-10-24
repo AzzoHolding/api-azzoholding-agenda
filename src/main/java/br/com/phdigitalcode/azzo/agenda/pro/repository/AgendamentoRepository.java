@@ -64,6 +64,18 @@ public interface AgendamentoRepository extends JpaRepository<Agendamento, UUID> 
       @Param("currentTime") String currentTime,
       Limit limit);
 
+  /** Atendimentos por vir de um profissional — mesma comparacao textual de hora de cima. */
+  @Query(
+      "select count(a) from Agendamento a where a.tenantId = :tenantId "
+          + "and a.professionalId = :professionalId and a.status in :statuses "
+          + "and (a.date > :today or (a.date = :today and a.startTime >= :currentTime))")
+  long countFutureActiveForProfessional(
+      @Param("tenantId") UUID tenantId,
+      @Param("professionalId") UUID professionalId,
+      @Param("statuses") Collection<StatusAgendamento> statuses,
+      @Param("today") LocalDate today,
+      @Param("currentTime") String currentTime);
+
   /**
    * Espelha {@code AssistantInternalResource.listarAgendamentosCliente} do original
    * ({@code agendamentoRepository.list("tenantId = ?1 and clientId = ?2 and status <> ?3 order by

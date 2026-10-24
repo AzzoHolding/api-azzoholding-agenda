@@ -82,11 +82,19 @@ public final class SchedulingDtos {
    * service.
    */
   public static class AgendamentoRequest {
+    @NotBlank(message = "Cliente é obrigatório")
     public String clientId;
+
+    @NotBlank(message = "Profissional é obrigatório")
     public String professionalId;
+
     public String serviceId;
     public List<ItemRequest> items = new ArrayList<>();
+
+    @NotBlank(message = "Data do agendamento é obrigatória")
     public String date; // yyyy-MM-dd
+
+    @NotBlank(message = "Hora de início é obrigatória")
     public String startTime;
     public String endTime;
     public String status; // enum string
@@ -108,13 +116,12 @@ public final class SchedulingDtos {
 
   /** Espelha {@code api/dto/AppointmentUpdateRequest.java}. */
   public static class AppointmentUpdateRequest {
-    @NotBlank(message = "ID do profissional e obrigatorio")
+    // Os tres sao opcionais: o que nao vier fica como esta. Antes eram obrigatorios, e anotar uma
+    // observacao exigia reenviar profissional, data e hora (jornada de usuario de 2026-09-17).
     public String professionalId;
 
-    @NotBlank(message = "Data do agendamento e obrigatoria")
     public String date;
 
-    @NotBlank(message = "Hora de inicio e obrigatoria")
     public String startTime;
 
     public String notes;
@@ -215,6 +222,12 @@ public final class SchedulingDtos {
   /** Espelha {@code api/dto/AppointmentDetailResponse.java}. */
   public static class AppointmentDetailResponse {
     public AgendamentoResponse appointment;
+    /**
+     * A comanda ligada ao atendimento, quando existe ({@code ABERTA}, {@code FECHADA}...). A tela
+     * usa para nao perguntar "para onde vai o pagamento" de um atendimento ja pago.
+     */
+    public String comandaId;
+    public String comandaStatus;
     public List<AppointmentCustomerNoteResponse> careNotes = new ArrayList<>();
     public List<AppointmentTimelineEventResponse> timeline = new ArrayList<>();
   }
@@ -233,7 +246,7 @@ public final class SchedulingDtos {
 
   /** Espelha {@code api/dto/AttendanceRequest.java}. */
   public static class AttendanceRequest {
-    @NotNull(message = "O campo attended e obrigatorio")
+    @NotNull(message = "O campo attended é obrigatório")
     public Boolean attended;
   }
 
@@ -339,7 +352,7 @@ public final class SchedulingDtos {
         if (item.name().equalsIgnoreCase(value.trim())) return item;
       }
       throw new IllegalArgumentException(
-          "groupBy invalido. Use DAY, PROFESSIONAL, CLIENT ou SERVICE.");
+          "groupBy inválido. Use DAY, PROFESSIONAL, CLIENT ou SERVICE.");
     }
   }
 

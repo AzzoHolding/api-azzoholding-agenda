@@ -34,6 +34,15 @@ public class SystemAdminController {
     return systemAdminService.commercialOverview();
   }
 
+  /**
+   * Sem equivalente no Quarkus original — adicionado em 26/09/2026 para a tela `/operacao` da
+   * zona `plataforma` do gerenciamento (ver {@link SystemAdminService#whatsappOverview()}).
+   */
+  @GetMapping("/whatsapp-overview")
+  public SystemAdminDtos.WhatsAppOverviewResponse whatsappOverview() {
+    return systemAdminService.whatsappOverview();
+  }
+
   @GetMapping("/audits")
   public SystemAdminDtos.GlobalAuditListResponse audits(
       @RequestParam(name = "from", required = false) String from,

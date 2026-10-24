@@ -136,7 +136,7 @@ class BillingAdminServiceTest {
   void tenantIdMalformadoEhErroDeRequisicao() {
     assertThatThrownBy(() -> service.listPaymentsByTenant("nao-e-uuid"))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("tenantId invalido.");
+        .hasMessage("tenantId inválido.");
   }
 
   @Test
@@ -146,7 +146,7 @@ class BillingAdminServiceTest {
 
     assertThatThrownBy(() -> service.listPaymentsByTenant(outro.toString()))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("Tenant nao encontrado.")
+        .hasMessage("Tenant não encontrado.")
         .extracting(e -> ((ApiClientErrorException) e).getStatus())
         .isEqualTo(404);
   }
@@ -261,7 +261,7 @@ class BillingAdminServiceTest {
   void liberarLicencaSemProdutoResolvivelFalha() {
     assertThatThrownBy(() -> service.releaseLicenseForCurrentTenant(null, null, null, null))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Produto nao encontrado para liberar licenca.");
+        .hasMessage("Produto não encontrado para liberar licença.");
   }
 
   @Test
@@ -296,7 +296,7 @@ class BillingAdminServiceTest {
 
     assertThat(response.productId).isEqualTo(productId.toString());
     assertThat(response.validUntil).isEqualTo(order.getValidUntil().toString());
-    assertThat(response.message).isEqualTo("Licenca liberada manualmente para testes.");
+    assertThat(response.message).isEqualTo("Licença liberada manualmente para testes.");
   }
 
   @Test
@@ -483,7 +483,7 @@ class BillingAdminServiceTest {
   void marcarPagamentoInexistenteFalha() {
     assertThatThrownBy(() -> service.markPaymentAsReceived(null, "pay_0", null))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Pagamento nao encontrado.");
+        .hasMessage("Pagamento não encontrado.");
   }
 
   @Test
@@ -557,7 +557,7 @@ class BillingAdminServiceTest {
 
     assertThatThrownBy(() -> service.markPaymentAsReceived(null, "pay_7", null))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("Tenant nao encontrado.");
+        .hasMessage("Tenant não encontrado.");
     // O pagamento ja tinha sido marcado antes do 404 — a transacao e quem desfaz.
     assertThat(payment.getStatus()).isEqualTo(StatusPayment.RECEIVED);
   }
@@ -582,7 +582,7 @@ class BillingAdminServiceTest {
   void extenderTrialExigeTenantIdEExtraDias() {
     assertThatThrownBy(() -> service.extenderTrial("  ", 5))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("tenantId obrigatorio");
+        .hasMessage("tenantId obrigatório");
     assertThatThrownBy(() -> service.extenderTrial(tenantId.toString(), 0))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessage("extraDays deve ser >= 1");
@@ -737,7 +737,6 @@ class BillingAdminServiceTest {
               "Salao Z",
               "z@x.com",
               "ACTIVE",
-              "CREDIT_CARD",
               "2026-05-01T00:00:00Z",
               12,
               false,
@@ -750,7 +749,6 @@ class BillingAdminServiceTest {
     assertThat(item.tenantNome).isEqualTo("Salao Z");
     assertThat(item.tenantEmail).isEqualTo("z@x.com");
     assertThat(item.planStatus).isEqualTo("ACTIVE");
-    assertThat(item.billingType).isEqualTo("CREDIT_CARD");
     assertThat(item.validUntil).isEqualTo("2026-05-01T00:00:00Z");
     assertThat(item.diasRestantes).isEqualTo(12);
     assertThat(item.vencido).isFalse();
@@ -761,9 +759,7 @@ class BillingAdminServiceTest {
   void diasRestantesNuloViraMenosUm() {
     stubNativeQuery(
         List.<Object[]>of(
-            new Object[] {
-              tenantId.toString(), "Salao Y", null, "ACTIVE", null, null, null, null, null
-            }));
+            new Object[] {tenantId.toString(), "Salao Y", null, "ACTIVE", null, null, null, null}));
 
     BillingDtos.LicencasAdminReportItem item = service.relatorioLicencas().items.get(0);
 
@@ -798,7 +794,6 @@ class BillingAdminServiceTest {
       "Tenant",
       "t@x.com",
       planStatus,
-      "PIX",
       "2026-05-01T00:00:00Z",
       5,
       vencido,

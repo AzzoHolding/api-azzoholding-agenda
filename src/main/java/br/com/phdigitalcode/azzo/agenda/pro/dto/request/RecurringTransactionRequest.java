@@ -10,12 +10,12 @@ import jakarta.validation.constraints.Size;
 /** Porte verbatim de {@code modules/finance/api/dto/RecurringTransactionRequest.java}. */
 public class RecurringTransactionRequest {
 
-  @NotBlank(message = "Tipo e obrigatorio")
+  @NotBlank(message = "Tipo é obrigatório")
   public String type; // INCOME | EXPENSE
 
   public String categoryId; // UUID opcional
 
-  @NotBlank(message = "Descricao e obrigatoria")
+  @NotBlank(message = "Descrição é obrigatória")
   @Size(max = 500)
   public String description;
 
@@ -23,10 +23,10 @@ public class RecurringTransactionRequest {
   @DecimalMin(value = "0.01", message = "Valor deve ser maior que zero")
   public BigDecimal amount;
 
-  @NotBlank(message = "Forma de pagamento e obrigatoria")
+  @NotBlank(message = "Forma de pagamento é obrigatória")
   public String paymentMethod;
 
-  @NotBlank(message = "Frequencia e obrigatoria")
+  @NotBlank(message = "Frequencia é obrigatória")
   public String frequency; // MONTHLY | WEEKLY
 
   /** Dia do mes (1-28) - obrigatorio para MONTHLY */

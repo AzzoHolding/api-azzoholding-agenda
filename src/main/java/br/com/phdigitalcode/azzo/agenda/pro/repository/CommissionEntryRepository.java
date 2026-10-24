@@ -123,5 +123,22 @@ public interface CommissionEntryRepository extends JpaRepository<CommissionEntry
       """)
   int markCycleEntriesAsPaid(@Param("tenantId") UUID tenantId, @Param("cycleId") UUID cycleId);
 
+  /**
+   * Tira do ciclo as entradas de UM profissional — as dele que nao vao ser pagas agora porque o
+   * saldo no ciclo ficou zerado ou negativo (um desconto de comissao ja paga maior que o que ele
+   * ganhou). Voltam a ficar abertas e entram no proximo ciclo, e o desconto nao se perde.
+   */
+  @Modifying
+  @Query("""
+      update CommissionEntry e
+      set e.cycleId = null
+      where e.tenantId = :tenantId and e.cycleId = :cycleId and e.professionalId = :professionalId
+        and e.entryStatus = 'OPEN'
+      """)
+  int releaseProfessionalFromCycle(
+      @Param("tenantId") UUID tenantId,
+      @Param("cycleId") UUID cycleId,
+      @Param("professionalId") UUID professionalId);
+
   long countByCycleId(UUID cycleId);
 }

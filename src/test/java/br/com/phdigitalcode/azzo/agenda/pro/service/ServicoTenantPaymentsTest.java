@@ -66,7 +66,7 @@ class ServicoTenantPaymentsTest {
 
     assertThatThrownBy(() -> service.atualizar(request))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Chave de API do Asaas e obrigatoria.");
+        .hasMessage("Chave de API do Asaas é obrigatória.");
 
     verify(asaasClient, never()).listPayments(any(), any(), any(), any());
   }
@@ -84,7 +84,7 @@ class ServicoTenantPaymentsTest {
 
     assertThatThrownBy(() -> service.atualizar(request))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("Nao foi possivel validar a chave de API informada junto ao Asaas");
+        .hasMessageContaining("Não foi possível validar a chave de API informada junto ao Asaas");
 
     verify(auditService).recordError(any(AuditEventCommand.class));
     verify(encryptionService, never()).encrypt(any());

@@ -22,6 +22,6 @@ public enum PlanStatus {
       if (item.name().equalsIgnoreCase(value.trim())) return item;
       if (item.description.equalsIgnoreCase(value.trim())) return item;
     }
-    throw new IllegalArgumentException("Status de plano invalido: " + value);
+    throw new IllegalArgumentException("Status de plano inválido: " + value);
   }
 }
