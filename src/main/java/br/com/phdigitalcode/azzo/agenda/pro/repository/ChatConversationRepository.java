@@ -274,10 +274,12 @@ public interface ChatConversationRepository extends JpaRepository<ChatConversati
       if (o instanceof Instant i) return i;
       if (o instanceof Timestamp ts) return ts.toInstant();
       if (o instanceof OffsetDateTime odt) return odt.toInstant();
-      // manual_mode_until e "timestamp without time zone": a consulta nativa devolve LocalDateTime,
-      // gravado em UTC (hibernate.jdbc.time_zone: UTC). Sem isto a lista do chat lia o modo manual
-      // sempre desligado — nem "Voce esta respondendo" nem "Pediu atendente" apareciam (24/10/2026).
-      if (o instanceof java.time.LocalDateTime ldt) return ldt.toInstant(java.time.ZoneOffset.UTC);
+      // manual_mode_until e "timestamp without time zone": a consulta nativa devolve LocalDateTime.
+      // Sem isto a lista do chat lia o modo manual sempre desligado — nem "Voce esta respondendo"
+      // nem "Pediu atendente" apareciam (24/10/2026). O valor chega ja no fuso da JVM: o banco tem
+      // 17:40 (UTC) e a linha traz 14:40 com a JVM em America/Sao_Paulo. Ler como UTC adiantava o
+      // fim do modo manual em 3h (conferido em producao no mesmo dia).
+      if (o instanceof java.time.LocalDateTime ldt) return ldt.atZone(java.time.ZoneId.systemDefault()).toInstant();
       return null;
     }
 
