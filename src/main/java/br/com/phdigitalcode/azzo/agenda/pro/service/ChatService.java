@@ -546,6 +546,27 @@ public class ChatService {
     return result;
   }
 
+  /** Motivo do modo manual quando o proprio cliente pediu uma pessoa no WhatsApp. */
+  public static final String MOTIVO_CLIENTE_PEDIU_ATENDENTE = "CLIENTE_PEDIU_ATENDENTE";
+
+  /**
+   * O cliente pediu uma pessoa: o assistente para de responder nesta conversa (modo manual) e o
+   * chat recebe o evento {@code HUMAN_REQUESTED}, que a tela usa para tocar o alerta e marcar a
+   * conversa. Teste de dialogos de 23/10/2026: o assistente dizia "eu sou a atendente" e ninguem
+   * da equipe ficava sabendo.
+   */
+  public void marcarPedidoDeAtendente(UUID tenantId, UUID conversationId) {
+    requiresNewTransaction.executeWithoutResult(txStatus -> {
+      ChatConversationEntity conversation = chatConversationRepository
+          .findByTenantAndId(tenantId, conversationId)
+          .orElse(null);
+      if (conversation == null) return;
+      enableManualMode(conversation, null, MOTIVO_CLIENTE_PEDIU_ATENDENTE);
+      chatConversationRepository.save(conversation);
+      chatRealtimePublisher.publishChatUpdate(tenantId, conversation.getId(), conversation.getClientId(), "HUMAN_REQUESTED");
+    });
+  }
+
   public ChatMessageEntity registerOutboundAssistantMessage(
       UUID tenantId,
       UUID conversationId,
@@ -756,6 +777,7 @@ public class ChatService {
     dto.updatedAt = r.updatedAt() != null ? r.updatedAt().toString() : null;
     dto.manualModeUntil = r.manualModeUntil() != null ? r.manualModeUntil().toString() : null;
     dto.manualModeEnabled = r.manualModeUntil() != null && r.manualModeUntil().isAfter(Instant.now());
+    dto.humanRequested = dto.manualModeEnabled && MOTIVO_CLIENTE_PEDIU_ATENDENTE.equals(r.manualModeReason());
     return dto;
   }
 

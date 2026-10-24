@@ -369,6 +369,29 @@ class WhatsAppWebhookControllerTest {
     verify(chatService, never()).processInboundWhatsAppMessage(any(), any(), any(), any(), any());
   }
 
+  // ---- POST receive: pedido de atendente (teste de dialogos de 23/10/2026) --
+
+  @Test
+  void pedidoDeAtendenteMarcaAConversaEAindaRespondeOCliente() {
+    WhatsAppWebhookController controller = controllerWithoutSecret();
+    String payload = "{\"entry\":[{\"changes\":[{\"value\":{"
+        + "\"metadata\":{\"phone_number_id\":\"" + phoneNumberId + "\"},"
+        + "\"messages\":[{\"id\":\"wamid-atendente\",\"from\":\"5511988887777\",\"type\":\"text\","
+        + "\"text\":{\"body\":\"quero falar com um atendente\"}}]}}]}]}";
+    ChatService.InboundProcessingResult inbound = new ChatService.InboundProcessingResult();
+    inbound.conversation = conversation();
+    inbound.client = cliente();
+    when(chatService.processInboundWhatsAppMessage(any(), any(), any(), any(), any())).thenReturn(inbound);
+    AssistantMessageResponse resposta = new AssistantMessageResponse("Claro! Ja avisei a equipe.");
+    resposta.slots.put("manualInterventionReason", ChatService.MOTIVO_CLIENTE_PEDIU_ATENDENTE);
+    when(assistantApiClient.processarMensagem(any(), any(), any(), any(AssistantMessageRequest.class))).thenReturn(resposta);
+
+    controller.receive(null, payload);
+
+    verify(chatService).marcarPedidoDeAtendente(any(), eq(inbound.conversation.getId()));
+    verify(whatsAppClient).sendMessage(any(), eq("5511988887777"), eq("Claro! Ja avisei a equipe."));
+  }
+
   // ---- POST receive: mensagens duplicadas ---------------------------------
 
   @Test
