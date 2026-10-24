@@ -86,6 +86,7 @@ public class AssistantInternalController {
   private final TenantWhatsAppConfigRepository tenantWhatsAppConfigRepository;
   private final ContextoTenant contextoTenant;
   private final TenantOperationalSettingsService tenantOperationalSettingsService;
+  private final br.com.phdigitalcode.azzo.agenda.pro.repository.TenantAddressRepository tenantAddressRepository;
 
   public AssistantInternalController(
       TenantRepository tenantRepository,
@@ -101,7 +102,8 @@ public class AssistantInternalController {
       ProfissionalRepository profissionalRepository,
       TenantWhatsAppConfigRepository tenantWhatsAppConfigRepository,
       ContextoTenant contextoTenant,
-      TenantOperationalSettingsService tenantOperationalSettingsService) {
+      TenantOperationalSettingsService tenantOperationalSettingsService,
+      br.com.phdigitalcode.azzo.agenda.pro.repository.TenantAddressRepository tenantAddressRepository) {
     this.tenantRepository = tenantRepository;
     this.servicoService = servicoService;
     this.profissionalService = profissionalService;
@@ -116,6 +118,7 @@ public class AssistantInternalController {
     this.tenantWhatsAppConfigRepository = tenantWhatsAppConfigRepository;
     this.contextoTenant = contextoTenant;
     this.tenantOperationalSettingsService = tenantOperationalSettingsService;
+    this.tenantAddressRepository = tenantAddressRepository;
   }
 
   // ─── Info do Tenant ───────────────────────────────────────────────────────
@@ -127,7 +130,12 @@ public class AssistantInternalController {
     if (tenant == null) {
       return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
     }
-    return ResponseEntity.ok(new TenantInfoResponse(tenant.getName(), tenant.getDescription()));
+    TenantInfoResponse info = new TenantInfoResponse(tenant.getName(), tenant.getDescription());
+    // O assistente responde "qual o endereco?" com isto (teste de dialogos de 23/10/2026: a pergunta
+    // caia em "nao encontrei agendamentos pra remarcar").
+    info.phone = tenant.getPhone();
+    info.address = tenantAddressRepository.findById(tid).map(AssistantInternalController::enderecoEmTexto).orElse(null);
+    return ResponseEntity.ok(info);
   }
 
   /**
@@ -470,9 +478,26 @@ public class AssistantInternalController {
     public int totalVisits;
   }
 
+  /** "Rua X, 10, ap 2 - Bairro, Cidade/UF, CEP 00000-000", sem as partes vazias; null sem rua. */
+  static String enderecoEmTexto(br.com.phdigitalcode.azzo.agenda.pro.entity.TenantAddress a) {
+    if (a == null || a.getStreet() == null || a.getStreet().isBlank()) return null;
+    StringBuilder s = new StringBuilder(a.getStreet().trim());
+    if (a.getNumber() != null && !a.getNumber().isBlank()) s.append(", ").append(a.getNumber().trim());
+    if (a.getComplement() != null && !a.getComplement().isBlank()) s.append(", ").append(a.getComplement().trim());
+    if (a.getNeighborhood() != null && !a.getNeighborhood().isBlank()) s.append(" - ").append(a.getNeighborhood().trim());
+    if (a.getCity() != null && !a.getCity().isBlank()) {
+      s.append(", ").append(a.getCity().trim());
+      if (a.getState() != null && !a.getState().isBlank()) s.append("/").append(a.getState().trim());
+    }
+    if (a.getZipCode() != null && !a.getZipCode().isBlank()) s.append(", CEP ").append(a.getZipCode().trim());
+    return s.toString();
+  }
+
   public static class TenantInfoResponse {
     public String name;
     public String description;
+    public String address;
+    public String phone;
 
     public TenantInfoResponse() {}
 
