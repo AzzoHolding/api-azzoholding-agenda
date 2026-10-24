@@ -411,7 +411,16 @@ public class ProfissionalService {
     p.setEmail(req.email != null ? req.email.trim().toLowerCase(Locale.ROOT) : null);
     p.setPhone(br.com.phdigitalcode.azzo.agenda.pro.util.TelefoneBr.normalizarSeMudou(req.phone, p.getPhone()));
     p.setAvatar(req.avatar);
-    p.setSpecialties(resolveSpecialties(tenantId, req.specialties));
+    // A colecao e do Hibernate: troca-la por outra (Set.of() era imutavel) quebrava o merge com
+    // UnsupportedOperationException e toda edicao de profissional sem especialidade dava 500
+    // (teste ponta a ponta de 23/10/2026). Atualiza no lugar.
+    Set<Specialty> especialidades = resolveSpecialties(tenantId, req.specialties);
+    if (p.getSpecialties() == null) {
+      p.setSpecialties(new LinkedHashSet<>(especialidades));
+    } else {
+      p.getSpecialties().clear();
+      p.getSpecialties().addAll(especialidades);
+    }
     // A coluna `commission_rate` e NOT NULL (como no original Quarkus): "sem comissao" se
     // grava como ZERO, nao como ausente. Cliente que manda `null` — a tela manda quando o campo
     // fica em branco — derrubava o cadastro com 400 generico ("null value in column
@@ -646,7 +655,7 @@ public class ProfissionalService {
   }
 
   private Set<Specialty> resolveSpecialties(UUID tenantId, List<String> requestedSpecialties) {
-    if (requestedSpecialties == null || requestedSpecialties.isEmpty()) return Set.of();
+    if (requestedSpecialties == null || requestedSpecialties.isEmpty()) return new LinkedHashSet<>();
 
     Map<String, String> normalizedByLower = new LinkedHashMap<>();
     for (String raw : requestedSpecialties) {

@@ -118,6 +118,20 @@ class ProfissionalAceitaAgendamentoTest {
   }
 
   @Test
+  @DisplayName("editar sem especialidade atualiza a colecao no lugar, sem trocar por uma imutavel")
+  void editarSemEspecialidadeMantemAColecaoDoHibernate() {
+    Profissional p = profissional("Ana", true);
+    java.util.Set<br.com.phdigitalcode.azzo.agenda.pro.entity.Specialty> colecao = p.getSpecialties();
+    when(profissionalRepository.findByIdAndTenantId(p.getId(), TENANT)).thenReturn(Optional.of(p));
+
+    // Set.of() no lugar da colecao gerenciada quebrava o merge (500 em toda edicao, 23/10/2026).
+    service.atualizar(p.getId(), edicao("Ana"));
+
+    assertThat(p.getSpecialties()).isSameAs(colecao).isEmpty();
+    p.getSpecialties().add(new br.com.phdigitalcode.azzo.agenda.pro.entity.Specialty());
+  }
+
+  @Test
   @DisplayName("a edicao desliga quando pedido, e sem o campo mantem o que estava")
   void edicaoDesligaOuMantem() {
     Profissional p = profissional("Ana", true);
