@@ -326,7 +326,7 @@ public class WhatsAppBookingReactivationSchedulerService {
 
     String whatsAppDestination = normalizeDigits(resolvedChannel.externalContactId());
     if (whatsAppDestination.length() < 10) {
-      throw new IllegalArgumentException("Cliente sem telefone valido para reativacao via WhatsApp.");
+      throw new IllegalArgumentException("Cliente sem telefone válido para reativacao via WhatsApp.");
     }
     return new ReactivationRoute(ChatChannel.WHATSAPP, whatsAppDestination, resolvedChannel.conversation());
   }

@@ -141,7 +141,7 @@ class ServicoPerfisDeAcessoTest {
   void telaForaDoTetoDoDonoE400() {
     assertThatThrownBy(() -> servico.criarPerfil(perfil("Estoquista", ESTOQUE)))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessageContaining("nao disponivel")
+        .hasMessageContaining("não disponível")
         .satisfies(e -> assertThat(status(e)).isEqualTo(400));
     verify(repositorio, never()).inserirPerfil(any(), any(), any(), any(), eq(false), any());
   }

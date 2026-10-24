@@ -205,7 +205,7 @@ public class GlobalExceptionHandler {
     // 401). Agora so a falha de autenticacao propriamente dita.
     if (root instanceof IllegalArgumentException
         && root.getMessage() != null
-        && root.getMessage().trim().toLowerCase(Locale.ROOT).startsWith("credenciais invalidas")) {
+        && br.com.phdigitalcode.azzo.agenda.pro.util.TextoSemAcento.de(root.getMessage().trim()).startsWith("credenciais invalidas")) {
       status = 401;
     }
     if (status == 429) {

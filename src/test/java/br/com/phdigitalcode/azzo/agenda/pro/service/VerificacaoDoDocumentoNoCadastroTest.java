@@ -44,7 +44,7 @@ class VerificacaoDoDocumentoNoCadastroTest {
   void documentoComDigitoErradoEhRecusadoSemConsultar() {
     assertThatThrownBy(() -> verificacao.verificarOuFalhar("52998224726"))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("invalido");
+        .hasMessageContaining("inválido");
     assertThatThrownBy(() -> verificacao.verificarOuFalhar("11222333000182"))
         .isInstanceOf(IllegalArgumentException.class);
     verify(consulta, never()).consultarSemContato(anyString());

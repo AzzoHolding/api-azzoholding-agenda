@@ -68,11 +68,11 @@ public class AsaasBoletoService {
   @Transactional
   public BillingDtos.SubscriptionResponse createBoletoChargeForCurrentTenant(
       BillingDtos.CreateSubscriptionRequest request, String remoteIp) {
-    if (!asaasEnabled) throw new IllegalStateException("Integracao Asaas desabilitada");
+    if (!asaasEnabled) throw new IllegalStateException("Integração Asaas desabilitada");
 
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Tenant tenant = tenantRepository.findById(tenantId).orElse(null);
-    if (tenant == null) throw new IllegalArgumentException("Tenant nao encontrado");
+    if (tenant == null) throw new IllegalArgumentException("Tenant não encontrado");
 
     asaasService.ensureCustomerForTenant(tenant, request.cpfCnpj);
 
@@ -195,13 +195,13 @@ public class AsaasBoletoService {
           tenant.getId(),
           CorrelatedLogging.traceId(),
           e);
-      throw new AsaasException("Falha de integracao com Asaas", 502, e);
+      throw new AsaasException("Falha de integração com Asaas", 502, e);
     }
   }
 
   private String requiredApiKey() {
     if (asaasApiKey == null || asaasApiKey.isBlank() || "__unset__".equals(asaasApiKey)) {
-      throw new IllegalStateException("ASAAS_API_KEY nao configurada");
+      throw new IllegalStateException("ASAAS_API_KEY não configurada");
     }
     return asaasApiKey.trim();
   }

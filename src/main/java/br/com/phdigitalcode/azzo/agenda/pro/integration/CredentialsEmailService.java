@@ -125,7 +125,7 @@ public class CredentialsEmailService {
       return;
     }
     if (toEmail == null || toEmail.isBlank()) {
-      throw new IllegalArgumentException("Email do profissional e obrigatorio para envio de credenciais");
+      throw new IllegalArgumentException("Email do profissional é obrigatório para envio de credenciais");
     }
 
     try {
@@ -176,7 +176,7 @@ public class CredentialsEmailService {
       }
     }
     if (toEmail == null || toEmail.isBlank()) {
-      throw new IllegalArgumentException("Email obrigatorio para envio");
+      throw new IllegalArgumentException("Email obrigatório para envio");
     }
     if (isFallbackFrom(effectiveFrom)) {
       String detail = "MAIL_FROM nao configurado ou usando fallback invalido: " + effectiveFrom;

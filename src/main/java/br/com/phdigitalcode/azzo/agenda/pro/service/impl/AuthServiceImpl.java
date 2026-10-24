@@ -204,12 +204,12 @@ public class AuthServiceImpl implements AuthService {
 
     if (usuarioRepository.findByEmail(email).isPresent()) {
       LOG.warn(CorrelatedLogging.context("Registro recusado", "email", email, "reason", "duplicate_email"));
-      throw new IllegalArgumentException("Ja existe usuario com este email");
+      throw new IllegalArgumentException("Já existe usuário com este email");
     }
     if (tenantRepository.existsByTrialDocumentHash(hashDoDocumento)) {
       // O documento NAO vai para o log (o original o gravava): e dado pessoal, e o motivo basta.
       LOG.warn(CorrelatedLogging.context("Registro recusado", "email", email, "reason", "trial_already_used"));
-      throw new IllegalArgumentException("CPF/CNPJ ja utilizou o plano gratuito");
+      throw new IllegalArgumentException("CPF/CNPJ já utilizou o plano gratuito");
     }
 
     Tenant tenant = new Tenant();
@@ -221,7 +221,7 @@ public class AuthServiceImpl implements AuthService {
     tenant.setTrialDocumentHash(hashDoDocumento);
     // plan_status_id e NOT NULL: sem isto o cadastro falhava em banco novo.
     tenant.setPlanStatusId(tenantRepository.buscarPlanStatusIdPorCodigo(PlanStatus.ACTIVE.name())
-        .orElseThrow(() -> new IllegalStateException("Status de plano ACTIVE nao encontrado")));
+        .orElseThrow(() -> new IllegalStateException("Status de plano ACTIVE não encontrado")));
     tenantRepository.save(tenant);
 
     Usuario usuario = new Usuario();
@@ -269,7 +269,7 @@ public class AuthServiceImpl implements AuthService {
       // real chegava ao 429 — o bloqueio revelava quem tem cadastro. Agora conta para todos.
       recordFailedEmailLogin(normalizedEmail);
       LOG.warn(CorrelatedLogging.context("Login recusado", "email", normalizedEmail, "reason", "user_not_found"));
-      throw new IllegalArgumentException("Credenciais invalidas");
+      throw new IllegalArgumentException("Credenciais inválidas");
     }
 
     boolean ok = BCrypt.verifyer().verify(request.password.toCharArray(), usuario.getPasswordHash()).verified;
@@ -284,7 +284,7 @@ public class AuthServiceImpl implements AuthService {
         AuditConstants.Status.DENIED,
         "AUTH_LOGIN",
         Map.of("email", usuario.getEmail()));
-      throw new IllegalArgumentException("Credenciais invalidas");
+      throw new IllegalArgumentException("Credenciais inválidas");
     }
     // SEG-007: o contador NAO e zerado aqui — so depois do MFA. Antes, a senha certa zerava o
     // contador e os codigos MFA errados nao contavam: o segundo fator ficava sem limite.
@@ -329,7 +329,7 @@ public class AuthServiceImpl implements AuthService {
         AuditConstants.Status.DENIED,
         "AUTH_LOGIN_MFA_REQUIRED",
         Map.of("email", usuario.getEmail()));
-      throw new ApiClientErrorException("Codigo MFA obrigatorio", 428);
+      throw new ApiClientErrorException("Código MFA obrigatório", 428);
     }
 
     if (requiresMfaForLogin(usuario)) {
@@ -347,7 +347,7 @@ public class AuthServiceImpl implements AuthService {
         AuditConstants.Status.DENIED,
         "AUTH_LOGIN_MFA_DENIED",
         Map.of("email", usuario.getEmail()));
-        throw new IllegalArgumentException("Codigo MFA invalido");
+        throw new IllegalArgumentException("Código MFA inválido");
       }
     }
 
@@ -369,7 +369,7 @@ public class AuthServiceImpl implements AuthService {
   public AuthResponse refresh(String refreshToken) {
     if (refreshToken == null || refreshToken.isBlank()) {
       LOG.warn(CorrelatedLogging.context("Refresh recusado", "reason", "refresh_token_missing"));
-      throw new ApiClientErrorException("refresh_token obrigatorio", 400);
+      throw new ApiClientErrorException("refresh_token obrigatório", 400);
     }
     RefreshTokenService.RefreshSession session = refreshTokenService.rotateAndGetSession(refreshToken);
     LOG.info(CorrelatedLogging.context(
@@ -434,19 +434,19 @@ public class AuthServiceImpl implements AuthService {
   public GenericMessageResponse resetPassword(ResetPasswordRequest request) {
     if (request == null || request.token == null || request.token.isBlank()) {
       LOG.warn(CorrelatedLogging.context("Reset de senha recusado", "reason", "token_missing"));
-      throw new ApiClientErrorException("Token de redefinicao obrigatorio", 400);
+      throw new ApiClientErrorException("Token de redefinicao obrigatório", 400);
     }
     passwordPolicyValidator.validateOrThrow(request.password);
 
     Instant now = Instant.now();
     PasswordResetToken token = passwordResetTokenRepository
         .findActiveByHash(sha256Hex(request.token.trim()), now)
-        .orElseThrow(() -> new ApiClientErrorException("Token de redefinicao invalido ou expirado", 400));
+        .orElseThrow(() -> new ApiClientErrorException("Token de redefinicao inválido ou expirado", 400));
 
     Usuario usuario = usuarioRepository.findById(token.getUserId())
         .orElseThrow(() -> {
           LOG.warn(CorrelatedLogging.context("Reset de senha recusado", "userId", token.getUserId(), "reason", "token_user_not_found"));
-          return new ApiClientErrorException("Usuario do token nao encontrado", 400);
+          return new ApiClientErrorException("Usuário do token não encontrado", 400);
         });
 
     // Um link emitido ANTES de a pessoa ser desligada nao pode devolver o acesso depois (SEG-004). A
@@ -455,7 +455,7 @@ public class AuthServiceImpl implements AuthService {
     if (acessoDeProfissional.desativado(usuario)) {
       LOG.warn(CorrelatedLogging.context(
           "Reset de senha recusado", "userId", usuario.getId(), "reason", "professional_inactive"));
-      throw new ApiClientErrorException("Token de redefinicao invalido ou expirado", 400);
+      throw new ApiClientErrorException("Token de redefinicao inválido ou expirado", 400);
     }
 
     usuario.setPasswordHash(BCrypt.withDefaults().hashToString(12, request.password.toCharArray()));
@@ -518,18 +518,18 @@ public class AuthServiceImpl implements AuthService {
   }
 
   private void validarAceiteObrigatorio(RegisterRequest request) {
-    if (request == null) throw new IllegalArgumentException("Request obrigatorio");
+    if (request == null) throw new IllegalArgumentException("Request obrigatório");
     if (!Boolean.TRUE.equals(request.acceptedTermsOfUse)) {
-      throw new IllegalArgumentException("Aceite dos Termos de Uso e obrigatorio");
+      throw new IllegalArgumentException("Aceite dos Termos de Uso é obrigatório");
     }
     if (!Boolean.TRUE.equals(request.acceptedPrivacyPolicy)) {
-      throw new IllegalArgumentException("Aceite da Politica de Privacidade e obrigatorio");
+      throw new IllegalArgumentException("Aceite da Politica de Privacidade é obrigatório");
     }
     if (request.termsOfUseVersion == null || request.termsOfUseVersion.isBlank()) {
-      throw new IllegalArgumentException("Versao dos Termos de Uso obrigatoria");
+      throw new IllegalArgumentException("Versão dos Termos de Uso obrigatória");
     }
     if (request.privacyPolicyVersion == null || request.privacyPolicyVersion.isBlank()) {
-      throw new IllegalArgumentException("Versao da Politica de Privacidade obrigatoria");
+      throw new IllegalArgumentException("Versão da Politica de Privacidade obrigatória");
     }
   }
 
@@ -583,7 +583,7 @@ public class AuthServiceImpl implements AuthService {
   }
 
   private String normalizeEmail(String email) {
-    if (email == null || email.isBlank()) throw new IllegalArgumentException("Email obrigatorio");
+    if (email == null || email.isBlank()) throw new IllegalArgumentException("Email obrigatório");
     return email.trim().toLowerCase(Locale.ROOT);
   }
 
@@ -596,7 +596,7 @@ public class AuthServiceImpl implements AuthService {
   private String buildResetUrl(String rawToken) {
     String baseUrl = publicFrontendBaseUrl == null ? "" : publicFrontendBaseUrl.trim();
     if (baseUrl.isBlank() || "__unset__".equalsIgnoreCase(baseUrl)) {
-      throw new IllegalStateException("PUBLIC_BOOKING_BASE_URL nao configurado para redefinicao de senha");
+      throw new IllegalStateException("PUBLIC_BOOKING_BASE_URL não configurado para redefinicao de senha");
     }
     if (baseUrl.endsWith("/")) baseUrl = baseUrl.substring(0, baseUrl.length() - 1);
     return baseUrl + "/redefinir-senha?token=" + rawToken;
@@ -608,7 +608,7 @@ public class AuthServiceImpl implements AuthService {
 
   private void validarCriacaoUsuarioPorRole(PapelUsuario targetRole) {
     if (PapelUsuario.ADMIN.equals(targetRole)) {
-      throw new ApiClientErrorException("Nao e permitido criar usuario com role ADMIN via registro publico", 403);
+      throw new ApiClientErrorException("Não é permitido criar usuário com role ADMIN via registro público", 403);
     }
   }
 
@@ -619,18 +619,18 @@ public class AuthServiceImpl implements AuthService {
   private String decryptMfaSecretOrThrow(Usuario usuario) {
     String secret = encryptionService.decrypt(usuario.getMfaSecretEnc());
     if (secret == null || secret.isBlank()) {
-      throw new IllegalStateException("MFA ativo sem secret configurado para o usuario");
+      throw new IllegalStateException("MFA ativo sem secret configurado para o usuário");
     }
     return secret;
   }
 
   private String normalizeCpfCnpj(String cpfCnpj) {
     if (cpfCnpj == null || cpfCnpj.isBlank()) {
-      throw new IllegalArgumentException("CPF/CNPJ obrigatorio para ativar plano gratuito");
+      throw new IllegalArgumentException("CPF/CNPJ obrigatório para ativar plano gratuito");
     }
     String digits = cpfCnpj.replaceAll("\\D", "");
     if (!DocumentoValidator.cpfOuCnpjValido(digits)) {
-      throw new IllegalArgumentException("CPF/CNPJ invalido");
+      throw new IllegalArgumentException("CPF/CNPJ inválido");
     }
     return digits;
   }
@@ -643,7 +643,7 @@ public class AuthServiceImpl implements AuthService {
       for (byte b : bytes) sb.append(String.format("%02x", b));
       return sb.toString();
     } catch (NoSuchAlgorithmException e) {
-      throw new IllegalStateException("SHA-256 nao disponivel", e);
+      throw new IllegalStateException("SHA-256 não disponível", e);
     }
   }
 

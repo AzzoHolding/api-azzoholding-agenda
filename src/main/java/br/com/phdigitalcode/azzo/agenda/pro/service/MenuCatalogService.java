@@ -139,11 +139,11 @@ public class MenuCatalogService {
 
   @Transactional
   public MenuCatalogItemResponse saveCatalogItem(MenuCatalogItemRequest request) {
-    if (request == null) throw new IllegalArgumentException("Payload obrigatorio");
+    if (request == null) throw new IllegalArgumentException("Payload obrigatório");
     UUID itemId = parseUuidNullable(request.id, "id invalido");
     UUID parentId = parseUuidNullable(request.parentId, "parentId invalido");
     if (itemId != null && itemId.equals(parentId)) {
-      throw new IllegalArgumentException("Item pai invalido");
+      throw new IllegalArgumentException("Item pai inválido");
     }
 
     String route = normalizeRoute(request.route);
@@ -194,7 +194,7 @@ public class MenuCatalogService {
           .setParameter("id", itemId)
           .executeUpdate();
       if (updatedRows != 1) {
-        throw new IllegalArgumentException("Menu nao encontrado para atualizacao");
+        throw new IllegalArgumentException("Menu não encontrado para atualizacao");
       }
       if (previousRoute != null && !previousRoute.equals(route)) {
         entityManager.createNativeQuery("""
@@ -246,7 +246,7 @@ public class MenuCatalogService {
         .setParameter("route", route)
         .getSingleResult();
     if (toInt(itemCount) != 1) {
-      throw new IllegalStateException("Menu nao foi persistido no catalogo");
+      throw new IllegalStateException("Menu não foi persistido no catalogo");
     }
 
     for (Map.Entry<String, Boolean> roleVisibility : roleVisibilities.entrySet()) {
@@ -262,7 +262,7 @@ public class MenuCatalogService {
           .findFirst()
           .orElse(null);
       if (saved == null || toBoolean(saved) != roleVisibility.getValue()) {
-        throw new IllegalStateException("Permissao de menu nao foi persistida para role " + roleVisibility.getKey());
+        throw new IllegalStateException("Permissão de menu não foi persistida para role " + roleVisibility.getKey());
       }
     }
   }
@@ -271,7 +271,7 @@ public class MenuCatalogService {
     return listCatalog().items.stream()
         .filter(item -> item.id.equals(itemId.toString()))
         .findFirst()
-        .orElseThrow(() -> new IllegalArgumentException("Menu nao encontrado"));
+        .orElseThrow(() -> new IllegalArgumentException("Menu não encontrado"));
   }
 
   private String findRouteById(UUID itemId) {
@@ -284,7 +284,7 @@ public class MenuCatalogService {
         .getResultStream()
         .findFirst()
         .orElse(null);
-    if (route == null) throw new IllegalArgumentException("Menu nao encontrado");
+    if (route == null) throw new IllegalArgumentException("Menu não encontrado");
     return route.toString();
   }
 
@@ -347,7 +347,7 @@ public class MenuCatalogService {
         .findFirst()
         .orElse(null);
     if (exists == null) {
-      throw new IllegalArgumentException("Item pai nao encontrado");
+      throw new IllegalArgumentException("Item pai não encontrado");
     }
   }
 
@@ -365,7 +365,7 @@ public class MenuCatalogService {
     if (existingId == null) return;
     UUID existingUuid = UUID.fromString(existingId.toString());
     if (currentId == null || !existingUuid.equals(currentId)) {
-      throw new IllegalArgumentException("Ja existe um menu com esta rota");
+      throw new IllegalArgumentException("Já existe um menu com esta rota");
     }
   }
 
@@ -377,7 +377,7 @@ public class MenuCatalogService {
   private String normalizeRole(String role) {
     String normalized = requireText(role, "role obrigatoria").toUpperCase();
     if (!SUPPORTED_ROLES.contains(normalized)) {
-      throw new IllegalArgumentException("role nao suportada");
+      throw new IllegalArgumentException("role não suportada");
     }
     return normalized;
   }

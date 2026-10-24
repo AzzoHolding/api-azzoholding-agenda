@@ -79,7 +79,7 @@ class FiscalDanfeJobServiceTest {
 
     assertThatThrownBy(() -> service.solicitarGeracao("ext-1"))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("Invoice fiscal nao encontrada.");
+        .hasMessage("Invoice fiscal não encontrada.");
   }
 
   @Test
@@ -135,7 +135,7 @@ class FiscalDanfeJobServiceTest {
 
     assertThatThrownBy(() -> service.consultarJob("ext-1", jobId.toString()))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("Job DANFE nao encontrado.");
+        .hasMessage("Job DANFE não encontrado.");
   }
 
   @Test
@@ -150,7 +150,7 @@ class FiscalDanfeJobServiceTest {
 
     assertThatThrownBy(() -> service.consultarJob("ext-1", job.getId().toString()))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("Job DANFE nao encontrado para a invoice informada.");
+        .hasMessage("Job DANFE não encontrado para a invoice informada.");
   }
 
   @Test
@@ -196,7 +196,7 @@ class FiscalDanfeJobServiceTest {
 
     assertThatThrownBy(() -> service.baixarDanfe("ext-1", job.getId().toString()))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("DANFE ainda nao esta pronto para download.")
+        .hasMessage("DANFE ainda não esta pronto para download.")
         .satisfies(ex -> assertThat(((ApiClientErrorException) ex).getStatus()).isEqualTo(409));
   }
 
@@ -212,7 +212,7 @@ class FiscalDanfeJobServiceTest {
 
     assertThatThrownBy(() -> service.baixarDanfe("ext-1", job.getId().toString()))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("DANFE ja foi baixado e removido.")
+        .hasMessage("DANFE já foi baixado e removido.")
         .satisfies(ex -> assertThat(((ApiClientErrorException) ex).getStatus()).isEqualTo(410));
   }
 
@@ -228,7 +228,7 @@ class FiscalDanfeJobServiceTest {
 
     assertThatThrownBy(() -> service.baixarDanfe("ext-1", job.getId().toString()))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("DANFE expirado e removido apos 24 horas.");
+        .hasMessage("DANFE expirado e removido após 24 horas.");
 
     verify(minioStorageService).removerArquivoFiscalDanfe("key-1", job.getTenantId());
     assertThat(job.getPdfStorageKey()).isNull();
@@ -292,7 +292,7 @@ class FiscalDanfeJobServiceTest {
 
     assertThatThrownBy(() -> service.baixarDanfe("ext-1", job.getId().toString()))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("Arquivo DANFE indisponivel para download.");
+        .hasMessage("Arquivo DANFE indisponível para download.");
   }
 
   // ─── processarPendentes ─────────────────────────────────────────────────

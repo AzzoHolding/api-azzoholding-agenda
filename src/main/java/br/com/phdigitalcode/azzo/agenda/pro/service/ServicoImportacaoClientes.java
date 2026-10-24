@@ -148,7 +148,7 @@ public class ServicoImportacaoClientes {
         formatoRaw == null || formatoRaw.isBlank() ? "xlsx" : formatoRaw.trim().toLowerCase(Locale.ROOT);
     if (!"xlsx".equals(formato) && !"csv".equals(formato)) {
       LOG.warn("customers.import.template.invalidFormat format={}", formatoRaw);
-      throw new ApiClientErrorException("formato invalido. Use xlsx ou csv.", HttpStatus.BAD_REQUEST.value());
+      throw new ApiClientErrorException("formato inválido. Use xlsx ou csv.", HttpStatus.BAD_REQUEST.value());
     }
 
     List<String> cabecalho =
@@ -221,7 +221,7 @@ public class ServicoImportacaoClientes {
     } catch (Exception exception) {
       LOG.warn("customers.import.invalidMode modoImportacao={}", raw);
       throw new ApiClientErrorException(
-          "modoImportacao invalido. Use INSERT_ONLY ou UPSERT.", HttpStatus.BAD_REQUEST.value());
+          "modoImportacao inválido. Use INSERT_ONLY ou UPSERT.", HttpStatus.BAD_REQUEST.value());
     }
   }
 
@@ -288,7 +288,7 @@ public class ServicoImportacaoClientes {
       workbook.write(outputStream);
       return outputStream.toByteArray();
     } catch (Exception exception) {
-      throw new IllegalStateException("Falha ao gerar modelo de importacao de clientes.", exception);
+      throw new IllegalStateException("Falha ao gerar modelo de importação de clientes.", exception);
     }
   }
 

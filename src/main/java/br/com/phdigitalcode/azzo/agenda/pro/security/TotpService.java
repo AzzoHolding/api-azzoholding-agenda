@@ -98,7 +98,7 @@ public class TotpService {
       int otp = binary % (int) Math.pow(10, digits);
       return String.format(Locale.ROOT, "%0" + digits + "d", otp);
     } catch (GeneralSecurityException e) {
-      throw new IllegalStateException("Falha ao gerar codigo TOTP", e);
+      throw new IllegalStateException("Falha ao gerar código TOTP", e);
     }
   }
 

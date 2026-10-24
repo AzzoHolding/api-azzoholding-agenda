@@ -447,7 +447,7 @@ public class ServicoPerfisDeAcesso {
   private Object[] carregarPerfil(UUID tenantId, UUID perfilId) {
     return repositorio
         .buscarPerfil(tenantId, perfilId)
-        .orElseThrow(() -> new ApiClientErrorException("Perfil nao encontrado.", 404));
+        .orElseThrow(() -> new ApiClientErrorException("Perfil não encontrado.", 404));
   }
 
   private PerfilResponse montarPerfil(UUID tenantId, Object[] linha) {
@@ -496,7 +496,7 @@ public class ServicoPerfisDeAcesso {
     Set<UUID> distribuiveis = idsDistribuiveis(tenantId);
     for (UUID item : itens) {
       if (!distribuiveis.contains(item)) {
-        throw invalido("Funcionalidade nao disponivel para o seu salao.");
+        throw invalido("Funcionalidade não disponível para o seu salão.");
       }
     }
     return new ArrayList<>(itens);
@@ -508,7 +508,7 @@ public class ServicoPerfisDeAcesso {
       try {
         perfis.add(UUID.fromString(bruto.trim()));
       } catch (RuntimeException e) {
-        throw new ApiClientErrorException("Perfil nao encontrado.", 404);
+        throw new ApiClientErrorException("Perfil não encontrado.", 404);
       }
     }
     if (perfis.isEmpty()) {
@@ -516,7 +516,7 @@ public class ServicoPerfisDeAcesso {
     }
     // Id de outro salao responde igual a id inexistente: nao se revela o que existe fora.
     if (repositorio.contarPerfisDoTenant(tenantId, perfis) != perfis.size()) {
-      throw new ApiClientErrorException("Perfil nao encontrado.", 404);
+      throw new ApiClientErrorException("Perfil não encontrado.", 404);
     }
     return new ArrayList<>(perfis);
   }
@@ -541,9 +541,9 @@ public class ServicoPerfisDeAcesso {
     String papel =
         repositorio
             .papelDoUsuario(tenantId, userId)
-            .orElseThrow(() -> new ApiClientErrorException("Pessoa nao encontrada na equipe.", 404));
+            .orElseThrow(() -> new ApiClientErrorException("Pessoa não encontrada na equipe.", 404));
     if (PapelUsuario.OWNER.name().equals(papel) || PapelUsuario.ADMIN.name().equals(papel)) {
-      throw new ApiClientErrorException("Pessoa nao encontrada na equipe.", 404);
+      throw new ApiClientErrorException("Pessoa não encontrada na equipe.", 404);
     }
     return papel;
   }
@@ -552,7 +552,7 @@ public class ServicoPerfisDeAcesso {
     Usuario usuario =
         usuarioRepository
             .findByIdAndTenantId(userId, tenantId)
-            .orElseThrow(() -> new ApiClientErrorException("Pessoa nao encontrada na equipe.", 404));
+            .orElseThrow(() -> new ApiClientErrorException("Pessoa não encontrada na equipe.", 404));
     if (usuario.getEmail() == null || usuario.getEmail().isBlank()) {
       throw invalido("Esta pessoa nao tem e-mail para receber a senha.");
     }
@@ -602,7 +602,7 @@ public class ServicoPerfisDeAcesso {
     return montarEquipe(tenantId).stream()
         .filter(m -> m.userId.equals(userId.toString()))
         .findFirst()
-        .orElseThrow(() -> new ApiClientErrorException("Pessoa nao encontrada na equipe.", 404));
+        .orElseThrow(() -> new ApiClientErrorException("Pessoa não encontrada na equipe.", 404));
   }
 
   private static Optional<PapelUsuario> papelFixo(String papel) {
@@ -621,7 +621,7 @@ public class ServicoPerfisDeAcesso {
       }
       if (passwordPolicyValidator.isValid(senha.toString())) return senha.toString();
     }
-    throw new IllegalStateException("Nao foi possivel gerar uma senha temporaria valida.");
+    throw new IllegalStateException("Não foi possível gerar uma senha temporaria valida.");
   }
 
   /** O e-mail com senha so sai se a transacao gravou: senao a pessoa receberia uma senha inutil. */

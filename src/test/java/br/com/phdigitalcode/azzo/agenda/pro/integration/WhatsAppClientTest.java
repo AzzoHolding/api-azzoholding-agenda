@@ -84,7 +84,7 @@ class WhatsAppClientTest {
 
     assertThatThrownBy(() -> client.sendMessage(config, "", "Ola!"))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Destino do WhatsApp invalido");
+        .hasMessage("Destino do WhatsApp inválido");
   }
 
   @Test
@@ -100,7 +100,7 @@ class WhatsAppClientTest {
   void deveLancarIllegalArgumentQuandoConfigNula() {
     assertThatThrownBy(() -> client.sendMessage(null, "5511999998888", "Ola"))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Configuracao de WhatsApp invalida");
+        .hasMessage("Configuração de WhatsApp inválida");
   }
 
   @Test
@@ -112,7 +112,7 @@ class WhatsAppClientTest {
 
     assertThatThrownBy(() -> client.sendMessage(config, "5511999998888", "Ola"))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Token do WhatsApp nao configurado para o tenant");
+        .hasMessage("Token do WhatsApp não configurado para o tenant");
   }
 
   @Test
@@ -126,7 +126,7 @@ class WhatsAppClientTest {
 
     assertThatThrownBy(() -> client.sendMessage(config, "5511999998888", "Ola"))
         .isInstanceOf(IllegalStateException.class)
-        .hasMessageContaining("Token nao autorizado")
+        .hasMessageContaining("Token não autorizado")
         .hasMessageContaining("Invalid OAuth access token");
   }
 
@@ -174,14 +174,14 @@ class WhatsAppClientTest {
   void deveLancarIllegalArgumentQuandoAccessTokenAusenteNoFetch() {
     assertThatThrownBy(() -> client.fetchPhoneNumberDetails((String) null, "1234567890"))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Token do WhatsApp nao configurado para o tenant");
+        .hasMessage("Token do WhatsApp não configurado para o tenant");
   }
 
   @Test
   void deveLancarIllegalArgumentQuandoPhoneNumberIdAusenteNoFetch() {
     assertThatThrownBy(() -> client.fetchPhoneNumberDetails("plain-token", " "))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("phoneNumberId do WhatsApp nao configurado para o tenant");
+        .hasMessage("phoneNumberId do WhatsApp não configurado para o tenant");
   }
 
   /**

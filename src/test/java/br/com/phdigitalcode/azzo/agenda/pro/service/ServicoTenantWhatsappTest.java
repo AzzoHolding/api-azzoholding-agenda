@@ -100,7 +100,7 @@ class ServicoTenantWhatsappTest {
 
     assertThatThrownBy(() -> serviceEmbeddedHabilitado.atualizar(request))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("obrigatorio na primeira configuracao");
+        .hasMessageContaining("obrigatório na primeira configuração");
   }
 
   @Test
@@ -163,12 +163,12 @@ class ServicoTenantWhatsappTest {
     TenantWhatsAppConfig config = configVazia();
     when(repository.findByTenantIdOrCreate(tenantId)).thenReturn(config);
     when(whatsAppClient.testConnection(any(TenantWhatsAppConfig.class)))
-        .thenThrow(new IllegalArgumentException("Token do WhatsApp nao configurado para o tenant"));
+        .thenThrow(new IllegalArgumentException("Token do WhatsApp não configurado para o tenant"));
 
     TenantWhatsAppDtos.TestResponse response = serviceEmbeddedHabilitado.testarConexao();
 
     assertThat(response.success).isFalse();
-    assertThat(response.message).contains("Salve a configuracao antes de testar");
+    assertThat(response.message).contains("Salve a configuração antes de testar");
     verify(auditService).recordError(any(AuditEventCommand.class));
   }
 

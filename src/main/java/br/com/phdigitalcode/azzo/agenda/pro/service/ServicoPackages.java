@@ -115,7 +115,7 @@ public class ServicoPackages {
       servicoRepository
           .findByIdAndTenantId(serviceId, tenantId)
           .orElseThrow(
-              () -> new ApiClientErrorException("Servico nao encontrado: " + itemRequest.serviceId, 404));
+              () -> new ApiClientErrorException("Serviço não encontrado: " + itemRequest.serviceId, 404));
 
       ServicePackageItem item = new ServicePackageItem();
       item.setTenantId(tenantId);
@@ -129,7 +129,7 @@ public class ServicoPackages {
   ServicePackage buscarOuFalhar(UUID id, UUID tenantId) {
     return servicePackageRepository
         .findByIdAndTenantId(id, tenantId)
-        .orElseThrow(() -> new ApiClientErrorException("Pacote nao encontrado.", 404));
+        .orElseThrow(() -> new ApiClientErrorException("Pacote não encontrado.", 404));
   }
 
   private PackageDtos.PackageResponse toResponse(ServicePackage pacote) {

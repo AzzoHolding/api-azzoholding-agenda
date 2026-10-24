@@ -138,7 +138,7 @@ class ServicoMembershipPlansTest {
 
     assertThatThrownBy(() -> service.criar(requestComUmBeneficio(1)))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("Servico nao encontrado: " + serviceId)
+        .hasMessage("Serviço não encontrado: " + serviceId)
         .extracting(e -> ((ApiClientErrorException) e).getStatus())
         .isEqualTo(404);
 
@@ -180,7 +180,7 @@ class ServicoMembershipPlansTest {
 
     assertThatThrownBy(() -> service.obter(id))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("Plano de assinatura nao encontrado.")
+        .hasMessage("Plano de assinatura não encontrado.")
         .extracting(e -> ((ApiClientErrorException) e).getStatus())
         .isEqualTo(404);
   }

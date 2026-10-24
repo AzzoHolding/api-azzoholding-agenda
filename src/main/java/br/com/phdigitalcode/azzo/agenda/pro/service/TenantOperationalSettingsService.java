@@ -461,7 +461,7 @@ public class TenantOperationalSettingsService {
     try {
       return objectMapper.writeValueAsString(normalizeBusinessHours(businessHours));
     } catch (Exception e) {
-      throw new IllegalStateException("Nao foi possivel serializar horarios de funcionamento", e);
+      throw new IllegalStateException("Não foi possível serializar horários de funcionamento", e);
     }
   }
 
@@ -498,12 +498,12 @@ public class TenantOperationalSettingsService {
 
   private LocalDate parseSpecialClosureDate(String value) {
     if (value == null || value.isBlank()) {
-      throw new IllegalArgumentException("Data especial de fechamento obrigatoria");
+      throw new IllegalArgumentException("Data especial de fechamento obrigatória");
     }
     try {
       return LocalDate.parse(value.trim());
     } catch (Exception e) {
-      throw new IllegalArgumentException("Data especial de fechamento invalida");
+      throw new IllegalArgumentException("Data especial de fechamento inválida");
     }
   }
 
@@ -1078,7 +1078,7 @@ public class TenantOperationalSettingsService {
     try {
       return EmailTemplateType.valueOf(type.toUpperCase(Locale.ROOT));
     } catch (Exception e) {
-      throw new IllegalArgumentException("Tipo de template invalido: " + type);
+      throw new IllegalArgumentException("Tipo de template inválido: " + type);
     }
   }
 

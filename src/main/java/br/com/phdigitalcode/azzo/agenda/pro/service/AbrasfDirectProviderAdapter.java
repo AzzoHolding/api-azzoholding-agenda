@@ -372,7 +372,7 @@ public class AbrasfDirectProviderAdapter implements NfseProviderAdapter {
     String cnpj = digitsOnly(tax != null ? tax.getIssuerCnpj() : null);
     String im = digitsOnly(tax != null ? tax.getIssuerIm() : null);
     if (cnpj.length() != 14) {
-      throw new IllegalArgumentException("NFSE_XML_PRESTADOR_CNPJ_INVALIDO");
+      throw new IllegalArgumentException("NFSE_XML_PRESTADOR_CNPJ_INVÁLIDO");
     }
     if (im.isBlank()) {
       throw new IllegalArgumentException("NFSE_XML_PRESTADOR_IM_AUSENTE");

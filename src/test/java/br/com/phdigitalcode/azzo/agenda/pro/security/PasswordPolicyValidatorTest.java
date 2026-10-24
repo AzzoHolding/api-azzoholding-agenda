@@ -38,6 +38,6 @@ class PasswordPolicyValidatorTest {
   void validateOrThrowLancaExcecaoComMensagemDeRequisitos() {
     assertThatThrownBy(() -> validator.validateOrThrow("fraca"))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("minimo de 8 caracteres");
+        .hasMessageContaining("mínimo de 8 caracteres");
   }
 }

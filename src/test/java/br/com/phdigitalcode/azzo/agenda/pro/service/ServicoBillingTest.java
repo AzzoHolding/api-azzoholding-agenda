@@ -112,7 +112,7 @@ class ServicoBillingTest {
   void requestNuloFalha() {
     assertThatThrownBy(() -> service.criarAssinatura(null, null))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("request obrigatorio");
+        .hasMessage("request obrigatório");
   }
 
   @Test
@@ -123,7 +123,7 @@ class ServicoBillingTest {
 
     assertThatThrownBy(() -> service.criarAssinatura(request, null))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("productId obrigatorio");
+        .hasMessage("productId obrigatório");
   }
 
   @Test
@@ -143,7 +143,7 @@ class ServicoBillingTest {
 
     assertThatThrownBy(() -> service.criarAssinatura(pedidoPix(), null))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("Plano nao encontrado ou inativo");
+        .hasMessageContaining("Plano não encontrado ou inativo");
   }
 
   @Test
@@ -169,7 +169,7 @@ class ServicoBillingTest {
 
     assertThatThrownBy(() -> service.criarAssinatura(request, null))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Forma de pagamento nao suportada");
+        .hasMessage("Forma de pagamento não suportada");
   }
 
   @Test
@@ -419,7 +419,7 @@ class ServicoBillingTest {
 
     assertThatThrownBy(() -> service.cancelarAssinaturaAtual())
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("A assinatura ja foi cancelada.")
+        .hasMessage("A assinatura já foi cancelada.")
         .extracting(e -> ((ApiClientErrorException) e).getStatus())
         .isEqualTo(409);
     verify(asaasService, never()).cancelarAssinaturaAtiva(any());
@@ -440,7 +440,7 @@ class ServicoBillingTest {
     assertThat(subscription.getCancelledAt()).isNotNull();
     assertThat(response.subscriptionId).isEqualTo("sub_1");
     assertThat(response.status).isEqualTo("CANCELLED");
-    assertThat(response.message).contains("acesso permanece ate o vencimento");
+    assertThat(response.message).contains("acesso permanece até o vencimento");
 
     ArgumentCaptor<LicenseEvent> captor = ArgumentCaptor.forClass(LicenseEvent.class);
     verify(licenseEventRepository).save(captor.capture());

@@ -170,7 +170,7 @@ public class AgendamentosController {
             .orElseThrow(
                 () ->
                     new ApiClientErrorException(
-                        "Profissional nao encontrado para o usuario autenticado",
+                        "Profissional não encontrado para o usuário autenticado",
                         HttpStatus.FORBIDDEN.value()));
     return servicoAgendamentos.listarRelatorioGerencial(
         parseLocalDateNullable(from),
@@ -324,7 +324,7 @@ public class AgendamentosController {
       @PathVariable UUID id, @Valid @RequestBody(required = false) AttendanceRequest request) {
     if (request == null || request.attended == null) {
       throw new ApiClientErrorException(
-          "Campo attended e obrigatorio", HttpStatus.BAD_REQUEST.value());
+          "Campo attended é obrigatório", HttpStatus.BAD_REQUEST.value());
     }
     return servicoAgendamentos.registrarPresenca(id, request.attended);
   }
@@ -411,7 +411,7 @@ public class AgendamentosController {
     try {
       return UUID.fromString(value);
     } catch (IllegalArgumentException e) {
-      throw new ApiClientErrorException("UUID invalido", HttpStatus.BAD_REQUEST.value());
+      throw new ApiClientErrorException("UUID inválido", HttpStatus.BAD_REQUEST.value());
     }
   }
 
@@ -424,7 +424,7 @@ public class AgendamentosController {
           .map(UUID::fromString)
           .toList();
     } catch (IllegalArgumentException e) {
-      throw new ApiClientErrorException("UUID invalido", HttpStatus.BAD_REQUEST.value());
+      throw new ApiClientErrorException("UUID inválido", HttpStatus.BAD_REQUEST.value());
     }
   }
 
@@ -433,7 +433,7 @@ public class AgendamentosController {
     try {
       return LocalDate.parse(value);
     } catch (DateTimeParseException e) {
-      throw new ApiClientErrorException("Data invalida", HttpStatus.BAD_REQUEST.value());
+      throw new ApiClientErrorException("Data inválida", HttpStatus.BAD_REQUEST.value());
     }
   }
 

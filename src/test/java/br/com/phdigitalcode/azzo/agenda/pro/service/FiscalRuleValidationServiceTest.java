@@ -60,7 +60,7 @@ class FiscalRuleValidationServiceTest {
 
     assertThatThrownBy(() -> service.validarCriacao(invoiceBase("00", "5102"), tax))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("CSOSN invalido para Simples Nacional");
+        .hasMessage("CSOSN inválido para Simples Nacional");
   }
 
   /** O mesmo codigo "00" que e invalido no Simples e valido como CST fora dele. */
@@ -74,7 +74,7 @@ class FiscalRuleValidationServiceTest {
 
     assertThatThrownBy(() -> service.validarCriacao(invoiceBase("101", "5102"), lucroReal))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("CST invalido para o regime tributario informado");
+        .hasMessage("CST inválido para o regime tributario informado");
   }
 
   @Test
@@ -85,7 +85,7 @@ class FiscalRuleValidationServiceTest {
 
     assertThatThrownBy(() -> service.validarCriacao(invoiceBase("00", "5102"), null))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("CSOSN invalido para Simples Nacional");
+        .hasMessage("CSOSN inválido para Simples Nacional");
   }
 
   @Test
@@ -95,14 +95,14 @@ class FiscalRuleValidationServiceTest {
 
     assertThatThrownBy(() -> service.validarCriacao(invoiceBase("101", "5102"), tax))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Regime tributario nao suportado");
+        .hasMessage("Regime tributario não suportado");
   }
 
   @Test
   void exigeCstOuCsosnNoItem() {
     assertThatThrownBy(() -> service.validarCriacao(invoiceBase("  ", "5102"), null))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("CST/CSOSN obrigatorio no item fiscal");
+        .hasMessage("CST/CSOSN obrigatório no item fiscal");
   }
 
   // ─── NCM e CFOP ───────────────────────────────────────────────────────────
@@ -117,7 +117,7 @@ class FiscalRuleValidationServiceTest {
     FiscalDtos.Invoice semCfop = invoiceBase("101", null);
     assertThatThrownBy(() -> service.validarCriacao(semCfop, null))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("CFOP invalido. Informe 4 digitos numericos.");
+        .hasMessage("CFOP inválido. Informe 4 digitos numericos.");
   }
 
   @Test
@@ -127,7 +127,7 @@ class FiscalRuleValidationServiceTest {
 
     assertThatThrownBy(() -> service.validarCriacao(invoice, null))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("NCM invalido. Informe 8 digitos numericos.");
+        .hasMessage("NCM inválido. Informe 8 digitos numericos.");
   }
 
   @Test
@@ -189,7 +189,7 @@ class FiscalRuleValidationServiceTest {
 
     assertThatThrownBy(() -> service.validarCriacao(invoice, null))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Percentuais de partilha nao podem ser negativos");
+        .hasMessage("Percentuais de partilha não podem ser negativos");
   }
 
   // ─── item basico ──────────────────────────────────────────────────────────
@@ -205,7 +205,7 @@ class FiscalRuleValidationServiceTest {
 
     assertThatThrownBy(() -> service.validarCriacao(null, null))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Invoice obrigatoria");
+        .hasMessage("Invoice obrigatória");
   }
 
   @Test

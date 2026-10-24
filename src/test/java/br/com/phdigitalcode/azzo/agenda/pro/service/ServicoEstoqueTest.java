@@ -280,7 +280,7 @@ class ServicoEstoqueTest {
 
     assertThatThrownBy(() -> service.buscarItem(ITEM_ID))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessageContaining("Item de estoque nao encontrado");
+        .hasMessageContaining("Item de estoque não encontrado");
   }
 
   // ─── Itens: listagem, paginacao e cursor ─────────────────────────────────
@@ -362,7 +362,7 @@ class ServicoEstoqueTest {
                 service.listarItens(
                     null, null, "ontem-de-tarde", UUID.randomUUID().toString(), null, null, null))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessageContaining("Cursor invalido")
+        .hasMessageContaining("Cursor inválido")
         .extracting(e -> ((ApiClientErrorException) e).getStatus())
         .isEqualTo(400);
   }
@@ -638,7 +638,7 @@ class ServicoEstoqueTest {
 
     assertThatThrownBy(() -> service.adicionarInsumo(requestInsumoValido()))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessageContaining("ja esta vinculado ao servico")
+        .hasMessageContaining("já esta vinculado ao serviço")
         .extracting(e -> ((ApiClientErrorException) e).getStatus())
         .isEqualTo(409);
   }
@@ -704,7 +704,7 @@ class ServicoEstoqueTest {
     assertThatThrownBy(
             () -> service.atualizarInsumo(INSUMO_ID.toString(), new ServicoInsumoUpdateRequest()))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessageContaining("Vinculo servico-insumo nao encontrado");
+        .hasMessageContaining("Vinculo serviço-insumo não encontrado");
   }
 
   @Test

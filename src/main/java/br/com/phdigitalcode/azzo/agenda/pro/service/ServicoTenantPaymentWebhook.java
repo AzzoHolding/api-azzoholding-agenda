@@ -97,9 +97,9 @@ public class ServicoTenantPaymentWebhook {
     TenantPaymentSettings config =
         tenantPaymentSettingsRepository
             .findByWebhookToken(webhookToken)
-            .orElseThrow(() -> new ApiClientErrorException("Token de webhook invalido", 401));
+            .orElseThrow(() -> new ApiClientErrorException("Token de webhook inválido", 401));
     if (payload == null || payload.event == null || payload.event.isBlank()) {
-      throw new ApiClientErrorException("Payload de webhook invalido", 400);
+      throw new ApiClientErrorException("Payload de webhook inválido", 400);
     }
 
     String payloadJson = safeJson(payload);
@@ -281,7 +281,7 @@ public class ServicoTenantPaymentWebhook {
       byte[] bytes = digest.digest(payload.getBytes(StandardCharsets.UTF_8));
       return HexFormat.of().formatHex(bytes);
     } catch (NoSuchAlgorithmException e) {
-      throw new IllegalStateException("SHA-256 nao disponivel", e);
+      throw new IllegalStateException("SHA-256 não disponível", e);
     }
   }
 }

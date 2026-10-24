@@ -103,20 +103,20 @@ class NfseXmlSignerServiceTest {
   void xmlNuloOuVazioLancaIllegalArgument() {
     assertThatThrownBy(() -> service.sign(null, CERT_PASSWORD))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("XML NFS-e obrigatorio para assinatura.");
+        .hasMessage("XML NFS-e obrigatório para assinatura.");
     assertThatThrownBy(() -> service.sign("   ", CERT_PASSWORD))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("XML NFS-e obrigatorio para assinatura.");
+        .hasMessage("XML NFS-e obrigatório para assinatura.");
   }
 
   @Test
   void segredoNuloOuVazioLancaIllegalArgument() {
     assertThatThrownBy(() -> service.sign("<nfse/>", null))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Assinatura NFS-e requer segredo de sessao/certificado.");
+        .hasMessage("Assinatura NFS-e requer segredo de sessão/certificado.");
     assertThatThrownBy(() -> service.sign("<nfse/>", ""))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Assinatura NFS-e requer segredo de sessao/certificado.");
+        .hasMessage("Assinatura NFS-e requer segredo de sessão/certificado.");
   }
 
   @Test

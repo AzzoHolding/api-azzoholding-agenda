@@ -48,10 +48,10 @@ public class FiscalSequenceService {
 
   @Transactional
   public synchronized int nextNumber(UUID tenantId, String modelo, int serie, String ambiente) {
-    if (tenantId == null) throw new IllegalArgumentException("tenantId obrigatorio");
-    if (modelo == null || modelo.isBlank()) throw new IllegalArgumentException("modelo obrigatorio");
+    if (tenantId == null) throw new IllegalArgumentException("tenantId obrigatório");
+    if (modelo == null || modelo.isBlank()) throw new IllegalArgumentException("modelo obrigatório");
     if (ambiente == null || ambiente.isBlank()) {
-      throw new IllegalArgumentException("ambiente obrigatorio");
+      throw new IllegalArgumentException("ambiente obrigatório");
     }
     if (serie <= 0) throw new IllegalArgumentException("serie deve ser maior que zero");
 

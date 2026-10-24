@@ -71,7 +71,7 @@ public class MetaEmbeddedSignupClient implements MetaEmbeddedSignupGateway {
     JsonNode payload = sendGet(uri, null, "Falha ao trocar code do Embedded Signup por access token.");
     String accessToken = text(payload.path("access_token"));
     if (accessToken == null) {
-      throw new IllegalStateException("Meta nao retornou access token no code exchange.");
+      throw new IllegalStateException("Meta não retornou access token no code exchange.");
     }
     return accessToken;
   }
@@ -90,7 +90,7 @@ public class MetaEmbeddedSignupClient implements MetaEmbeddedSignupGateway {
     details.displayPhoneNumber = text(payload.path("display_phone_number"));
     details.verifiedName = text(payload.path("verified_name"));
     if (details.id == null) {
-      throw new IllegalStateException("Meta nao retornou id valido para o Phone Number ID informado.");
+      throw new IllegalStateException("Meta não retornou id válido para o Phone Number ID informado.");
     }
     return details;
   }
@@ -116,9 +116,9 @@ public class MetaEmbeddedSignupClient implements MetaEmbeddedSignupGateway {
       restClient.delete().uri(URI.create(uri)).retrieve().toBodilessEntity();
     } catch (RestClientResponseException e) {
       JsonNode payload = tryParseJson(e.getResponseBodyAsString());
-      throw new IllegalStateException(extractErrorMessage(payload, "Falha ao revogar permissoes na Meta."), e);
+      throw new IllegalStateException(extractErrorMessage(payload, "Falha ao revogar permissões na Meta."), e);
     } catch (Exception e) {
-      throw new IllegalStateException("Falha ao revogar permissoes na Meta.", e);
+      throw new IllegalStateException("Falha ao revogar permissões na Meta.", e);
     }
   }
 
@@ -168,7 +168,7 @@ public class MetaEmbeddedSignupClient implements MetaEmbeddedSignupGateway {
 
   private void ensureMetaCredentialsConfigured() {
     if (isUnset(appId) || isUnset(appSecret)) {
-      throw new IllegalStateException("META_APP_ID/META_APP_SECRET nao configurados.");
+      throw new IllegalStateException("META_APP_ID/META_APP_SECRET não configurados.");
     }
   }
 

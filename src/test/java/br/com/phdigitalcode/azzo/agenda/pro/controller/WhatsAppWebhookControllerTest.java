@@ -249,7 +249,7 @@ class WhatsAppWebhookControllerTest {
     WhatsAppWebhookController.WebhookResponse response = controller.receive(badSignature, body);
 
     assertThat(response.status).isEqualTo("REJECTED");
-    assertThat(response.message).isEqualTo("Assinatura invalida");
+    assertThat(response.message).isEqualTo("Assinatura inválida");
   }
 
   @Test
@@ -293,7 +293,7 @@ class WhatsAppWebhookControllerTest {
     WhatsAppWebhookController.WebhookResponse response = controller.receive(null, "{invalido");
 
     assertThat(response.status).isEqualTo("IGNORED");
-    assertThat(response.message).isEqualTo("Payload invalido");
+    assertThat(response.message).isEqualTo("Payload inválido");
   }
 
   @Test
@@ -585,7 +585,7 @@ class WhatsAppWebhookControllerTest {
     inbound.client = cli;
     when(chatService.processInboundWhatsAppMessage(any(), any(), any(), any(), any())).thenReturn(inbound);
     when(assistantApiClient.processarMensagem(any(), any(), any(), any()))
-        .thenThrow(new RuntimeException("Token do WhatsApp nao configurado para o tenant"));
+        .thenThrow(new RuntimeException("Token do WhatsApp não configurado para o tenant"));
     when(whatsAppClient.sendMessage(any(), any(), any())).thenReturn("provider-fallback-1");
 
     controller.receive(null, payload);

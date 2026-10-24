@@ -406,7 +406,7 @@ class ServicoSalonProfileTest {
       assertThatThrownBy(() -> service.atualizarPrivado(pedidoComSlug(ruim)))
           .as(ruim)
           .isInstanceOf(ApiClientErrorException.class)
-          .hasMessageContaining("Endereco de agendamento invalido");
+          .hasMessageContaining("Endereço de agendamento inválido");
       assertThat(tenant.getSlug()).as(ruim).isEqualTo("antigo");
     }
     verify(tenantRepository, never()).save(any());
@@ -422,7 +422,7 @@ class ServicoSalonProfileTest {
 
     assertThatThrownBy(() -> service.atualizarPrivado(pedidoComSlug("studio-bella")))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessageContaining("ja esta em uso por outro salao");
+        .hasMessageContaining("já esta em uso por outro salão");
   }
 
   /** A tela reenvia o perfil inteiro a cada gravacao: o proprio slug nao e "outro salao". */

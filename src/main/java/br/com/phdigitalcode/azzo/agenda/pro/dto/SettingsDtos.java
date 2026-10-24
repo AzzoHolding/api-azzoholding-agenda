@@ -45,7 +45,7 @@ public final class SettingsDtos {
   // --- Business Hours (tabela relacional) ---
 
   public static class BusinessHoursItemRequest {
-    @NotBlank(message = "Dia da semana e obrigatorio")
+    @NotBlank(message = "Dia da semana é obrigatório")
     public String dayOfWeek;
 
     @Pattern(

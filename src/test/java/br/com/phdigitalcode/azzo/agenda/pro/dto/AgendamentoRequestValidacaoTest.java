@@ -22,10 +22,10 @@ class AgendamentoRequestValidacaoTest {
     assertThat(VALIDADOR.validate(new AgendamentoRequest()))
         .extracting(ConstraintViolation::getMessage)
         .containsExactlyInAnyOrder(
-            "Cliente e obrigatorio",
-            "Profissional e obrigatorio",
-            "Data do agendamento e obrigatoria",
-            "Hora de inicio e obrigatoria");
+            "Cliente é obrigatório",
+            "Profissional é obrigatório",
+            "Data do agendamento é obrigatória",
+            "Hora de início é obrigatória");
   }
 
   @Test

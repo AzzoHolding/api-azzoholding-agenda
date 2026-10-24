@@ -44,11 +44,11 @@ public enum StatusAgendamento {
 
   public static void validarTransicao(StatusAgendamento atual, StatusAgendamento proximo) {
     if (atual == null || proximo == null) {
-      throw new IllegalArgumentException("Status de agendamento obrigatorio");
+      throw new IllegalArgumentException("Status de agendamento obrigatório");
     }
     if (!atual.canTransitionTo(proximo)) {
       throw new IllegalArgumentException(
-          "Transicao de status invalida: " + atual.name() + " -> " + proximo.name());
+          "Transicao de status inválida: " + atual.name() + " -> " + proximo.name());
     }
   }
 
@@ -58,6 +58,6 @@ public enum StatusAgendamento {
       if (item.name().equalsIgnoreCase(value.trim())) return item;
       if (item.description.equalsIgnoreCase(value.trim())) return item;
     }
-    throw new IllegalArgumentException("Status de agendamento invalido: " + value);
+    throw new IllegalArgumentException("Status de agendamento inválido: " + value);
   }
 }

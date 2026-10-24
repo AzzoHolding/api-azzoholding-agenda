@@ -72,7 +72,7 @@ class TelegramBotClientTest {
   void deveLancarIllegalArgumentQuandoChatIdVazio() {
     assertThatThrownBy(() -> client.sendMessage("123456:ABC-token", " ", "Ola"))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Destino do Telegram invalido.");
+        .hasMessage("Destino do Telegram inválido.");
   }
 
   @Test
@@ -89,7 +89,7 @@ class TelegramBotClientTest {
 
     assertThatThrownBy(() -> client.sendMessage(config, "42", "Ola"))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Token do bot do Telegram nao configurado.");
+        .hasMessage("Token do bot do Telegram não configurado.");
   }
 
   @Test

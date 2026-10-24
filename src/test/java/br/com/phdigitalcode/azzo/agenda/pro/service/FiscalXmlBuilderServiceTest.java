@@ -16,7 +16,7 @@ class FiscalXmlBuilderServiceTest {
   void invoiceNulaLancaIllegalArgument() {
     assertThatThrownBy(() -> service.buildAndValidate(null))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Invoice obrigatoria para gerar XML fiscal.");
+        .hasMessage("Invoice obrigatória para gerar XML fiscal.");
   }
 
   @Test

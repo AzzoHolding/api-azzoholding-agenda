@@ -99,7 +99,7 @@ class TelegramWebhookControllerTest {
     TelegramWebhookController.WebhookResponse response = controller.receive("nao-uuid", null, "{}");
 
     assertThat(response.status).isEqualTo("IGNORED");
-    assertThat(response.message).isEqualTo("tenantId invalido");
+    assertThat(response.message).isEqualTo("tenantId inválido");
   }
 
   @Test
@@ -131,7 +131,7 @@ class TelegramWebhookControllerTest {
         controller.receive(tenantId.toString(), "token-errado", "{}");
 
     assertThat(response.status).isEqualTo("REJECTED");
-    assertThat(response.message).isEqualTo("Secret token invalido");
+    assertThat(response.message).isEqualTo("Secret token inválido");
   }
 
   @Test
@@ -153,7 +153,7 @@ class TelegramWebhookControllerTest {
         controller.receive(tenantId.toString(), "segredo", "{invalido");
 
     assertThat(response.status).isEqualTo("IGNORED");
-    assertThat(response.message).isEqualTo("Payload invalido");
+    assertThat(response.message).isEqualTo("Payload inválido");
   }
 
   @Test
@@ -163,7 +163,7 @@ class TelegramWebhookControllerTest {
     TelegramWebhookController.WebhookResponse response = controller.receive(tenantId.toString(), "segredo", payload);
 
     assertThat(response.status).isEqualTo("IGNORED");
-    assertThat(response.message).isEqualTo("Mensagem sem chatId ou conteudo");
+    assertThat(response.message).isEqualTo("Mensagem sem chatId ou conteúdo");
   }
 
   @Test

@@ -169,11 +169,11 @@ public class AuthController {
   public UsuarioResponse me() {
     Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
     if (!(authentication != null && authentication.getPrincipal() instanceof JwtPrincipal jwtPrincipal)) {
-      throw new ApiClientErrorException("Nao autenticado", 401);
+      throw new ApiClientErrorException("Não autenticado", 401);
     }
     return usuarioRepository.findById(jwtPrincipal.userId())
         .map(usuarioMapper::toResponse)
-        .orElseThrow(() -> new ApiClientErrorException("Usuario nao encontrado", 401));
+        .orElseThrow(() -> new ApiClientErrorException("Usuário não encontrado", 401));
   }
 
   private String firstIp(String forwardedFor) {

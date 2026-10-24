@@ -19,7 +19,7 @@ public class PasswordPolicyValidator {
   public void validateOrThrow(String password) {
     if (!isValid(password)) {
       throw new IllegalArgumentException(
-          "Senha invalida. Requisitos: minimo de 8 caracteres, letra maiuscula, letra minuscula, numero e caractere especial.");
+          "Senha inválida. Requisitos: mínimo de 8 caracteres, letra maiuscula, letra minuscula, número e caractere especial.");
     }
   }
 

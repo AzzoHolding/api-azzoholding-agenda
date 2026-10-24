@@ -75,7 +75,7 @@ public class ServicoMembershipPlans {
   MembershipPlan buscarOuFalhar(UUID id, UUID tenantId) {
     return membershipPlanRepository
         .findByIdAndTenantId(id, tenantId)
-        .orElseThrow(() -> new ApiClientErrorException("Plano de assinatura nao encontrado.", 404));
+        .orElseThrow(() -> new ApiClientErrorException("Plano de assinatura não encontrado.", 404));
   }
 
   private void aplicar(MembershipDtos.PlanRequest request, MembershipPlan plano) {
@@ -95,7 +95,7 @@ public class ServicoMembershipPlans {
           .orElseThrow(
               () ->
                   new ApiClientErrorException(
-                      "Servico nao encontrado: " + beneficioRequest.serviceId, 404));
+                      "Serviço não encontrado: " + beneficioRequest.serviceId, 404));
 
       MembershipPlanBenefit beneficio = new MembershipPlanBenefit();
       beneficio.setTenantId(tenantId);

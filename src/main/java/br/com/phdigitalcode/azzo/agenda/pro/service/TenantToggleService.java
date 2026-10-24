@@ -65,7 +65,7 @@ public class TenantToggleService {
         String val = asString(key, value).toUpperCase();
         if (!VALID_USAGE_PROFILES.contains(val)) {
           throw new ApiClientErrorException(
-              "Perfil invalido: " + val + ". Valores aceitos: REACTIVE_ONLY, NOTIFICATIONS, COMPLETE", 400);
+              "Perfil inválido: " + val + ". Valores aceitos: REACTIVE_ONLY, NOTIFICATIONS, COMPLETE", 400);
         }
         config.setWhatsappUsageProfile(val);
         tenantWhatsAppConfigRepository.save(config);
@@ -90,7 +90,7 @@ public class TenantToggleService {
         tenantWhatsAppConfigRepository.save(config);
         return new ToggleResponse(key, val);
       }
-      default -> throw new ApiClientErrorException("Toggle nao suportado: " + key, 400);
+      default -> throw new ApiClientErrorException("Toggle não suportado: " + key, 400);
     }
   }
 
@@ -110,11 +110,11 @@ public class TenantToggleService {
   private boolean asBoolean(String key, Object value) {
     if (value instanceof Boolean b) return b;
     if (value instanceof String s) return Boolean.parseBoolean(s.trim());
-    throw new ApiClientErrorException("Valor invalido para " + key + ": esperado boolean", 400);
+    throw new ApiClientErrorException("Valor inválido para " + key + ": esperado boolean", 400);
   }
 
   private String asString(String key, Object value) {
     if (value instanceof String s && !s.isBlank()) return s.trim();
-    throw new ApiClientErrorException("Valor invalido para " + key + ": esperado string", 400);
+    throw new ApiClientErrorException("Valor inválido para " + key + ": esperado string", 400);
   }
 }

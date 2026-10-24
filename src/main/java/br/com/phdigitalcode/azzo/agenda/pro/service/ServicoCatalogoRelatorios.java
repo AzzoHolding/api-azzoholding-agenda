@@ -94,7 +94,7 @@ public class ServicoCatalogoRelatorios {
           "XLSX");
     }
     if (!"csv".equals(normalizedFormat)) {
-      throw new IllegalArgumentException("Formato invalido. Use csv ou xlsx.");
+      throw new IllegalArgumentException("Formato inválido. Use csv ou xlsx.");
     }
     return new ExportedReport(
         toCsv(definition, rows).getBytes(StandardCharsets.UTF_8),
@@ -155,8 +155,8 @@ public class ServicoCatalogoRelatorios {
   }
 
   private static void validatePeriod(LocalDate inicio, LocalDate fim) {
-    if (fim.isBefore(inicio)) throw new IllegalArgumentException("Periodo invalido");
-    if (inicio.plusDays(370).isBefore(fim)) throw new IllegalArgumentException("Periodo maximo de 370 dias");
+    if (fim.isBefore(inicio)) throw new IllegalArgumentException("Período inválido");
+    if (inicio.plusDays(370).isBefore(fim)) throw new IllegalArgumentException("Período máximo de 370 dias");
   }
 
   ReportDefinition definition(String rawKey) {
@@ -498,7 +498,7 @@ public class ServicoCatalogoRelatorios {
           ORDER BY EXTRACT(DAY FROM c.birth_date), c.name
           LIMIT :limit OFFSET :offset
           """);
-      default -> throw new IllegalArgumentException("Relatorio nao suportado: " + rawKey);
+      default -> throw new IllegalArgumentException("Relatório não suportado: " + rawKey);
     };
   }
 
@@ -555,7 +555,7 @@ public class ServicoCatalogoRelatorios {
       workbook.write(output);
       return output.toByteArray();
     } catch (Exception ex) {
-      throw new IllegalStateException("Falha ao gerar XLSX do relatorio.", ex);
+      throw new IllegalStateException("Falha ao gerar XLSX do relatório.", ex);
     }
   }
 

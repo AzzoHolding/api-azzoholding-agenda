@@ -39,7 +39,7 @@ public class ViaCepClient {
         throw new IllegalStateException("Falha ao consultar ViaCEP");
       }
       if (json.has("erro") && json.get("erro").asBoolean()) {
-        throw new IllegalArgumentException("CEP nao encontrado");
+        throw new IllegalArgumentException("CEP não encontrado");
       }
 
       ViaCepAddress payload = new ViaCepAddress();

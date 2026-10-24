@@ -64,7 +64,7 @@ public class NotificationController {
   public ResponseEntity<Map<String, Object>> marcarVisualizada(@PathVariable("id") UUID id) {
     boolean updated = notificationService.marcarComoVisualizada(id);
     if (!updated) {
-      throw new ApiClientErrorException("Notificacao nao encontrada", HttpStatus.NOT_FOUND.value());
+      throw new ApiClientErrorException("Notificação não encontrada", HttpStatus.NOT_FOUND.value());
     }
     return ResponseEntity.ok(Map.of("updated", true));
   }
@@ -82,7 +82,7 @@ public class NotificationController {
   public ResponseEntity<Void> remover(@PathVariable("id") UUID id) {
     boolean removed = notificationService.remover(id);
     if (!removed) {
-      throw new ApiClientErrorException("Notificacao nao encontrada", HttpStatus.NOT_FOUND.value());
+      throw new ApiClientErrorException("Notificação não encontrada", HttpStatus.NOT_FOUND.value());
     }
     return ResponseEntity.noContent().build();
   }
@@ -107,7 +107,7 @@ public class NotificationController {
       }
     } catch (Exception e) {
       throw new ApiClientErrorException(
-          "cursorCreatedAt ou cursorId invalido", HttpStatus.BAD_REQUEST.value());
+          "cursorCreatedAt ou cursorId inválido", HttpStatus.BAD_REQUEST.value());
     }
 
     if ((parsedCursorCreatedAt == null) != (parsedCursorId == null)) {

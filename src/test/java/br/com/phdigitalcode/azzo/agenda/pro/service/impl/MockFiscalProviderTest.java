@@ -110,7 +110,7 @@ class MockFiscalProviderTest {
   void obterInvoiceInexistenteLancaIllegalArgumentException() {
     assertThatThrownBy(() -> provider.obterInvoice(tenantId, "nao-existe"))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Invoice nao encontrada");
+        .hasMessage("Invoice não encontrada");
   }
 
   @Test
@@ -166,7 +166,7 @@ class MockFiscalProviderTest {
 
     assertThatThrownBy(() -> provider.autorizarInvoice(tenantId, criada.id))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Configure Razao Social do emitente.");
+        .hasMessage("Configure Razão Social do emitente.");
   }
 
   @Test
@@ -178,7 +178,7 @@ class MockFiscalProviderTest {
 
     assertThatThrownBy(() -> provider.autorizarInvoice(tenantId, criada.id))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Configure CNPJ valido do emitente (14 digitos).");
+        .hasMessage("Configure CNPJ válido do emitente (14 digitos).");
   }
 
   @Test

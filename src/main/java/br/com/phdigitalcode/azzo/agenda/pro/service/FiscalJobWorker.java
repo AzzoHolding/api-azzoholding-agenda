@@ -105,7 +105,7 @@ public class FiscalJobWorker {
               .orElseThrow(
                   () ->
                       new ApiClientErrorException(
-                          "Invoice fiscal nao encontrada para processamento DANFE.", 404));
+                          "Invoice fiscal não encontrada para processamento DANFE.", 404));
 
       FiscalDtos.Invoice invoiceDto =
           fiscalProvider.obterInvoice(job.getTenantId(), invoice.getExternalInvoiceId());

@@ -45,12 +45,12 @@ public class TermsService {
   @Transactional
   public TermsVersion publishVersion(
       String documentType, String version, String title, String content, UUID publishedBy) {
-    if (documentType == null || documentType.isBlank()) throw new IllegalArgumentException("documentType obrigatorio");
-    if (version == null || version.isBlank()) throw new IllegalArgumentException("version obrigatoria");
-    if (title == null || title.isBlank()) throw new IllegalArgumentException("title obrigatorio");
-    if (content == null || content.isBlank()) throw new IllegalArgumentException("content obrigatorio");
+    if (documentType == null || documentType.isBlank()) throw new IllegalArgumentException("documentType obrigatório");
+    if (version == null || version.isBlank()) throw new IllegalArgumentException("version obrigatória");
+    if (title == null || title.isBlank()) throw new IllegalArgumentException("title obrigatório");
+    if (content == null || content.isBlank()) throw new IllegalArgumentException("content obrigatório");
     if (termsVersionRepository.findByDocumentTypeAndVersion(documentType.trim(), version.trim()).isPresent()) {
-      throw new IllegalArgumentException("Versao de termo ja existe para o documentType informado");
+      throw new IllegalArgumentException("Versão de termo já existe para o documentType informado");
     }
 
     TermsVersion termsVersion = new TermsVersion();
@@ -69,7 +69,7 @@ public class TermsService {
   @Transactional
   public TermsLifecycleEvent disableVersion(UUID termsVersionId, UUID actorUserId, String reason) {
     TermsVersion termsVersion = termsVersionRepository.findById(termsVersionId)
-        .orElseThrow(() -> new IllegalArgumentException("Versao de termo nao encontrada"));
+        .orElseThrow(() -> new IllegalArgumentException("Versão de termo não encontrada"));
 
     String metadata = toJson(Map.of("reason", reason == null ? "" : reason.trim()));
     return createLifecycleEvent(termsVersion.getId(), AuditConstants.TermsEventType.DISABLED, actorUserId, metadata);
@@ -78,11 +78,11 @@ public class TermsService {
   @Transactional
   public AuditTermsAcceptance accept(
       UUID tenantId, UUID userId, UUID termsVersionId, String requestId, String ipAddress) {
-    if (tenantId == null) throw new IllegalArgumentException("tenantId obrigatorio");
-    if (userId == null) throw new IllegalArgumentException("userId obrigatorio");
-    if (termsVersionId == null) throw new IllegalArgumentException("termsVersionId obrigatorio");
+    if (tenantId == null) throw new IllegalArgumentException("tenantId obrigatório");
+    if (userId == null) throw new IllegalArgumentException("userId obrigatório");
+    if (termsVersionId == null) throw new IllegalArgumentException("termsVersionId obrigatório");
     TermsVersion termsVersion = termsVersionRepository.findById(termsVersionId)
-        .orElseThrow(() -> new IllegalArgumentException("Versao de termo nao encontrada"));
+        .orElseThrow(() -> new IllegalArgumentException("Versão de termo não encontrada"));
 
     AuditTermsAcceptance acceptance = new AuditTermsAcceptance();
     acceptance.setTenantId(tenantId);
@@ -108,9 +108,9 @@ public class TermsService {
   @Transactional(readOnly = true)
   public Map<String, Object> getAcceptanceProof(UUID acceptanceId) {
     AuditTermsAcceptance acceptance = termsAcceptanceRepository.findById(acceptanceId)
-        .orElseThrow(() -> new IllegalArgumentException("Aceite nao encontrado"));
+        .orElseThrow(() -> new IllegalArgumentException("Aceite não encontrado"));
     TermsVersion version = termsVersionRepository.findById(acceptance.getTermsVersionId())
-        .orElseThrow(() -> new IllegalArgumentException("Versao de termo nao encontrada para o aceite"));
+        .orElseThrow(() -> new IllegalArgumentException("Versão de termo não encontrada para o aceite"));
     return Map.ofEntries(
         Map.entry("acceptanceId", acceptance.getId().toString()),
         Map.entry("tenantId", acceptance.getTenantId().toString()),
@@ -137,13 +137,13 @@ public class TermsService {
 
   @Transactional(readOnly = true)
   public TermsVersion requireActiveVersion(String documentType, String version) {
-    if (documentType == null || documentType.isBlank()) throw new IllegalArgumentException("documentType obrigatorio");
-    if (version == null || version.isBlank()) throw new IllegalArgumentException("version obrigatoria");
+    if (documentType == null || documentType.isBlank()) throw new IllegalArgumentException("documentType obrigatório");
+    if (version == null || version.isBlank()) throw new IllegalArgumentException("version obrigatória");
     TermsVersion termsVersion = termsVersionRepository
         .findByDocumentTypeAndVersion(documentType.trim(), version.trim())
-        .orElseThrow(() -> new IllegalArgumentException("Versao de termo nao encontrada para o documentType informado"));
+        .orElseThrow(() -> new IllegalArgumentException("Versão de termo não encontrada para o documentType informado"));
     if (isDisabled(termsVersion.getId())) {
-      throw new IllegalArgumentException("Versao de termo desativada para aceite");
+      throw new IllegalArgumentException("Versão de termo desativada para aceite");
     }
     return termsVersion;
   }

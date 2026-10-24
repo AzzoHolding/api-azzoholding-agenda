@@ -39,11 +39,11 @@ public class RetentionService {
       String executedBy,
       String executionId,
       Map<String, Object> reportMetadata) {
-    if (policyVersion == null || policyVersion.isBlank()) throw new IllegalArgumentException("policyVersion obrigatoria");
-    if (retentionPeriodDays < 1) throw new IllegalArgumentException("retentionPeriodDays invalido");
-    if (windowStart == null || windowEnd == null) throw new IllegalArgumentException("janela de expurgo obrigatoria");
-    if (executedBy == null || executedBy.isBlank()) throw new IllegalArgumentException("executedBy obrigatorio");
-    if (executionId == null || executionId.isBlank()) throw new IllegalArgumentException("executionId obrigatorio");
+    if (policyVersion == null || policyVersion.isBlank()) throw new IllegalArgumentException("policyVersion obrigatória");
+    if (retentionPeriodDays < 1) throw new IllegalArgumentException("retentionPeriodDays inválido");
+    if (windowStart == null || windowEnd == null) throw new IllegalArgumentException("janela de expurgo obrigatória");
+    if (executedBy == null || executedBy.isBlank()) throw new IllegalArgumentException("executedBy obrigatório");
+    if (executionId == null || executionId.isBlank()) throw new IllegalArgumentException("executionId obrigatório");
 
     String reportJson = toJson(reportMetadata);
     String evidenceHash = sha256(

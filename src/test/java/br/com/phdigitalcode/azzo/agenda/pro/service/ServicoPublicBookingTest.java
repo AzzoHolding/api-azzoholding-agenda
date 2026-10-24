@@ -132,7 +132,7 @@ class ServicoPublicBookingTest {
 
     assertThatThrownBy(() -> service.listarServicosAtivos("inexistente"))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("Salao nao encontrado");
+        .hasMessageContaining("Salão não encontrado");
   }
 
   // ---- quem nao aceita agendamento fica fora do link publico ----
@@ -287,14 +287,14 @@ class ServicoPublicBookingTest {
   void obterDisponibilidadeLancaQuandoDataInvalida() {
     assertThatThrownBy(() -> service.obterDisponibilidade("salao-teste", "data-invalida", null, null, null))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("Data invalida");
+        .hasMessageContaining("Data inválida");
   }
 
   @Test
   void obterDisponibilidadeLancaQuandoServicoNaoInformado() {
     assertThatThrownBy(() -> service.obterDisponibilidade("salao-teste", "2026-01-01", null, null, null))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("Servico nao encontrado");
+        .hasMessageContaining("Serviço não encontrado");
   }
 
   @Test
@@ -395,7 +395,7 @@ class ServicoPublicBookingTest {
 
     assertThatThrownBy(() -> service.criarAgendamentoPublico("salao-teste", request))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("Horario indisponivel");
+        .hasMessageContaining("Horário indisponível");
   }
 
   @Test
@@ -618,7 +618,7 @@ class ServicoPublicBookingTest {
 
     assertThatThrownBy(() -> service.criarAgendamentoPublico("salao-teste", request))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("ja passou");
+        .hasMessageContaining("já passou");
     verify(agendamentoRepository, org.mockito.Mockito.never()).save(any(Agendamento.class));
   }
 
@@ -640,7 +640,7 @@ class ServicoPublicBookingTest {
 
     assertThatThrownBy(() -> service.criarAgendamentoPublico("salao-teste", request))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("nao atende neste horario");
+        .hasMessageContaining("não atende neste horário");
   }
 
   /** Quem esta no link nao tem login: nao pode trocar nome, e-mail e CPF de um cliente existente. */

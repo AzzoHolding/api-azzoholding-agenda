@@ -119,7 +119,7 @@ public class EmailJobProcessor {
           "EMAIL_VERIFICATION_LINK");
     }
 
-    throw new IllegalStateException("Tipo de email nao suportado: " + job.emailType());
+    throw new IllegalStateException("Tipo de email não suportado: " + job.emailType());
   }
 
   private <T> T readPayload(String payloadJson, Class<T> type) {

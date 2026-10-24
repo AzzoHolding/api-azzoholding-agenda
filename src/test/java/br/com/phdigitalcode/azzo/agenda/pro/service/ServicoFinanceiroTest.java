@@ -180,7 +180,7 @@ class ServicoFinanceiroTest {
 
     assertThatThrownBy(() -> servicoFinanceiro.criar(req))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessageContaining("Profissional nao encontrado");
+        .hasMessageContaining("Profissional não encontrado");
     verify(transacaoRepository, never()).save(any());
     verify(commissionService, never())
         .registerProductCommissionIfApplicable(
@@ -237,7 +237,7 @@ class ServicoFinanceiroTest {
 
     assertThatThrownBy(() -> servicoFinanceiro.deletar(transacaoId))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("Transacao nao encontrada")
+        .hasMessage("Transação não encontrada")
         .extracting(e -> ((ApiClientErrorException) e).getStatus())
         .isEqualTo(404);
   }
@@ -274,7 +274,7 @@ class ServicoFinanceiroTest {
 
     assertThatThrownBy(() -> servicoFinanceiro.renomearCategoria(id, "Nova"))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Ja existe uma categoria com este nome");
+        .hasMessage("Já existe uma categoria com este nome");
 
     assertThat(alvo.getName()).isEqualTo("Antiga");
   }

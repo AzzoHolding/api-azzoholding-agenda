@@ -58,7 +58,7 @@ class MetaSignedRequestServiceTest {
   void parseAndValidateSignedRequestRejeitaFormatoInvalido() {
     assertThatThrownBy(() -> service.parseAndValidateSignedRequest("sem-ponto"))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("invalido");
+        .hasMessageContaining("inválido");
   }
 
   @Test

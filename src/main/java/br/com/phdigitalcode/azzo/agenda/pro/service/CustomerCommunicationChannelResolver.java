@@ -29,7 +29,7 @@ public class CustomerCommunicationChannelResolver {
       ChatConversationEntity preferredConversation,
       String... whatsAppFallbacks) {
     if (tenantId == null || client == null || client.getId() == null) {
-      throw new IllegalArgumentException("Cliente invalido para roteamento de canal.");
+      throw new IllegalArgumentException("Cliente inválido para roteamento de canal.");
     }
 
     ChatConversationEntity conversation = preferredConversation != null

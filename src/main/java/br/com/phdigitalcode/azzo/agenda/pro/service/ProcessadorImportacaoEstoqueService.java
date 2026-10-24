@@ -255,7 +255,7 @@ public class ProcessadorImportacaoEstoqueService {
 
     try {
       if (job.getArquivoStorageKey() == null || job.getArquivoStorageKey().isBlank()) {
-        throw new IllegalStateException("Arquivo de importacao nao encontrado no storage.");
+        throw new IllegalStateException("Arquivo de importação não encontrado no storage.");
       }
       byte[] bytes =
           minioStorageService.baixarArquivo(job.getArquivoStorageKey(), job.getTenantId());

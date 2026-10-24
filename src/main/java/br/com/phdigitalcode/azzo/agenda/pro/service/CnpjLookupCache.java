@@ -58,7 +58,7 @@ public class CnpjLookupCache {
         throw new CnpjNaoEncontradoException();
       }
       LOG.error("Ambas as APIs falharam para CNPJ {}: {}", CnpjValidator.mask(cnpj), e.getMessage());
-      throw new CnpjApiIndisponivelException("Servico de consulta CNPJ temporariamente indisponivel. Tente novamente em instantes.");
+      throw new CnpjApiIndisponivelException("Serviço de consulta CNPJ temporariamente indisponível. Tente novamente em instantes.");
     }
   }
 }

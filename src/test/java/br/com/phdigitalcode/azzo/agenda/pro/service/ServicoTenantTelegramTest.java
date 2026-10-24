@@ -74,7 +74,7 @@ class ServicoTenantTelegramTest {
 
     assertThatThrownBy(() -> service.atualizar(request))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("obrigatorio na primeira configuracao");
+        .hasMessageContaining("obrigatório na primeira configuração");
   }
 
   @Test
@@ -128,7 +128,7 @@ class ServicoTenantTelegramTest {
     when(repository.findByTenantIdOrCreate(tenantId)).thenReturn(config);
     when(encryptionService.decrypt("enc-token")).thenReturn("bad-token");
     when(telegramBotClient.getMe(any(TenantTelegramConfig.class)))
-        .thenThrow(new IllegalArgumentException("Token do bot do Telegram nao configurado."));
+        .thenThrow(new IllegalArgumentException("Token do bot do Telegram não configurado."));
 
     TenantTelegramDtos.TestResponse response = service.testarConexao();
 

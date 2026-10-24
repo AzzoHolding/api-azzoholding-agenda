@@ -142,13 +142,13 @@ public class FiscalPersistenceService {
   @Transactional
   public String reservarNumeroFiscal(
       UUID tenantId, String externalInvoiceId, String modelo, int serie, String ambiente) {
-    if (tenantId == null) throw new IllegalArgumentException("tenantId obrigatorio");
+    if (tenantId == null) throw new IllegalArgumentException("tenantId obrigatório");
     if (externalInvoiceId == null || externalInvoiceId.isBlank()) {
-      throw new IllegalArgumentException("externalInvoiceId obrigatorio");
+      throw new IllegalArgumentException("externalInvoiceId obrigatório");
     }
-    if (modelo == null || modelo.isBlank()) throw new IllegalArgumentException("modelo obrigatorio");
+    if (modelo == null || modelo.isBlank()) throw new IllegalArgumentException("modelo obrigatório");
     if (ambiente == null || ambiente.isBlank()) {
-      throw new IllegalArgumentException("ambiente obrigatorio");
+      throw new IllegalArgumentException("ambiente obrigatório");
     }
     if (serie <= 0) throw new IllegalArgumentException("serie deve ser maior que zero");
 
@@ -156,7 +156,7 @@ public class FiscalPersistenceService {
         fiscalInvoiceRepository
             .findByTenantAndExternalInvoiceIdForUpdate(tenantId, externalInvoiceId)
             .orElseThrow(
-                () -> new IllegalArgumentException("Invoice nao encontrada para reserva de numeracao fiscal"));
+                () -> new IllegalArgumentException("Invoice não encontrada para reserva de numeracao fiscal"));
 
     if (entity.getNumeroNf() != null && !entity.getNumeroNf().isBlank()) {
       return entity.getNumeroNf();

@@ -90,19 +90,19 @@ class AppointmentServiceTest {
   void validaEntrada() {
     assertThatThrownBy(() -> service.findAvailableSlots(null, professionalId, DATA, 30, 0))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("tenantId obrigatorio");
+        .hasMessage("tenantId obrigatório");
     assertThatThrownBy(() -> service.findAvailableSlots(tenantId, null, DATA, 30, 0))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("professionalId obrigatorio");
+        .hasMessage("professionalId obrigatório");
     assertThatThrownBy(() -> service.findAvailableSlots(tenantId, professionalId, null, 30, 0))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("date obrigatoria");
+        .hasMessage("date obrigatória");
     assertThatThrownBy(() -> service.findAvailableSlots(tenantId, professionalId, DATA, 0, 0))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("serviceDurationMinutes invalido");
+        .hasMessage("serviceDurationMinutes inválido");
     assertThatThrownBy(() -> service.findAvailableSlots(tenantId, professionalId, DATA, 30, -1))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("bufferMinutes invalido");
+        .hasMessage("bufferMinutes inválido");
 
     verify(specialClosureService, never()).isClosedAt(any(), any(), any(), any(), any());
   }
@@ -116,7 +116,7 @@ class AppointmentServiceTest {
 
     assertThatThrownBy(() -> service.findAvailableSlots(tenantId, professionalId, DATA, 30, 0))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Profissional nao encontrado para o tenant informado");
+        .hasMessage("Profissional não encontrado para o tenant informado");
   }
 
   @Test

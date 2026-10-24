@@ -64,21 +64,21 @@ public class RefreshTokenService {
   @Transactional
   public RefreshSession rotateAndGetSession(String rawRefreshToken) {
     if (rawRefreshToken == null || rawRefreshToken.isBlank()) {
-      throw new ApiClientErrorException("refresh_token invalido", 401);
+      throw new ApiClientErrorException("refresh_token inválido", 401);
     }
     Instant now = Instant.now();
     String currentHash = hashToken(rawRefreshToken.trim());
     RefreshToken current = refreshTokenRepository.findActiveByHash(currentHash, now).orElse(null);
     if (current == null) {
       revogarFamiliaSeForReuso(currentHash, now);
-      throw new ApiClientErrorException("refresh_token invalido ou expirado", 401);
+      throw new ApiClientErrorException("refresh_token inválido ou expirado", 401);
     }
 
     Usuario user = usuarioRepository.findById(current.getUserId())
-        .orElseThrow(() -> new ApiClientErrorException("Usuario do refresh_token nao encontrado", 401));
+        .orElseThrow(() -> new ApiClientErrorException("Usuário do refresh_token não encontrado", 401));
     if (current.getTenantId() != null && user.getTenantId() != null
         && !current.getTenantId().equals(user.getTenantId())) {
-      throw new ApiClientErrorException("refresh_token invalido para o tenant atual", 401);
+      throw new ApiClientErrorException("refresh_token inválido para o tenant atual", 401);
     }
     // Sem isto, quem foi desligado continuava renovando a sessao que ja tinha aberta por ate 30
     // dias. O token apresentado e revogado ali mesmo: nao serve para uma segunda tentativa.
@@ -93,7 +93,7 @@ public class RefreshTokenService {
     // Pentest 14/10/2026 (SEG-015): consulta e troca eram separadas, sem trava — duas requisicoes
     // com o MESMO token criavam duas sessoes validas. Agora so quem reivindica a linha ativa segue.
     if (refreshTokenRepository.reivindicar(current.getId(), newHash, now) != 1) {
-      throw new ApiClientErrorException("refresh_token invalido ou expirado", 401);
+      throw new ApiClientErrorException("refresh_token inválido ou expirado", 401);
     }
     RefreshToken replacement = new RefreshToken();
     replacement.setUserId(user.getId());

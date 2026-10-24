@@ -9,12 +9,12 @@ public enum ChatMessageDirection {
 
   public static ChatMessageDirection from(String value) {
     if (value == null || value.isBlank()) {
-      throw new IllegalArgumentException("Direcao da mensagem obrigatoria.");
+      throw new IllegalArgumentException("Direcao da mensagem obrigatória.");
     }
     try {
       return ChatMessageDirection.valueOf(value.trim().toUpperCase(Locale.ROOT));
     } catch (IllegalArgumentException e) {
-      throw new IllegalArgumentException("Direcao da mensagem invalida: " + value);
+      throw new IllegalArgumentException("Direcao da mensagem inválida: " + value);
     }
   }
 }

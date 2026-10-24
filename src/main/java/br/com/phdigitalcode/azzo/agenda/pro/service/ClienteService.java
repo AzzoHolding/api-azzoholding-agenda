@@ -121,7 +121,7 @@ public class ClienteService {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Cliente cliente = clienteRepository.findByIdAndTenantId(id, tenantId).orElseThrow(() -> {
       LOG.warn("customers.getById.notFound {}", CorrelatedLogging.context("tenantId", tenantId, "clientId", id));
-      return new IllegalArgumentException("Cliente nao encontrado");
+      return new IllegalArgumentException("Cliente não encontrado");
     });
     LOG.info("customers.getById.completed {}", CorrelatedLogging.context("tenantId", tenantId, "clientId", id));
     return toDetailResponse(cliente, clienteStatsRepository.findStatsByTenantAndClient(tenantId, cliente.getId()), List.of());
@@ -133,7 +133,7 @@ public class ClienteService {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Cliente cliente = clienteRepository.findByIdAndTenantId(id, tenantId).orElseThrow(() -> {
       LOG.warn("customers.indicators.notFound {}", CorrelatedLogging.context("tenantId", tenantId, "clientId", id));
-      return new IllegalArgumentException("Cliente nao encontrado");
+      return new IllegalArgumentException("Cliente não encontrado");
     });
     java.time.LocalDate hoje = java.time.LocalDate.now(java.time.ZoneId.of("America/Sao_Paulo"));
     java.time.LocalDate desde = hoje.minusMonths(12);
@@ -177,7 +177,7 @@ public class ClienteService {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Cliente c = clienteRepository.findByIdAndTenantId(id, tenantId).orElseThrow(() -> {
       LOG.warn("customers.update.notFound {}", CorrelatedLogging.context("tenantId", tenantId, "clientId", id));
-      return new IllegalArgumentException("Cliente nao encontrado");
+      return new IllegalArgumentException("Cliente não encontrado");
     });
 
     ClienteStats beforeStats = clienteStatsRepository.findStatsByTenantAndClient(tenantId, c.getId());
@@ -201,7 +201,7 @@ public class ClienteService {
     Cliente before = clienteRepository.findByIdAndTenantId(id, tenantId).orElse(null);
     if (before == null) {
       LOG.warn("customers.delete.notFound {}", CorrelatedLogging.context("tenantId", tenantId, "clientId", id));
-      throw new IllegalArgumentException("Cliente nao encontrado");
+      throw new IllegalArgumentException("Cliente não encontrado");
     }
     // Cliente com historico nao se apaga: o banco levava junto os pacotes COMPRADOS e as
     // assinaturas (dinheiro recebido, sessoes devidas), e o resto estourava como "erro
@@ -213,7 +213,7 @@ public class ClienteService {
           "tenantId", tenantId, "clientId", id, "vinculos", vinculos));
       throw new IllegalArgumentException(
           "Este cliente tem " + String.join(", ", vinculos)
-              + " e nao pode ser excluido. Para remover os dados pessoais, use a anonimizacao"
+              + " e não pode ser excluído. Para remover os dados pessoais, use a anonimizacao"
               + " (LGPD).");
     }
 
@@ -236,7 +236,7 @@ public class ClienteService {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Cliente cliente = clienteRepository.findByIdAndTenantId(id, tenantId).orElseThrow(() -> {
       LOG.warn("customers.avatar.update.notFound {}", CorrelatedLogging.context("tenantId", tenantId, "clientId", id));
-      return new IllegalArgumentException("Cliente nao encontrado");
+      return new IllegalArgumentException("Cliente não encontrado");
     });
 
     String avatarAnterior = cliente.getAvatar();
@@ -260,7 +260,7 @@ public class ClienteService {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Cliente cliente = clienteRepository.findByIdAndTenantId(id, tenantId).orElseThrow(() -> {
       LOG.warn("customers.avatar.remove.notFound {}", CorrelatedLogging.context("tenantId", tenantId, "clientId", id));
-      return new IllegalArgumentException("Cliente nao encontrado");
+      return new IllegalArgumentException("Cliente não encontrado");
     });
 
     String avatarAnterior = cliente.getAvatar();

@@ -276,7 +276,7 @@ public class AgendamentoQueryRepository {
         afterId == null
             ? null
             : findNoShowCursor(tenantId, afterId)
-                .orElseThrow(() -> new IllegalArgumentException("Cursor de paginacao invalido"));
+                .orElseThrow(() -> new IllegalArgumentException("Cursor de paginacao inválido"));
 
     StringBuilder sql =
         new StringBuilder(

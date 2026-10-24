@@ -116,10 +116,10 @@ public class ServicoFechamentoCaixa {
           tenantId, "FINANCE_CASH_CLOSING_OPEN", null,
           Map.of("businessDate", businessDate.toString()),
           "Nao e possivel abrir caixa para uma data futura.");
-      throw new IllegalArgumentException("Nao e possivel abrir caixa para uma data futura.");
+      throw new IllegalArgumentException("Não é possível abrir caixa para uma data futura.");
     }
     if (fechamentoCaixaRepository.findByTenantIdAndBusinessDate(tenantId, businessDate).isPresent()) {
-      throw new IllegalStateException("Ja existe fechamento de caixa para a data informada");
+      throw new IllegalStateException("Já existe fechamento de caixa para a data informada");
     }
 
     FechamentoCaixa fechamento = new FechamentoCaixa();
@@ -144,10 +144,10 @@ public class ServicoFechamentoCaixa {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     FechamentoCaixa fechamento = getOrFail(tenantId, id);
     if (fechamento.getStatus() != StatusFechamentoCaixa.OPEN) {
-      throw new IllegalStateException("Fechamento de caixa ja encerrado");
+      throw new IllegalStateException("Fechamento de caixa já encerrado");
     }
     if (request == null || request.countedTotals == null) {
-      throw new IllegalArgumentException("countedTotals e obrigatorio");
+      throw new IllegalArgumentException("countedTotals é obrigatório");
     }
 
     Map<MetodoPagamento, BigDecimal> expected =
@@ -223,14 +223,14 @@ public class ServicoFechamentoCaixa {
     FechamentoCaixa fechamento = getOrFail(tenantId, id);
 
     if (!fechamento.getBusinessDate().isAfter(LocalDate.now(ZONA_BR))) {
-      throw new IllegalArgumentException("So e possivel remover caixas de datas futuras.");
+      throw new IllegalArgumentException("Só é possível remover caixas de datas futuras.");
     }
 
     Instant from = fechamento.getBusinessDate().atStartOfDay(ZONA_BR).toInstant();
     Instant to =
         fechamento.getBusinessDate().plusDays(1).atStartOfDay(ZONA_BR).minusNanos(1).toInstant();
     if (transacaoRepository.existsInPeriod(tenantId, from, to)) {
-      throw new IllegalArgumentException("Este caixa ja tem movimento lancado e nao pode ser removido.");
+      throw new IllegalArgumentException("Este caixa já tem movimento lancado e não pode ser removido.");
     }
 
     Map<String, Object> before = buildAuditPayload(fechamento);
@@ -243,7 +243,7 @@ public class ServicoFechamentoCaixa {
   private FechamentoCaixa getOrFail(UUID tenantId, UUID id) {
     return fechamentoCaixaRepository
         .findByTenantIdAndId(tenantId, id)
-        .orElseThrow(() -> new ApiClientErrorException("Fechamento de caixa nao encontrado", 404));
+        .orElseThrow(() -> new ApiClientErrorException("Fechamento de caixa não encontrado", 404));
   }
 
   /**
@@ -397,13 +397,13 @@ public class ServicoFechamentoCaixa {
     }
     for (Map.Entry<String, BigDecimal> entry : rawTotals.entrySet()) {
       if (entry.getKey() == null || entry.getKey().isBlank()) {
-        throw new IllegalArgumentException("Metodo de pagamento invalido");
+        throw new IllegalArgumentException("Metodo de pagamento inválido");
       }
       MetodoPagamento method;
       try {
         method = MetodoPagamento.valueOf(entry.getKey().trim().toUpperCase(Locale.ROOT));
       } catch (Exception e) {
-        throw new IllegalArgumentException("Metodo de pagamento invalido: " + entry.getKey());
+        throw new IllegalArgumentException("Metodo de pagamento inválido: " + entry.getKey());
       }
       normalized.put(method, entry.getValue() != null ? entry.getValue() : BigDecimal.ZERO);
     }

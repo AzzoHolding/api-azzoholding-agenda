@@ -51,7 +51,7 @@ public class SefinNacionalXmlLayoutBuilder extends AbstractNfseXmlLayoutBuilder 
 
   @Override
   public String buildAndValidateAuthorizationXml(NfseInvoiceEntity invoice) {
-    if (invoice == null) throw new IllegalArgumentException("NFS-e obrigatoria para gerar XML.");
+    if (invoice == null) throw new IllegalArgumentException("NFS-e obrigatória para gerar XML.");
     NfseConfigEntity config = nfseConfigRepository.findByTenantAndAmbiente(invoice.getTenantId(), invoice.getAmbiente())
         .orElseThrow(() -> new IllegalArgumentException("NFSE_PROVIDER_SEFIN_NACIONAL_CONFIG_MISSING"));
     FiscalTaxConfigEntity taxConfig = fiscalTaxConfigRepository.findByTenantId(invoice.getTenantId())

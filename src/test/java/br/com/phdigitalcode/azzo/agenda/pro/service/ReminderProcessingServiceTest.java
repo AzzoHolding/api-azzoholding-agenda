@@ -475,8 +475,8 @@ class ReminderProcessingServiceTest {
   }
 
   /**
-   * Opt-out vale em qualquer canal. Ate 2026-10-13 este teste fixava o contrario ("irrelevante para
-   * Telegram"): quem tinha pedido para parar continuava recebendo lembrete pelo Telegram.
+   * Opt-out vale em qualquer canal. Ate 2026-10-13 este teste fixava o contrario ("irrelevante para"
+   * Telegram"): quem tinha pedido para parar continuava recebendo lembrete pelo Telegram."
    */
   @Test
   void optOutTambemValeNoTelegram() {

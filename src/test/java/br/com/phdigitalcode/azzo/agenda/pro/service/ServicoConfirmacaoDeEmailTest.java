@@ -98,7 +98,7 @@ class ServicoConfirmacaoDeEmailTest {
 
     assertThatThrownBy(() -> servico.confirmar("qualquer"))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessageContaining("invalido ou expirado");
+        .hasMessageContaining("inválido ou expirado");
     assertThatThrownBy(() -> servico.confirmar(" "))
         .isInstanceOf(ApiClientErrorException.class);
     verify(usuarios, never()).save(any());

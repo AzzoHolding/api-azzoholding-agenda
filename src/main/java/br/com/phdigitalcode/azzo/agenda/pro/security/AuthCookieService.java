@@ -40,7 +40,7 @@ public class AuthCookieService {
   void validateSecurityCookiePolicy() {
     if ("None".equalsIgnoreCase(resolveSameSitePolicy()) && !secureCookie) {
       throw new IllegalStateException(
-          "Configuracao invalida: SameSite=None exige app.auth.cookie.secure=true");
+          "Configuração inválida: SameSite=None exige app.auth.cookie.secure=true");
     }
   }
 

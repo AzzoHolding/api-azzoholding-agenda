@@ -334,7 +334,7 @@ public class ReminderProcessingService {
 
     String whatsAppDestination = normalizeDigits(resolvedChannel.externalContactId());
     if (whatsAppDestination.length() < 10) {
-      throw new IllegalArgumentException("Cliente sem telefone valido para lembrete via WhatsApp.");
+      throw new IllegalArgumentException("Cliente sem telefone válido para lembrete via WhatsApp.");
     }
     return new ReminderRoute(ChatChannel.WHATSAPP, whatsAppDestination);
   }

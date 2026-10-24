@@ -23,7 +23,7 @@ public final class DataUtil {
       }
       return LocalDate.parse(valor);
     } catch (DateTimeParseException e) {
-      throw new IllegalArgumentException("Data invalida (use yyyy-MM-dd): " + valor);
+      throw new IllegalArgumentException("Data inválida (use yyyy-MM-dd): " + valor);
     }
   }
 

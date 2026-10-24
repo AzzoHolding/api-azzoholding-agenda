@@ -391,7 +391,7 @@ class ServicoAgendamentosTest {
 
       assertThatThrownBy(() -> service.criar(requestValido()))
           .isInstanceOf(IllegalArgumentException.class)
-          .hasMessage("Salao fechado na data informada");
+          .hasMessage("Salão fechado na data informada");
       verify(agendamentoQueryRepository, never()).lockProfessionalDateForWrite(any(), any(), any());
     }
 
@@ -426,7 +426,7 @@ class ServicoAgendamentosTest {
 
       assertThatThrownBy(() -> service.criar(requestValido()))
           .isInstanceOf(IllegalArgumentException.class)
-          .hasMessage("Salao ou profissional com fechamento especial no horario informado");
+          .hasMessage("Salão ou profissional com fechamento especial no horário informado");
     }
 
     @Test
@@ -454,7 +454,7 @@ class ServicoAgendamentosTest {
 
       assertThatThrownBy(() -> service.criar(requestValido()))
           .isInstanceOf(IllegalArgumentException.class)
-          .hasMessage("O profissional nao atende neste horario");
+          .hasMessage("O profissional não atende neste horário");
     }
 
     @Test
@@ -466,7 +466,7 @@ class ServicoAgendamentosTest {
 
       assertThatThrownBy(() -> service.criar(requestValido()))
           .isInstanceOf(IllegalArgumentException.class)
-          .hasMessage("Profissional nao encontrado ou inativo");
+          .hasMessage("Profissional não encontrado ou inativo");
     }
 
     @Test
@@ -497,7 +497,7 @@ class ServicoAgendamentosTest {
 
       assertThatThrownBy(() -> service.criar(requestValido()))
           .isInstanceOf(IllegalArgumentException.class)
-          .hasMessage("Profissional nao atende o servico selecionado");
+          .hasMessage("Profissional não atende o serviço selecionado");
     }
 
     @Test
@@ -508,7 +508,7 @@ class ServicoAgendamentosTest {
 
       assertThatThrownBy(() -> service.criar(requestValido()))
           .isInstanceOf(AppointmentConflictException.class)
-          .hasMessage("Profissional indisponivel neste horario.");
+          .hasMessage("Profissional indisponível neste horário.");
       verify(agendamentoRepository, never()).saveAndFlush(any(Agendamento.class));
     }
 
@@ -522,7 +522,7 @@ class ServicoAgendamentosTest {
 
       assertThatThrownBy(() -> service.criar(req))
           .isInstanceOf(AppointmentConflictException.class)
-          .hasMessage("Horario ja utilizado para este profissional. Confirme o conflito para continuar.");
+          .hasMessage("Horário já utilizado para este profissional. Confirme o conflito para continuar.");
     }
 
     @Test
@@ -537,7 +537,7 @@ class ServicoAgendamentosTest {
 
       assertThatThrownBy(() -> service.criar(req))
           .isInstanceOf(AppointmentConflictException.class)
-          .hasMessage("Profissional indisponivel neste horario.");
+          .hasMessage("Profissional indisponível neste horário.");
     }
 
     @Test
@@ -584,7 +584,7 @@ class ServicoAgendamentosTest {
 
       assertThatThrownBy(() -> service.criar(requestValido()))
           .isInstanceOf(IllegalArgumentException.class)
-          .hasMessage("Cliente nao encontrado");
+          .hasMessage("Cliente não encontrado");
       verify(agendamentoRepository, never()).saveAndFlush(any());
     }
 
@@ -593,15 +593,15 @@ class ServicoAgendamentosTest {
     void semClienteOuProfissionalDizOCampo() {
       AgendamentoRequest semCliente = requestValido();
       semCliente.clientId = null;
-      assertThatThrownBy(() -> service.criar(semCliente)).hasMessage("Cliente e obrigatorio");
+      assertThatThrownBy(() -> service.criar(semCliente)).hasMessage("Cliente é obrigatório");
 
       AgendamentoRequest semProfissional = requestValido();
       semProfissional.professionalId = " ";
-      assertThatThrownBy(() -> service.criar(semProfissional)).hasMessage("Profissional e obrigatorio");
+      assertThatThrownBy(() -> service.criar(semProfissional)).hasMessage("Profissional é obrigatório");
 
       AgendamentoRequest idRuim = requestValido();
       idRuim.professionalId = "nao-e-uuid";
-      assertThatThrownBy(() -> service.criar(idRuim)).hasMessage("Profissional invalido");
+      assertThatThrownBy(() -> service.criar(idRuim)).hasMessage("Profissional inválido");
     }
 
     @Test
@@ -612,7 +612,7 @@ class ServicoAgendamentosTest {
       concluido.status = "COMPLETED";
 
       assertThatThrownBy(() -> service.criar(concluido))
-          .hasMessage("Agendamento novo so pode ser criado como pendente ou confirmado");
+          .hasMessage("Agendamento novo só pode ser criado como pendente ou confirmado");
       verify(agendamentoRepository, never()).saveAndFlush(any());
       verify(commissionService, never())
           .registerServiceCommissionsIfApplicable(any(), any(), any(), any(), any());
@@ -785,7 +785,7 @@ class ServicoAgendamentosTest {
 
       assertThatThrownBy(() -> service.atualizarStatus(a.getId(), "COMPLETED"))
           .isInstanceOf(IllegalArgumentException.class)
-          .hasMessage("Transicao de status invalida: PENDING -> COMPLETED");
+          .hasMessage("Transicao de status inválida: PENDING -> COMPLETED");
     }
 
     @Test
@@ -941,7 +941,7 @@ class ServicoAgendamentosTest {
 
       assertThatThrownBy(() -> service.atualizarStatus(a.getId(), "CANCELLED"))
           .isInstanceOf(IllegalArgumentException.class)
-          .hasMessageContaining("a comanda vinculada ja foi fechada");
+          .hasMessageContaining("a comanda vinculada já foi fechada");
       assertThat(a.getStatus()).isEqualTo(StatusAgendamento.COMPLETED);
     }
 
@@ -1112,7 +1112,7 @@ class ServicoAgendamentosTest {
 
       assertThatThrownBy(() -> service.atualizarStatus(a.getId(), "COMPLETED", "PIX", "PAY_NOW"))
           .isInstanceOf(IllegalArgumentException.class)
-          .hasMessageContaining("Forma de pagamento nao suportada para 'pagar agora': PIX");
+          .hasMessageContaining("Forma de pagamento não suportada para 'pagar agora': PIX");
     }
   }
 
@@ -1138,7 +1138,7 @@ class ServicoAgendamentosTest {
 
       assertThatThrownBy(() -> service.registrarPresenca(a.getId(), false))
           .isInstanceOf(IllegalArgumentException.class)
-          .hasMessage("Nao compareceu so pode ser marcado 5 minutos apos o horario agendado");
+          .hasMessage("Não compareceu só pode ser marcado 5 minutos após o horário agendado");
       assertThat(a.getStatus()).isEqualTo(StatusAgendamento.CONFIRMED);
     }
 
@@ -1190,7 +1190,7 @@ class ServicoAgendamentosTest {
 
       assertThatThrownBy(() -> service.registrarPresenca(a.getId(), true))
           .isInstanceOf(IllegalArgumentException.class)
-          .hasMessage("Acesso negado: agendamento nao pertence ao profissional");
+          .hasMessage("Acesso negado: agendamento não pertence ao profissional");
     }
 
     @Test
@@ -1232,7 +1232,7 @@ class ServicoAgendamentosTest {
 
       assertThatThrownBy(() -> service.atualizar(a.getId(), new AppointmentUpdateRequest()))
           .isInstanceOf(IllegalArgumentException.class)
-          .hasMessage("Nao e permitido editar agendamento concluido ou cancelado");
+          .hasMessage("Não é permitido editar agendamento concluído ou cancelado");
     }
 
     @Test
@@ -1311,7 +1311,7 @@ class ServicoAgendamentosTest {
 
       assertThatThrownBy(() -> service.realocarProfissional(a.getId(), novoProfId))
           .isInstanceOf(IllegalArgumentException.class)
-          .hasMessage("Profissional nao atende um ou mais servicos do agendamento");
+          .hasMessage("Profissional não atende um ou mais serviços do agendamento");
     }
 
     @Test
@@ -1352,7 +1352,7 @@ class ServicoAgendamentosTest {
 
       assertThatThrownBy(() -> service.realocarProfissional(a.getId(), novoProfId))
           .isInstanceOf(IllegalArgumentException.class)
-          .hasMessage("Profissional indisponivel neste horario");
+          .hasMessage("Profissional indisponível neste horário");
     }
 
     // ─── AGD-002 / BNC-003: edicao e realocacao tomam o mesmo lock da criacao ───────────────
@@ -1513,7 +1513,7 @@ class ServicoAgendamentosTest {
 
       assertThatThrownBy(() -> service.atualizar(a.getId(), trocarSoOProfissional(colegaId)))
           .isInstanceOf(RuntimeException.class)
-          .hasMessageContaining("Profissional indisponivel");
+          .hasMessageContaining("Profissional indisponível");
 
       verify(agendamentoRepository, never()).save(any(Agendamento.class));
     }
@@ -1528,7 +1528,7 @@ class ServicoAgendamentosTest {
 
       assertThatThrownBy(() -> service.atualizar(a.getId(), trocarSoOProfissional(colegaId)))
           .isInstanceOf(IllegalArgumentException.class)
-          .hasMessage("Salao ou profissional com fechamento especial no horario informado");
+          .hasMessage("Salão ou profissional com fechamento especial no horário informado");
 
       verify(agendamentoRepository, never()).save(any(Agendamento.class));
     }
@@ -1548,7 +1548,7 @@ class ServicoAgendamentosTest {
 
       assertThatThrownBy(() -> service.atualizar(a.getId(), trocarSoOProfissional(colegaId)))
           .isInstanceOf(IllegalArgumentException.class)
-          .hasMessage("O profissional nao atende neste horario");
+          .hasMessage("O profissional não atende neste horário");
 
       verify(agendamentoRepository, never()).save(any(Agendamento.class));
     }
@@ -1567,7 +1567,7 @@ class ServicoAgendamentosTest {
 
       assertThatThrownBy(() -> service.atualizar(a.getId(), trocarSoOProfissional(colegaId)))
           .isInstanceOf(IllegalArgumentException.class)
-          .hasMessage("Profissional nao atende um ou mais servicos do agendamento");
+          .hasMessage("Profissional não atende um ou mais serviços do agendamento");
 
       verify(agendamentoRepository, never()).save(any(Agendamento.class));
     }
@@ -1595,7 +1595,7 @@ class ServicoAgendamentosTest {
 
       assertThatThrownBy(() -> service.realocarProfissional(a.getId(), UUID.randomUUID()))
           .isInstanceOf(IllegalArgumentException.class)
-          .hasMessage("Nao e permitido realocar agendamento concluido ou cancelado");
+          .hasMessage("Não é permitido realocar agendamento concluído ou cancelado");
     }
   }
 
@@ -1605,7 +1605,7 @@ class ServicoAgendamentosTest {
   @DisplayName("profissional so acessa o proprio agendamento")
   class ProfissionalSoMexeNoProprio {
 
-    private static final String NEGADO = "Acesso negado: agendamento nao pertence ao profissional";
+    private static final String NEGADO = "Acesso negado: agendamento não pertence ao profissional";
 
     private Agendamento doColega;
 
@@ -1780,7 +1780,7 @@ class ServicoAgendamentosTest {
 
       assertThatThrownBy(() -> service.deletarNotaCliente(a.getId(), noteId))
           .isInstanceOf(IllegalArgumentException.class)
-          .hasMessage("Nota operacional nao encontrada");
+          .hasMessage("Nota operacional não encontrada");
     }
   }
 
@@ -1870,7 +1870,7 @@ class ServicoAgendamentosTest {
     void mesInvalidoNasMetricas() {
       assertThatThrownBy(() -> service.listarMetricasDiarias(13, 2030))
           .isInstanceOf(IllegalArgumentException.class)
-          .hasMessage("Mes invalido. Informe valor entre 1 e 12");
+          .hasMessage("Mês inválido. Informe valor entre 1 e 12");
     }
 
     @Test
@@ -1915,7 +1915,7 @@ class ServicoAgendamentosTest {
 
       assertThatThrownBy(() -> service.obterDetalhe(id))
           .isInstanceOf(IllegalArgumentException.class)
-          .hasMessage("Agendamento nao encontrado");
+          .hasMessage("Agendamento não encontrado");
     }
 
     @Test
@@ -1964,7 +1964,7 @@ class ServicoAgendamentosTest {
                   service.listarRelatorioGerencial(
                       LocalDate.of(2030, 2, 1), LocalDate.of(2030, 1, 1), null, null, null, null))
           .isInstanceOf(IllegalArgumentException.class)
-          .hasMessage("Periodo de filtro invalido");
+          .hasMessage("Período de filtro inválido");
     }
 
     @Test
@@ -2049,7 +2049,7 @@ class ServicoAgendamentosTest {
                       null, null, LocalDate.of(2030, 1, 1), LocalDate.of(2030, 1, 31), null, null, null, null,
                       "MES"))
           .isInstanceOf(IllegalArgumentException.class)
-          .hasMessage("groupBy invalido. Use DAY, PROFESSIONAL, CLIENT ou SERVICE.");
+          .hasMessage("groupBy inválido. Use DAY, PROFESSIONAL, CLIENT ou SERVICE.");
     }
 
     @Test
@@ -2125,7 +2125,7 @@ class ServicoAgendamentosTest {
                   service.obterHistoricoCliente(
                       clientId, null, null, LocalDate.of(2030, 2, 1), LocalDate.of(2030, 1, 1), null))
           .isInstanceOf(IllegalArgumentException.class)
-          .hasMessage("Periodo de filtro invalido");
+          .hasMessage("Período de filtro inválido");
     }
   }
 
@@ -2155,7 +2155,7 @@ class ServicoAgendamentosTest {
 
     assertThatThrownBy(() -> service.deletar(id))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Agendamento nao encontrado");
+        .hasMessage("Agendamento não encontrado");
     verify(agendamentoRepository, never()).delete(any(Agendamento.class));
   }
 
@@ -2184,7 +2184,7 @@ class ServicoAgendamentosTest {
 
     assertThatThrownBy(() -> service.deletar(a.getId()))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("historico do cliente");
+        .hasMessageContaining("histórico do cliente");
     verify(agendamentoRepository, never()).delete(any(Agendamento.class));
   }
 
@@ -2236,7 +2236,7 @@ class ServicoAgendamentosTest {
 
     assertThatThrownBy(() -> service.atualizar(a.getId(), form.req))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("ajuste servicos e profissional na comanda");
+        .hasMessageContaining("ajuste serviços e profissional na comanda");
     assertThat(a.getProfessionalId()).isEqualTo(professionalId);
   }
 

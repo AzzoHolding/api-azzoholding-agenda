@@ -92,7 +92,7 @@ public class MockFiscalProvider implements FiscalProvider {
   @Override
   public FiscalDtos.Invoice obterInvoice(UUID tenantId, String id) {
     FiscalDtos.Invoice invoice = getInvoices(tenantId).get(id);
-    if (invoice == null) throw new IllegalArgumentException("Invoice nao encontrada");
+    if (invoice == null) throw new IllegalArgumentException("Invoice não encontrada");
     return invoice;
   }
 
@@ -253,10 +253,10 @@ public class MockFiscalProvider implements FiscalProvider {
 
   private void validarConfiguracaoFiscalObrigatoria(UUID tenantId, FiscalDtos.Invoice invoice) {
     FiscalDtos.TaxConfig cfg = obterTaxConfig(tenantId);
-    if (cfg == null) throw new IllegalArgumentException("Configuracao fiscal do emitente nao encontrada.");
-    if (isBlank(cfg.issuerRazaoSocial)) throw new IllegalArgumentException("Configure Razao Social do emitente.");
+    if (cfg == null) throw new IllegalArgumentException("Configuração fiscal do emitente não encontrada.");
+    if (isBlank(cfg.issuerRazaoSocial)) throw new IllegalArgumentException("Configure Razão Social do emitente.");
     if (digits(cfg.issuerCnpj).length() != 14) {
-      throw new IllegalArgumentException("Configure CNPJ valido do emitente (14 digitos).");
+      throw new IllegalArgumentException("Configure CNPJ válido do emitente (14 digitos).");
     }
     if (isBlank(cfg.issuerIe)) throw new IllegalArgumentException("Configure IE do emitente.");
     if (isBlank(cfg.issuerCity) || isBlank(cfg.issuerState)) {

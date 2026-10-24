@@ -56,13 +56,13 @@ public class TelegramBotClient {
   }
 
   public BotProfile getMe(TenantTelegramConfig config) {
-    if (config == null) throw new IllegalArgumentException("Configuracao do Telegram invalida.");
+    if (config == null) throw new IllegalArgumentException("Configuração do Telegram inválida.");
     return getMe(resolveBotToken(config));
   }
 
   public BotProfile getMe(String botToken) {
     String token = normalize(botToken);
-    if (token == null) throw new IllegalArgumentException("Token do bot do Telegram nao configurado.");
+    if (token == null) throw new IllegalArgumentException("Token do bot do Telegram não configurado.");
 
     LOG.info("telegramClient.getMe.started {}", CorrelatedLogging.context());
     JsonNode payload = execute(token, "getMe", null);
@@ -78,12 +78,12 @@ public class TelegramBotClient {
   }
 
   public String sendMessage(TenantTelegramConfig config, String chatId, String message) {
-    if (config == null) throw new IllegalArgumentException("Configuracao do Telegram invalida.");
+    if (config == null) throw new IllegalArgumentException("Configuração do Telegram inválida.");
     return sendMessage(resolveBotToken(config), chatId, message);
   }
 
   public void setWebhook(TenantTelegramConfig config, String webhookUrl, String secretToken) {
-    if (config == null) throw new IllegalArgumentException("Configuracao do Telegram invalida.");
+    if (config == null) throw new IllegalArgumentException("Configuração do Telegram inválida.");
     setWebhook(resolveBotToken(config), webhookUrl, secretToken);
   }
 
@@ -92,8 +92,8 @@ public class TelegramBotClient {
     String normalizedWebhookUrl = normalize(webhookUrl);
     String normalizedSecretToken = normalize(secretToken);
 
-    if (token == null) throw new IllegalArgumentException("Token do bot do Telegram nao configurado.");
-    if (normalizedWebhookUrl == null) throw new IllegalArgumentException("URL do webhook do Telegram invalida.");
+    if (token == null) throw new IllegalArgumentException("Token do bot do Telegram não configurado.");
+    if (normalizedWebhookUrl == null) throw new IllegalArgumentException("URL do webhook do Telegram inválida.");
 
     LOG.info("telegramClient.setWebhook.started {}", CorrelatedLogging.context("webhookUrl", normalizedWebhookUrl));
 
@@ -105,13 +105,13 @@ public class TelegramBotClient {
   }
 
   public void deleteWebhook(TenantTelegramConfig config) {
-    if (config == null) throw new IllegalArgumentException("Configuracao do Telegram invalida.");
+    if (config == null) throw new IllegalArgumentException("Configuração do Telegram inválida.");
     deleteWebhook(resolveBotToken(config));
   }
 
   public void deleteWebhook(String botToken) {
     String token = normalize(botToken);
-    if (token == null) throw new IllegalArgumentException("Token do bot do Telegram nao configurado.");
+    if (token == null) throw new IllegalArgumentException("Token do bot do Telegram não configurado.");
 
     LOG.info("telegramClient.deleteWebhook.started {}", CorrelatedLogging.context());
     execute(token, "deleteWebhook", Map.of("drop_pending_updates", Boolean.FALSE));
@@ -119,13 +119,13 @@ public class TelegramBotClient {
   }
 
   public WebhookInfo getWebhookInfo(TenantTelegramConfig config) {
-    if (config == null) throw new IllegalArgumentException("Configuracao do Telegram invalida.");
+    if (config == null) throw new IllegalArgumentException("Configuração do Telegram inválida.");
     return getWebhookInfo(resolveBotToken(config));
   }
 
   public WebhookInfo getWebhookInfo(String botToken) {
     String token = normalize(botToken);
-    if (token == null) throw new IllegalArgumentException("Token do bot do Telegram nao configurado.");
+    if (token == null) throw new IllegalArgumentException("Token do bot do Telegram não configurado.");
 
     LOG.info("telegramClient.getWebhookInfo.started {}", CorrelatedLogging.context());
     JsonNode payload = execute(token, "getWebhookInfo", null);
@@ -149,8 +149,8 @@ public class TelegramBotClient {
     String normalizedChatId = normalize(chatId);
     String normalizedMessage = normalize(message);
 
-    if (token == null) throw new IllegalArgumentException("Token do bot do Telegram nao configurado.");
-    if (normalizedChatId == null) throw new IllegalArgumentException("Destino do Telegram invalido.");
+    if (token == null) throw new IllegalArgumentException("Token do bot do Telegram não configurado.");
+    if (normalizedChatId == null) throw new IllegalArgumentException("Destino do Telegram inválido.");
     if (normalizedMessage == null) throw new IllegalArgumentException("Mensagem do Telegram vazia.");
 
     LOG.info("telegramClient.send.started {}", CorrelatedLogging.context("destination", normalizedChatId));
@@ -206,9 +206,9 @@ public class TelegramBotClient {
 
   private String resolveBotToken(TenantTelegramConfig config) {
     String encrypted = normalize(config.getTelegramBotTokenEnc());
-    if (encrypted == null) throw new IllegalArgumentException("Token do bot do Telegram nao configurado.");
+    if (encrypted == null) throw new IllegalArgumentException("Token do bot do Telegram não configurado.");
     String token = normalize(encryptionService.decrypt(encrypted));
-    if (token == null) throw new IllegalArgumentException("Token do bot do Telegram nao configurado.");
+    if (token == null) throw new IllegalArgumentException("Token do bot do Telegram não configurado.");
     return token;
   }
 

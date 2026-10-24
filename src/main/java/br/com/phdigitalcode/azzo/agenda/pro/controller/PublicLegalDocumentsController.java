@@ -75,14 +75,14 @@ public class PublicLegalDocumentsController {
   @GetMapping("/terms-of-use")
   public PublicLegalDtos.LegalDocumentResponse termsOfUse() {
     TermsVersion version = termsService.getLatestActiveVersion(AuditConstants.TermsDocumentType.TERMS_OF_USE)
-        .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Termos de uso nao publicados"));
+        .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Termos de uso não publicados"));
     return toResponse(version);
   }
 
   @GetMapping("/privacy-policy")
   public PublicLegalDtos.LegalDocumentResponse privacyPolicy() {
     TermsVersion version = termsService.getLatestActiveVersion(AuditConstants.TermsDocumentType.PRIVACY_POLICY)
-        .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Politica de privacidade nao publicada"));
+        .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Politica de privacidade não publicada"));
     return toResponse(version);
   }
 

@@ -419,7 +419,7 @@ class ServicoEstoqueImportacaoTest {
     for (String invalido : new String[] {null, "", "  ", "itens", "PRODUTOS"}) {
       assertThatThrownBy(() -> service.gerarModeloImportacao(invalido, "xlsx"))
           .isInstanceOf(ApiClientErrorException.class)
-          .hasMessage("tipoImportacao invalido. Use ITENS, ENTRADAS ou AJUSTES.")
+          .hasMessage("tipoImportacao inválido. Use ITENS, ENTRADAS ou AJUSTES.")
           .extracting(e -> ((ApiClientErrorException) e).getStatus())
           .isEqualTo(400);
     }
@@ -429,7 +429,7 @@ class ServicoEstoqueImportacaoTest {
   void formatoInvalidoNoModeloEQuatrocentos() {
     assertThatThrownBy(() -> service.gerarModeloImportacao("ITENS", "pdf"))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("formato invalido. Use xlsx ou csv.")
+        .hasMessage("formato inválido. Use xlsx ou csv.")
         .extracting(e -> ((ApiClientErrorException) e).getStatus())
         .isEqualTo(400);
   }

@@ -82,19 +82,19 @@ public final class SchedulingDtos {
    * service.
    */
   public static class AgendamentoRequest {
-    @NotBlank(message = "Cliente e obrigatorio")
+    @NotBlank(message = "Cliente é obrigatório")
     public String clientId;
 
-    @NotBlank(message = "Profissional e obrigatorio")
+    @NotBlank(message = "Profissional é obrigatório")
     public String professionalId;
 
     public String serviceId;
     public List<ItemRequest> items = new ArrayList<>();
 
-    @NotBlank(message = "Data do agendamento e obrigatoria")
+    @NotBlank(message = "Data do agendamento é obrigatória")
     public String date; // yyyy-MM-dd
 
-    @NotBlank(message = "Hora de inicio e obrigatoria")
+    @NotBlank(message = "Hora de início é obrigatória")
     public String startTime;
     public String endTime;
     public String status; // enum string
@@ -246,7 +246,7 @@ public final class SchedulingDtos {
 
   /** Espelha {@code api/dto/AttendanceRequest.java}. */
   public static class AttendanceRequest {
-    @NotNull(message = "O campo attended e obrigatorio")
+    @NotNull(message = "O campo attended é obrigatório")
     public Boolean attended;
   }
 
@@ -352,7 +352,7 @@ public final class SchedulingDtos {
         if (item.name().equalsIgnoreCase(value.trim())) return item;
       }
       throw new IllegalArgumentException(
-          "groupBy invalido. Use DAY, PROFESSIONAL, CLIENT ou SERVICE.");
+          "groupBy inválido. Use DAY, PROFESSIONAL, CLIENT ou SERVICE.");
     }
   }
 

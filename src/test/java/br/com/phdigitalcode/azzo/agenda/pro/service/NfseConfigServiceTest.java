@@ -89,7 +89,7 @@ class NfseConfigServiceTest {
 
     assertThatThrownBy(() -> service.obterConfig("PRODUCAO"))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("Configuracao NFS-e nao encontrada para o ambiente informado.")
+        .hasMessage("Configuração NFS-e não encontrada para o ambiente informado.")
         .extracting(ex -> ((ApiClientErrorException) ex).getStatus())
         .isEqualTo(404);
   }
@@ -98,7 +98,7 @@ class NfseConfigServiceTest {
   void obterConfigComAmbienteInvalidoLancaIllegalArgument() {
     assertThatThrownBy(() -> service.obterConfig("INEXISTENTE"))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Ambiente NFS-e invalido.");
+        .hasMessage("Ambiente NFS-e inválido.");
   }
 
   @Test
@@ -169,7 +169,7 @@ class NfseConfigServiceTest {
   void salvarConfigRejeitaRequestNulo() {
     assertThatThrownBy(() -> service.salvarConfig(null))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Configuracao NFS-e obrigatoria.");
+        .hasMessage("Configuração NFS-e obrigatória.");
   }
 
   @Test
@@ -200,7 +200,7 @@ class NfseConfigServiceTest {
     semItemLista.itemListaServicoPadrao = null;
     assertThatThrownBy(() -> service.salvarConfig(semItemLista))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("NFSE_CONFIG_MISSING_ITEM_LISTA_SERVICO");
+        .hasMessage("NFSE_CONFIG_MISSING_ITEM_LISTA_SERVIÇO");
   }
 
   /**
@@ -264,21 +264,21 @@ class NfseConfigServiceTest {
     comAmbienteInvalido.ambiente = "XPTO";
     assertThatThrownBy(() -> service.salvarConfig(comAmbienteInvalido))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Ambiente NFS-e invalido.");
+        .hasMessage("Ambiente NFS-e inválido.");
 
     NfseDtos.Config comEmissionModeInvalido = requestValido();
     comEmissionModeInvalido.provedor = "ABRASF";
     comEmissionModeInvalido.emissionMode = "XPTO";
     assertThatThrownBy(() -> service.salvarConfig(comEmissionModeInvalido))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Modo de emissao NFS-e invalido.");
+        .hasMessage("Modo de emissão NFS-e inválido.");
 
     NfseDtos.Config comCpfModeInvalido = requestValido();
     comCpfModeInvalido.provedor = "ABRASF";
     comCpfModeInvalido.emitForCpfMode = "XPTO";
     assertThatThrownBy(() -> service.salvarConfig(comCpfModeInvalido))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Politica CPF NFS-e invalida.");
+        .hasMessage("Politica CPF NFS-e inválida.");
   }
 
   @Test

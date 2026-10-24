@@ -138,7 +138,7 @@ public class SaudeDoEnvioWhatsApp {
   String motivoSeForDoSalao(Throwable erro, boolean consultaDoNumeroDoSalao) {
     for (Throwable t = erro; t != null; t = t.getCause()) {
       if (t instanceof IllegalArgumentException iae && iae.getMessage() != null
-          && iae.getMessage().toLowerCase().contains("nao configurado")) {
+          && br.com.phdigitalcode.azzo.agenda.pro.util.TextoSemAcento.de(iae.getMessage()).contains("nao configurado")) {
         return iae.getMessage();
       }
       if (t instanceof RestClientResponseException http) {

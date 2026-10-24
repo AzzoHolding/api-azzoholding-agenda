@@ -150,7 +150,7 @@ class ServicoPackagesTest {
 
     assertThatThrownBy(() -> service.criar(requestComUmItem(3)))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("Servico nao encontrado: " + serviceId)
+        .hasMessage("Serviço não encontrado: " + serviceId)
         .extracting(e -> ((ApiClientErrorException) e).getStatus())
         .isEqualTo(404);
 
@@ -192,7 +192,7 @@ class ServicoPackagesTest {
 
     assertThatThrownBy(() -> service.atualizar(id, requestComUmItem(1)))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("Pacote nao encontrado.");
+        .hasMessage("Pacote não encontrado.");
 
     verify(servicePackageItemRepository, never()).deleteByPackageId(any());
   }

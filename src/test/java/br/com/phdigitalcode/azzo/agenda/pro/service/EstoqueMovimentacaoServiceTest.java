@@ -220,7 +220,7 @@ class EstoqueMovimentacaoServiceTest {
 
     assertThatThrownBy(() -> service.criarMovimentacao(request))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessageContaining("Origem de movimentacao invalida")
+        .hasMessageContaining("Origem de movimentacao inválida")
         .extracting(e -> ((ApiClientErrorException) e).getStatus())
         .isEqualTo(400);
   }
@@ -349,7 +349,7 @@ class EstoqueMovimentacaoServiceTest {
     assertThatThrownBy(
             () -> service.criarMovimentacao(ITEM_ID, "TRANSFERENCIA", new BigDecimal("1"), "Venda"))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("Tipo de movimentacao invalido.");
+        .hasMessage("Tipo de movimentacao inválido.");
   }
 
   /** {@code normalizarCodigoObrigatorio} faz upper + trim: "saida" e um tipo valido. */
@@ -640,7 +640,7 @@ class EstoqueMovimentacaoServiceTest {
 
     assertThatThrownBy(() -> service.criarMovimentacao(request("AJUSTE", "10", "Conferido")))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessageContaining("nao ha o que ajustar")
+        .hasMessageContaining("não ha o que ajustar")
         .extracting(e -> ((ApiClientErrorException) e).getStatus())
         .isEqualTo(400);
     verify(movimentacaoEstoqueRepository, never()).saveAndFlush(any());
@@ -699,7 +699,7 @@ class EstoqueMovimentacaoServiceTest {
 
     assertThatThrownBy(() -> service.criarMovimentacao(request))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessageContaining("Forma de pagamento invalida");
+        .hasMessageContaining("Forma de pagamento inválida");
   }
 
   @Test

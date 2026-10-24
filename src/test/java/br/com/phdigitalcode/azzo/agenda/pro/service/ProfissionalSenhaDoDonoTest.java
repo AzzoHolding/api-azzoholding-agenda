@@ -138,7 +138,7 @@ class ProfissionalSenhaDoDonoTest {
 
     assertThatThrownBy(() -> service.atualizar(p.getId(), edicaoComSenha("NovaSenha@123")))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("A senha do dono da conta so pode ser trocada por ele mesmo.");
+        .hasMessage("A senha do dono da conta só pode ser trocada por ele mesmo.");
 
     assertThat(dono.getPasswordHash()).isEqualTo(HASH_ORIGINAL);
     verify(usuarioRepository, never()).save(any());

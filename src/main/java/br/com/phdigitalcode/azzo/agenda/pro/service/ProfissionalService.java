@@ -151,7 +151,7 @@ public class ProfissionalService {
       UUID serviceUuid = UUID.fromString(serviceId);
       Servico servico = servicoRepository.findByIdAndTenantId(serviceUuid, tenantId)
           .filter(Servico::isActive)
-          .orElseThrow(() -> new IllegalArgumentException("Servico nao encontrado"));
+          .orElseThrow(() -> new IllegalArgumentException("Serviço não encontrado"));
       encontrados = servico.getProfissionais() == null || servico.getProfissionais().isEmpty()
           ? profissionalRepository.findByTenantIdAndIsActiveTrue(tenantId)
           : servico.getProfissionais().stream().filter(Profissional::isActive).toList();
@@ -171,7 +171,7 @@ public class ProfissionalService {
   public long contarAgendamentosFuturos(UUID id) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     profissionalRepository.findByIdAndTenantId(id, tenantId)
-        .orElseThrow(() -> new IllegalArgumentException("Profissional nao encontrado"));
+        .orElseThrow(() -> new IllegalArgumentException("Profissional não encontrado"));
     ZonedDateTime agora = ZonedDateTime.now(ZONA_DO_SALAO);
     return agendamentoRepository.countFutureActiveForProfessional(
         tenantId,
@@ -185,7 +185,7 @@ public class ProfissionalService {
   public ProfissionalResponse obterPorId(UUID id) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Profissional profissional = profissionalRepository.findByIdAndTenantId(id, tenantId)
-        .orElseThrow(() -> new IllegalArgumentException("Profissional nao encontrado"));
+        .orElseThrow(() -> new IllegalArgumentException("Profissional não encontrado"));
     return toResponse(profissional);
   }
 
@@ -193,7 +193,7 @@ public class ProfissionalService {
   public void validarAcessoProprio(UUID profissionalId, UUID userId) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Profissional profissional = profissionalRepository.findByIdAndTenantId(profissionalId, tenantId)
-        .orElseThrow(() -> new IllegalArgumentException("Profissional nao encontrado"));
+        .orElseThrow(() -> new IllegalArgumentException("Profissional não encontrado"));
     if (!userId.equals(profissional.getUserId())) {
       throw new ApiClientErrorException("Acesso negado", 403);
     }
@@ -235,7 +235,7 @@ public class ProfissionalService {
   public ProfissionalResponse atualizar(UUID id, ProfissionalRequest req) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Profissional p = profissionalRepository.findByIdAndTenantId(id, tenantId)
-        .orElseThrow(() -> new IllegalArgumentException("Profissional nao encontrado"));
+        .orElseThrow(() -> new IllegalArgumentException("Profissional não encontrado"));
 
     ProfissionalResponse before = toResponse(p);
     // Fidelidade ao original: email/telefone do profissional NAO sao alterados no update
@@ -260,7 +260,7 @@ public class ProfissionalService {
   public ProfissionalResponse toggleStatus(UUID id, boolean isActive) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Profissional p = profissionalRepository.findByIdAndTenantId(id, tenantId)
-        .orElseThrow(() -> new IllegalArgumentException("Profissional nao encontrado"));
+        .orElseThrow(() -> new IllegalArgumentException("Profissional não encontrado"));
 
     ProfissionalResponse before = toResponse(p);
     boolean estavaAtivo = p.isActive();
@@ -319,14 +319,14 @@ public class ProfissionalService {
   public void deletar(UUID id) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Profissional profissional = profissionalRepository.findByIdAndTenantId(id, tenantId)
-        .orElseThrow(() -> new IllegalArgumentException("Profissional nao encontrado"));
+        .orElseThrow(() -> new IllegalArgumentException("Profissional não encontrado"));
     ProfissionalResponse before = toResponse(profissional);
 
     UUID usuarioAutenticadoId = obterUsuarioAutenticadoId();
     if (usuarioAutenticadoId != null
         && profissional.getUserId() != null
         && profissional.getUserId().equals(usuarioAutenticadoId)) {
-      throw new IllegalArgumentException("Nao e permitido remover o proprio usuario");
+      throw new IllegalArgumentException("Não é permitido remover o próprio usuário");
     }
 
     boolean estavaAtivo = profissional.isActive();
@@ -341,17 +341,17 @@ public class ProfissionalService {
   public ProfissionalResponse.PasswordResetResponse resetarSenha(UUID id) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Profissional p = profissionalRepository.findByIdAndTenantId(id, tenantId)
-        .orElseThrow(() -> new IllegalArgumentException("Profissional nao encontrado"));
+        .orElseThrow(() -> new IllegalArgumentException("Profissional não encontrado"));
     if (p.getUserId() == null) {
-      throw new IllegalArgumentException("Profissional nao possui usuario de acesso vinculado");
+      throw new IllegalArgumentException("Profissional não possui usuário de acesso vinculado");
     }
 
     Usuario user = usuarioRepository.findById(p.getUserId())
         .filter(item -> tenantId.equals(item.getTenantId()))
-        .orElseThrow(() -> new IllegalArgumentException("Usuario vinculado ao profissional nao encontrado"));
+        .orElseThrow(() -> new IllegalArgumentException("Usuário vinculado ao profissional não encontrado"));
     exigirQuePodeTrocarSenhaDe(user);
     if (user.getEmail() == null || user.getEmail().isBlank()) {
-      throw new IllegalArgumentException("Usuario do profissional nao possui email configurado");
+      throw new IllegalArgumentException("Usuário do profissional não possui email configurado");
     }
 
     String temporaryPassword = generatePassword(12);
@@ -467,14 +467,14 @@ public class ProfissionalService {
     if (req.userId != null && !req.userId.isBlank()) {
       Usuario user = usuarioRepository.findById(UUID.fromString(req.userId))
           .filter(item -> tenantId.equals(item.getTenantId()))
-          .orElseThrow(() -> new IllegalArgumentException("Usuario informado nao encontrado no tenant"));
+          .orElseThrow(() -> new IllegalArgumentException("Usuário informado não encontrado no tenant"));
       return prepareLinkedUser(tenantId, user, req, null);
     }
 
     if (!Boolean.TRUE.equals(req.createUser)) return null;
 
     if (req.email == null || req.email.isBlank()) {
-      throw new IllegalArgumentException("Email obrigatorio para criar usuario de acesso do profissional");
+      throw new IllegalArgumentException("Email obrigatório para criar usuário de acesso do profissional");
     }
     String effectivePassword = req.accessPassword;
     boolean generatedPassword = false;
@@ -492,7 +492,7 @@ public class ProfissionalService {
           && isCurrentAuthenticatedUser(existentGlobal.getId())) {
         return prepareLinkedUser(tenantId, existentGlobal, req, null);
       }
-      throw new IllegalArgumentException("Ja existe usuario com este email");
+      throw new IllegalArgumentException("Já existe usuário com este email");
     }
 
     Usuario user = new Usuario();
@@ -524,11 +524,11 @@ public class ProfissionalService {
       // Ligar um login (o do dono, por exemplo) so vale para quem ainda nao tem: trocar deixaria o
       // login anterior sem cadastro, com acesso e sem ninguem saber de quem e.
       if (p.getUserId() != null && !p.getUserId().equals(novoUserId)) {
-        throw new IllegalArgumentException("Este profissional ja tem login proprio");
+        throw new IllegalArgumentException("Este profissional já tem login próprio");
       }
       user = usuarioRepository.findById(novoUserId)
           .filter(item -> tenantId.equals(item.getTenantId()))
-          .orElseThrow(() -> new IllegalArgumentException("Usuario informado nao encontrado no tenant"));
+          .orElseThrow(() -> new IllegalArgumentException("Usuário informado não encontrado no tenant"));
       p.setUserId(user.getId());
     } else if (p.getUserId() != null) {
       user = usuarioRepository.findById(p.getUserId()).filter(item -> tenantId.equals(item.getTenantId())).orElse(null);
@@ -552,7 +552,7 @@ public class ProfissionalService {
     if (req.email != null && !req.email.isBlank()) {
       Usuario existentGlobal = usuarioRepository.findByEmail(req.email.trim()).orElse(null);
       if (existentGlobal != null && !existentGlobal.getId().equals(user.getId())) {
-        throw new IllegalArgumentException("Ja existe usuario com este email");
+        throw new IllegalArgumentException("Já existe usuário com este email");
       }
       if (!preservePrimaryRole) {
         user.setEmail(req.email.trim().toLowerCase(Locale.ROOT));
@@ -590,7 +590,7 @@ public class ProfissionalService {
   private void exigirQuePodeTrocarSenhaDe(Usuario user) {
     if (isPrivilegedUser(user) && !isCurrentAuthenticatedUser(user.getId())) {
       throw new ApiClientErrorException(
-          "A senha do dono da conta so pode ser trocada por ele mesmo.", 403);
+          "A senha do dono da conta só pode ser trocada por ele mesmo.", 403);
     }
   }
 
@@ -599,7 +599,7 @@ public class ProfissionalService {
     Profissional linked = profissionalRepository.findByTenantIdAndUserId(tenantId, userId).orElse(null);
     if (linked == null) return;
     if (currentProfessionalId != null && linked.getId() != null && linked.getId().equals(currentProfessionalId)) return;
-    throw new IllegalArgumentException("Usuario ja vinculado a outro profissional");
+    throw new IllegalArgumentException("Usuário já vinculado a outro profissional");
   }
 
   private boolean isPrivilegedUser(Usuario user) {
@@ -620,7 +620,7 @@ public class ProfissionalService {
             .map(GrantedAuthority::getAuthority)
             .anyMatch("ROLE_ADMIN"::equals);
     if (!isAdminActor) {
-      throw new ApiClientErrorException("Somente ADMIN pode criar usuario com role ADMIN", 403);
+      throw new ApiClientErrorException("Somente ADMIN pode criar usuário com role ADMIN", 403);
     }
   }
 
@@ -700,9 +700,9 @@ public class ProfissionalService {
 
   private int obterLimiteProfissionaisDoPlanoObrigatorio(UUID tenantId) {
     UUID productId = planLimitsRepository.findActivePlanProductId(tenantId, Instant.now())
-        .orElseThrow(() -> new IllegalArgumentException("Nao existe plano ativo para o tenant"));
+        .orElseThrow(() -> new IllegalArgumentException("Não existe plano ativo para o tenant"));
     return planLimitsRepository.findMaxProfessionals(productId)
-        .orElseThrow(() -> new IllegalArgumentException("Plano sem configuracao de limite de profissionais"));
+        .orElseThrow(() -> new IllegalArgumentException("Plano sem configuração de limite de profissionais"));
   }
 
   private UUID obterUsuarioAutenticadoId() {
