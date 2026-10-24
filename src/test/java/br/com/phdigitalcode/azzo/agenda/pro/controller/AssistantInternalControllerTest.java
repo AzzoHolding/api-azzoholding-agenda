@@ -118,7 +118,8 @@ class AssistantInternalControllerTest {
         tenantWhatsAppConfigRepository,
         contextoTenant,
         tenantOperationalSettingsService,
-        org.mockito.Mockito.mock(br.com.phdigitalcode.azzo.agenda.pro.repository.TenantAddressRepository.class));
+        org.mockito.Mockito.mock(br.com.phdigitalcode.azzo.agenda.pro.repository.TenantAddressRepository.class),
+        org.mockito.Mockito.mock(br.com.phdigitalcode.azzo.agenda.pro.service.SpecialClosureService.class));
   }
 
   // ─── contrato de classe ─────────────────────────────────────────────────

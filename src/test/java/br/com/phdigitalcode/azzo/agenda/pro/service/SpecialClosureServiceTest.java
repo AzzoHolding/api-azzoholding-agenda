@@ -81,6 +81,30 @@ class SpecialClosureServiceTest {
             whatsAppNotificationService);
   }
 
+  // ---------- trechosFechados (24/10/2026) ----------
+
+  @Test
+  @DisplayName("trechos fechados: do salao e deste profissional, nao de outro")
+  void trechosFechadosDoSalaoEDoProfissional() {
+    TenantSpecialClosureDate doSalao = new TenantSpecialClosureDate();
+    doSalao.setStartTime(LocalTime.of(14, 0));
+    doSalao.setEndTime(LocalTime.of(16, 0));
+    TenantSpecialClosureDate desteProfissional = new TenantSpecialClosureDate();
+    desteProfissional.setProfessionalId(professionalId);
+    desteProfissional.setStartTime(LocalTime.of(9, 0));
+    desteProfissional.setEndTime(LocalTime.of(10, 0));
+    TenantSpecialClosureDate deOutro = new TenantSpecialClosureDate();
+    deOutro.setProfessionalId(UUID.randomUUID());
+    deOutro.setStartTime(LocalTime.of(11, 0));
+    deOutro.setEndTime(LocalTime.of(12, 0));
+    when(closureRepository.findByTenantIdAndClosureDateAndAllDayFalse(tenantId, DATA))
+        .thenReturn(List.of(doSalao, desteProfissional, deOutro));
+
+    List<LocalTime[]> trechos = service.trechosFechados(tenantId, professionalId, DATA);
+
+    assertThat(trechos).extracting(t -> t[0]).containsExactly(LocalTime.of(14, 0), LocalTime.of(9, 0));
+  }
+
   // ---------- isClosedAt: os quatro ramos que o placeholder suprimia ----------
 
   @Test
