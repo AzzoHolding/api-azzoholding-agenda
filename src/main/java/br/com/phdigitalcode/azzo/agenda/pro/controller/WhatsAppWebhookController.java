@@ -497,6 +497,16 @@ public class WhatsAppWebhookController {
 
       whatsAppBookingReactivationService.syncAfterAssistantTurn(
           tenant.getId(), inbound.conversation, inbound.client, body, assistantResponse);
+      if (assistantResponse != null && assistantResponse.slots != null
+          && ChatService.MOTIVO_CLIENTE_PEDIU_ATENDENTE.equals(assistantResponse.slots.get("manualInterventionReason"))) {
+        try {
+          chatService.marcarPedidoDeAtendente(tenant.getId(), inbound.conversation.getId());
+        } catch (RuntimeException e) {
+          // O alerta no chat e melhor esforco: a resposta ao cliente sai de qualquer jeito.
+          LOG.warn("whatsapp.atendente.alerta_falhou tenant={} conversa={} motivo={}",
+              tenant.getId(), inbound.conversation.getId(), e.getMessage());
+        }
+      }
       String outbound = formatAssistantReplyForWhatsApp(assistantResponse);
       if (outbound != null && !outbound.isBlank()) {
         if (debugEnabled) {
