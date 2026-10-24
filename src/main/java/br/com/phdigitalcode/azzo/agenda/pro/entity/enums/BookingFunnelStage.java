@@ -12,12 +12,12 @@ public enum BookingFunnelStage {
 
   public static BookingFunnelStage from(String value) {
     if (value == null || value.isBlank()) {
-      throw new IllegalArgumentException("Etapa do funil obrigatoria.");
+      throw new IllegalArgumentException("Etapa do funil obrigatória.");
     }
     try {
       return BookingFunnelStage.valueOf(value.trim().toUpperCase(Locale.ROOT));
     } catch (IllegalArgumentException ex) {
-      throw new IllegalArgumentException("Etapa do funil invalida: " + value);
+      throw new IllegalArgumentException("Etapa do funil inválida: " + value);
     }
   }
 }

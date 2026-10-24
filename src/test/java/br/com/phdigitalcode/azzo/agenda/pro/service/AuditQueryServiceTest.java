@@ -299,7 +299,7 @@ class AuditQueryServiceTest {
 
     assertThatThrownBy(() -> service.downloadExport(UUID.randomUUID(), response.exportId))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Export nao encontrado ou expirado");
+        .hasMessage("Export não encontrado ou expirado");
     assertThatThrownBy(() -> service.downloadExport(null, response.exportId))
         .isInstanceOf(IllegalArgumentException.class);
     // O dono da exportacao continua baixando: a recusa acima nao a apagou.

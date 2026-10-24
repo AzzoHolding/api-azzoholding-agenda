@@ -112,7 +112,7 @@ public class MinioStorageService {
 
     inicializarClienteSeNecessario();
     if (!operacional) {
-      throw new IllegalStateException("Storage MinIO indisponivel para upload.");
+      throw new IllegalStateException("Storage MinIO indisponível para upload.");
     }
 
     try {
@@ -141,7 +141,7 @@ public class MinioStorageService {
 
     inicializarClienteSeNecessario();
     if (!operacional) {
-      throw new IllegalStateException("Storage MinIO indisponivel para upload de DANFE.");
+      throw new IllegalStateException("Storage MinIO indisponível para upload de DANFE.");
     }
 
     try {
@@ -169,7 +169,7 @@ public class MinioStorageService {
 
     inicializarClienteSeNecessario();
     if (!operacional) {
-      throw new IllegalStateException("Storage MinIO indisponivel para upload.");
+      throw new IllegalStateException("Storage MinIO indisponível para upload.");
     }
 
     try {
@@ -196,7 +196,7 @@ public class MinioStorageService {
 
     inicializarClienteSeNecessario();
     if (!operacional) {
-      throw new IllegalStateException("Storage MinIO indisponivel para upload do avatar do cliente.");
+      throw new IllegalStateException("Storage MinIO indisponível para upload do avatar do cliente.");
     }
 
     try {
@@ -222,7 +222,7 @@ public class MinioStorageService {
 
     inicializarClienteSeNecessario();
     if (!operacional) {
-      throw new IllegalStateException("Storage MinIO indisponivel para upload da logo do salao.");
+      throw new IllegalStateException("Storage MinIO indisponível para upload da logo do salão.");
     }
 
     try {
@@ -236,13 +236,13 @@ public class MinioStorageService {
       return storageKey;
     } catch (Exception exception) {
       LOG.error("Falha ao enviar logo do salao para o MinIO (key={}).", storageKey, exception);
-      throw new IllegalStateException("Falha ao enviar logo do salao para o storage.", exception);
+      throw new IllegalStateException("Falha ao enviar logo do salão para o storage.", exception);
     }
   }
 
   public byte[] baixarArquivo(String storageKey, UUID tenantId) {
     if (storageKey == null || storageKey.isBlank()) {
-      throw new IllegalArgumentException("Storage key obrigatoria para download.");
+      throw new IllegalArgumentException("Storage key obrigatória para download.");
     }
     validarEscopoTenant(storageKey, tenantId);
     if (!minioEnabled) {
@@ -251,7 +251,7 @@ public class MinioStorageService {
 
     inicializarClienteSeNecessario();
     if (!operacional) {
-      throw new IllegalStateException("Storage MinIO indisponivel para download.");
+      throw new IllegalStateException("Storage MinIO indisponível para download.");
     }
 
     try (var stream =
@@ -347,7 +347,7 @@ public class MinioStorageService {
    */
   public String gerarUrlAssinadaLeitura(String storageKey, UUID tenantId) {
     if (storageKey == null || storageKey.isBlank()) {
-      throw new IllegalArgumentException("Storage key obrigatoria para gerar URL.");
+      throw new IllegalArgumentException("Storage key obrigatória para gerar URL.");
     }
     validarEscopoTenant(storageKey, tenantId);
     String base =
@@ -405,7 +405,7 @@ public class MinioStorageService {
       mac.init(new javax.crypto.spec.SecretKeySpec(chave, "HmacSHA256"));
       return mac.doFinal(dado.getBytes(StandardCharsets.UTF_8));
     } catch (java.security.GeneralSecurityException e) {
-      throw new IllegalStateException("HmacSHA256 indisponivel", e);
+      throw new IllegalStateException("HmacSHA256 indisponível", e);
     }
   }
 
@@ -451,7 +451,7 @@ public class MinioStorageService {
 
   private String gerarStorageKeyFiscalDanfe(String nomeArquivo, UUID tenantId) {
     if (tenantId == null) {
-      throw new IllegalArgumentException("TenantId obrigatorio para gerar storage key.");
+      throw new IllegalArgumentException("TenantId obrigatório para gerar storage key.");
     }
     YearMonth periodoAtual = YearMonth.now();
     return String.format(
@@ -466,7 +466,7 @@ public class MinioStorageService {
 
   private String gerarStorageKeyClientes(String nomeArquivo, UUID tenantId) {
     if (tenantId == null) {
-      throw new IllegalArgumentException("TenantId obrigatorio para gerar storage key.");
+      throw new IllegalArgumentException("TenantId obrigatório para gerar storage key.");
     }
     YearMonth periodoAtual = YearMonth.now();
     return String.format(
@@ -481,10 +481,10 @@ public class MinioStorageService {
 
   private String gerarStorageKeyClienteAvatar(String nomeArquivo, UUID tenantId, UUID clientId) {
     if (tenantId == null) {
-      throw new IllegalArgumentException("TenantId obrigatorio para gerar storage key.");
+      throw new IllegalArgumentException("TenantId obrigatório para gerar storage key.");
     }
     if (clientId == null) {
-      throw new IllegalArgumentException("ClientId obrigatorio para gerar storage key.");
+      throw new IllegalArgumentException("ClientId obrigatório para gerar storage key.");
     }
     return String.format(
         Locale.ROOT,
@@ -497,7 +497,7 @@ public class MinioStorageService {
 
   private String gerarStorageKeySalaoLogo(String nomeArquivo, UUID tenantId) {
     if (tenantId == null) {
-      throw new IllegalArgumentException("TenantId obrigatorio para gerar storage key.");
+      throw new IllegalArgumentException("TenantId obrigatório para gerar storage key.");
     }
     return String.format(
         Locale.ROOT, "tenant/%s/salao/logo/%s-%s", tenantId, UUID.randomUUID(), sanitizarNomeArquivo(nomeArquivo));
@@ -505,7 +505,7 @@ public class MinioStorageService {
 
   private String gerarStorageKey(String nomeArquivo, UUID tenantId) {
     if (tenantId == null) {
-      throw new IllegalArgumentException("TenantId obrigatorio para gerar storage key.");
+      throw new IllegalArgumentException("TenantId obrigatório para gerar storage key.");
     }
     YearMonth periodoAtual = YearMonth.now();
     return String.format(
@@ -520,7 +520,7 @@ public class MinioStorageService {
 
   private void validarEscopoTenant(String storageKey, UUID tenantId) {
     if (tenantId == null) {
-      throw new IllegalArgumentException("TenantId obrigatorio para validar storage key.");
+      throw new IllegalArgumentException("TenantId obrigatório para validar storage key.");
     }
     String prefixoEsperado = "tenant/" + tenantId + "/";
     if (!storageKey.startsWith(prefixoEsperado)) {

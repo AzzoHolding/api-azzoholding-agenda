@@ -194,7 +194,7 @@ public class BillingAdminService {
     UUID targetTenantId = resolveTargetTenantId(tenantId);
     Product product = resolveProduct(targetTenantId, explicitProductId);
     if (product == null) {
-      throw new IllegalArgumentException("Produto nao encontrado para liberar licenca.");
+      throw new IllegalArgumentException("Produto não encontrado para liberar licença.");
     }
 
     if (paymentIdToMarkReceived != null && !paymentIdToMarkReceived.isBlank()) {
@@ -251,7 +251,7 @@ public class BillingAdminService {
     response.status = "OK";
     response.tenantId = targetTenantId.toString();
     response.licenseStatus = license.planStatus().name();
-    response.message = "Licenca liberada manualmente para testes.";
+    response.message = "Licença liberada manualmente para testes.";
     response.productId = product.getId().toString();
     response.validUntil = validUntil.toString();
     return response;
@@ -266,7 +266,7 @@ public class BillingAdminService {
       String tenantId, String paymentId, Integer validityDays) {
     UUID targetTenantId = resolveTargetTenantId(tenantId);
     Payment payment = findPaymentByAnyId(targetTenantId, paymentId);
-    if (payment == null) throw new IllegalArgumentException("Pagamento nao encontrado.");
+    if (payment == null) throw new IllegalArgumentException("Pagamento não encontrado.");
 
     payment.setStatus(StatusPayment.RECEIVED);
     payment.setPaidAt(Instant.now());
@@ -410,10 +410,10 @@ public class BillingAdminService {
     try {
       parsed = UUID.fromString(tenantId.trim());
     } catch (IllegalArgumentException e) {
-      throw new IllegalArgumentException("tenantId invalido.");
+      throw new IllegalArgumentException("tenantId inválido.");
     }
     if (tenantRepository.findById(parsed).isEmpty()) {
-      throw new ApiClientErrorException("Tenant nao encontrado.", 404);
+      throw new ApiClientErrorException("Tenant não encontrado.", 404);
     }
     return parsed;
   }
@@ -427,7 +427,7 @@ public class BillingAdminService {
   @Transactional
   public BillingDtos.ExtendTrialResponse extenderTrial(String tenantIdStr, Integer extraDays) {
     if (tenantIdStr == null || tenantIdStr.isBlank()) {
-      throw new IllegalArgumentException("tenantId obrigatorio");
+      throw new IllegalArgumentException("tenantId obrigatório");
     }
     if (extraDays == null || extraDays < 1) {
       throw new IllegalArgumentException("extraDays deve ser >= 1");

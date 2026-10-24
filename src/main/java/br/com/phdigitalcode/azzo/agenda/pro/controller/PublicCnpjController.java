@@ -36,7 +36,7 @@ public class PublicCnpjController {
     rateLimiter.consumirOuFalhar(request);
     String sanitized = CnpjValidator.sanitize(cnpj);
     if (!CnpjValidator.isValid(sanitized)) {
-      throw new IllegalArgumentException("CNPJ invalido. Informe os 14 digitos corretamente.");
+      throw new IllegalArgumentException("CNPJ inválido. Informe os 14 digitos corretamente.");
     }
     return PublicCnpjResponse.de(cnpjConsultaService.consultarSemContato(sanitized));
   }

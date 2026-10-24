@@ -131,7 +131,7 @@ public class NfseStatusPollingInvoiceProcessor {
     NfseFiscalStatus current = invoice.getFiscalStatus();
     if (current == target) return;
     if (!nfseFiscalStateMachine.canReach(current, target)) {
-      throw new NfseStateTransitionException("Transicao fiscal NFS-e invalida: " + current + " -> " + target);
+      throw new NfseStateTransitionException("Transicao fiscal NFS-e inválida: " + current + " -> " + target);
     }
     invoice.setFiscalStatus(target);
     registrarEvento(invoice.getTenantId(), invoice.getId(), target.name(), eventStatus, null, null, null);

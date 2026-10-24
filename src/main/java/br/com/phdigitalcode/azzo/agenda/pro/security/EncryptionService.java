@@ -51,7 +51,7 @@ public class EncryptionService {
     try {
       byte[] payload = Base64.getDecoder().decode(encryptedValue);
       if (payload.length <= IV_LENGTH) {
-        throw new IllegalArgumentException("Valor criptografado invalido");
+        throw new IllegalArgumentException("Valor criptografado inválido");
       }
 
       byte[] iv = Arrays.copyOfRange(payload, 0, IV_LENGTH);
@@ -70,7 +70,7 @@ public class EncryptionService {
 
   private byte[] parseKey(String configuredKey) {
     if (configuredKey == null || configuredKey.isBlank()) {
-      throw new IllegalStateException("Chave de criptografia nao configurada");
+      throw new IllegalStateException("Chave de criptografia não configurada");
     }
 
     byte[] decoded = tryDecodeBase64(configuredKey);
@@ -79,7 +79,7 @@ public class EncryptionService {
     byte[] raw = configuredKey.getBytes(StandardCharsets.UTF_8);
     if (isValidAesKey(raw)) return raw;
 
-    throw new IllegalStateException("Chave de criptografia invalida. Use 16, 24 ou 32 bytes.");
+    throw new IllegalStateException("Chave de criptografia inválida. Use 16, 24 ou 32 bytes.");
   }
 
   private byte[] tryDecodeBase64(String value) {

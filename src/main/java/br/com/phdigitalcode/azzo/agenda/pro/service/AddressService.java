@@ -41,7 +41,7 @@ public class AddressService {
 
   private String normalizarCep(String cepRaw) {
     String cep = cepRaw == null ? "" : cepRaw.replaceAll("\\D", "");
-    if (cep.length() != 8) throw new IllegalArgumentException("CEP invalido");
+    if (cep.length() != 8) throw new IllegalArgumentException("CEP inválido");
     return cep;
   }
 

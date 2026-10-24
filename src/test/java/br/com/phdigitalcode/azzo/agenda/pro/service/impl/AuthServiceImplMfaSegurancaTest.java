@@ -135,7 +135,7 @@ class AuthServiceImplMfaSegurancaTest {
     when(usuarioRepository.findByEmail("ninguem@salao.test")).thenReturn(Optional.empty());
     for (int i = 0; i < 5; i++) {
       assertThatThrownBy(() -> service.login(login("ninguem@salao.test", "x", null)))
-          .hasMessageContaining("Credenciais invalidas");
+          .hasMessageContaining("Credenciais inválidas");
     }
     // Antes: e-mail inexistente nunca recebia 429 — o bloqueio dizia quais e-mails tem conta.
     assertThatThrownBy(() -> service.login(login("ninguem@salao.test", "x", null)))

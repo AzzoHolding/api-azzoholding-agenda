@@ -91,7 +91,7 @@ class MetaEmbeddedSignupClientTest {
 
     assertThatThrownBy(() -> client.exchangeCodeForAccessToken("abc123"))
         .isInstanceOf(IllegalStateException.class)
-        .hasMessageContaining("nao retornou access token");
+        .hasMessageContaining("não retornou access token");
   }
 
   @Test
@@ -151,6 +151,6 @@ class MetaEmbeddedSignupClientTest {
 
     assertThatThrownBy(() -> client.fetchPhoneNumberDetails("token-abc", "1234567890"))
         .isInstanceOf(IllegalStateException.class)
-        .hasMessageContaining("nao retornou id valido");
+        .hasMessageContaining("não retornou id válido");
   }
 }

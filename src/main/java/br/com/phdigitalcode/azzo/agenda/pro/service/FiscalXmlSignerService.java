@@ -21,10 +21,10 @@ public class FiscalXmlSignerService {
 
   public String sign(String xml, String certificatePassword) {
     if (xml == null || xml.isBlank()) {
-      throw new IllegalArgumentException("XML fiscal obrigatorio para assinatura.");
+      throw new IllegalArgumentException("XML fiscal obrigatório para assinatura.");
     }
     if (certificatePassword == null || certificatePassword.isBlank()) {
-      throw new IllegalArgumentException("Senha do certificado obrigatoria para assinatura fiscal.");
+      throw new IllegalArgumentException("Senha do certificado obrigatória para assinatura fiscal.");
     }
 
     // Assinatura MVP com comprovacao de integridade sem persistencia de senha.

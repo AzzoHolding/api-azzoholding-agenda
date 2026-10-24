@@ -350,7 +350,7 @@ class SpecialClosureServiceTest {
     assertThatThrownBy(() -> service.criar(tenantId, dto))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessage(
-            "Tipo de fechamento invalido. Valores aceitos: HOLIDAY, VACATION, RECESS,"
+            "Tipo de fechamento inválido. Valores aceitos: HOLIDAY, VACATION, RECESS,"
                 + " INTERNAL_EVENT, MANUAL");
   }
 
@@ -387,7 +387,7 @@ class SpecialClosureServiceTest {
 
     assertThatThrownBy(() -> service.criar(tenantId, dto))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageStartingWith("Tipo de fechamento invalido.");
+        .hasMessageStartingWith("Tipo de fechamento inválido.");
   }
 
   @Test
@@ -397,7 +397,7 @@ class SpecialClosureServiceTest {
 
     assertThatThrownBy(() -> service.criar(tenantId, dto))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Data de fechamento obrigatoria");
+        .hasMessage("Data de fechamento obrigatória");
   }
 
   @Test
@@ -408,7 +408,7 @@ class SpecialClosureServiceTest {
     semHorario.allDay = false;
     assertThatThrownBy(() -> service.criar(tenantId, semHorario))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Para fechamento parcial, startTime e endTime sao obrigatorios");
+        .hasMessage("Para fechamento parcial, startTime e endTime são obrigatórios");
 
     SpecialClosureDto invertido = new SpecialClosureDto();
     invertido.closureDate = DATA;
@@ -546,10 +546,10 @@ class SpecialClosureServiceTest {
 
     assertThatThrownBy(() -> service.remover(tenantId, id))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Fechamento nao encontrado");
+        .hasMessage("Fechamento não encontrado");
     assertThatThrownBy(() -> service.editar(tenantId, id, dtoAllDay()))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Fechamento nao encontrado");
+        .hasMessage("Fechamento não encontrado");
   }
 
   // ---------- listagem ----------

@@ -207,7 +207,7 @@ class CheckoutServiceTest {
 
     assertThatThrownBy(() -> service.criarIntent(intentRequest(1)))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("Produto nao encontrado")
+        .hasMessage("Produto não encontrado")
         .extracting(e -> ((ApiClientErrorException) e).getStatus())
         .isEqualTo(404);
   }
@@ -232,7 +232,7 @@ class CheckoutServiceTest {
 
     assertThatThrownBy(() -> service.criarIntent(intentRequest(1)))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("Checkout requer usuario autenticado com tenant valido")
+        .hasMessage("Checkout requer usuário autenticado com tenant válido")
         .extracting(e -> ((ApiClientErrorException) e).getStatus())
         .isEqualTo(403);
   }
@@ -321,7 +321,7 @@ class CheckoutServiceTest {
 
     assertThatThrownBy(() -> service.confirmarIntent(intent.getId()))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("Intent em status invalido para confirmacao")
+        .hasMessage("Intent em status inválido para confirmacao")
         .extracting(e -> ((ApiClientErrorException) e).getStatus())
         .isEqualTo(409);
   }
@@ -333,7 +333,7 @@ class CheckoutServiceTest {
 
     assertThatThrownBy(() -> service.confirmarIntent(intent.getId()))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("Produto nao disponivel")
+        .hasMessage("Produto não disponível")
         .extracting(e -> ((ApiClientErrorException) e).getStatus())
         .isEqualTo(422);
 
@@ -361,7 +361,7 @@ class CheckoutServiceTest {
 
     assertThatThrownBy(() -> service.confirmarIntent(intent.getId()))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("Intent pertence a outro usuario");
+        .hasMessage("Intent pertence a outro usuário");
   }
 
   @Test
@@ -371,7 +371,7 @@ class CheckoutServiceTest {
 
     assertThatThrownBy(() -> service.confirmarIntent(id))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("Intent nao encontrada")
+        .hasMessage("Intent não encontrada")
         .extracting(e -> ((ApiClientErrorException) e).getStatus())
         .isEqualTo(404);
   }

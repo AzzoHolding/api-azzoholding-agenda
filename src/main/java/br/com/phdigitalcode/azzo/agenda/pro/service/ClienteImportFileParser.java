@@ -65,11 +65,11 @@ public class ClienteImportFileParser {
         return parseXlsx(arquivo);
       }
       throw new ApiClientErrorException(
-          "Formato de importacao nao suportado. Use csv ou xlsx.", HttpStatus.BAD_REQUEST.value());
+          "Formato de importação não suportado. Use csv ou xlsx.", HttpStatus.BAD_REQUEST.value());
     } catch (ApiClientErrorException exception) {
       throw exception;
     } catch (Exception exception) {
-      throw new IllegalStateException("Falha ao ler arquivo de importacao de clientes.", exception);
+      throw new IllegalStateException("Falha ao ler arquivo de importação de clientes.", exception);
     }
   }
 
@@ -101,7 +101,7 @@ public class ClienteImportFileParser {
       Sheet sheet = workbook.getSheetAt(0);
       if (sheet == null) {
         throw new ApiClientErrorException(
-            "Planilha de importacao vazia.", HttpStatus.BAD_REQUEST.value());
+            "Planilha de importação vazia.", HttpStatus.BAD_REQUEST.value());
       }
       Row headerRow = sheet.getRow(0);
       validarCabecalho(readCells(headerRow, formatter));
@@ -150,7 +150,7 @@ public class ClienteImportFileParser {
     }
     if (!HEADER.equals(normalized)) {
       throw new ApiClientErrorException(
-          "Cabecalho invalido para importacao de clientes. Baixe o modelo e tente novamente.",
+          "Cabecalho inválido para importação de clientes. Baixe o modelo e tente novamente.",
           HttpStatus.BAD_REQUEST.value());
     }
   }

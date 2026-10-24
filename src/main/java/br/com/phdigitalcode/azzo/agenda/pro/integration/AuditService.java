@@ -209,16 +209,16 @@ public class AuditService {
       }
       return objectMapper.writeValueAsString(objeto);
     } catch (Exception e) {
-      throw new IllegalStateException("Nao foi possivel redigir o evento de auditoria", e);
+      throw new IllegalStateException("Não foi possível redigir o evento de auditoria", e);
     }
   }
 
   private AuditEvent persist(AuditEventCommand command, String status) {
     Timer.Sample sample = meterRegistry != null ? Timer.start(meterRegistry) : null;
-    if (command == null) throw new IllegalArgumentException("AuditEventCommand obrigatorio");
-    if (command.tenantId == null) throw new IllegalArgumentException("tenantId obrigatorio");
-    if (command.action == null || command.action.isBlank()) throw new IllegalArgumentException("action obrigatoria");
-    if (command.module == null || command.module.isBlank()) throw new IllegalArgumentException("module obrigatorio");
+    if (command == null) throw new IllegalArgumentException("AuditEventCommand obrigatório");
+    if (command.tenantId == null) throw new IllegalArgumentException("tenantId obrigatório");
+    if (command.action == null || command.action.isBlank()) throw new IllegalArgumentException("action obrigatória");
+    if (command.module == null || command.module.isBlank()) throw new IllegalArgumentException("module obrigatório");
 
     enrichWithRequestContext(command);
     String requestId = requestIdOrGenerated(command.requestId);

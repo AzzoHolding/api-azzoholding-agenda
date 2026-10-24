@@ -70,7 +70,7 @@ public class WhatsAppClient {
   public String sendMessage(TenantWhatsAppConfig config, String to, String message) {
     String token = getTenantTokenOrFail(config);
     String phoneNumberId = getPhoneNumberIdOrFail(config);
-    if (to == null || to.isBlank()) throw new IllegalArgumentException("Destino do WhatsApp invalido");
+    if (to == null || to.isBlank()) throw new IllegalArgumentException("Destino do WhatsApp inválido");
     if (message == null || message.isBlank()) throw new IllegalArgumentException("Mensagem vazia");
 
     String normalizedDestination = normalizeDestination(to);
@@ -124,7 +124,7 @@ public class WhatsAppClient {
                 "destination", to,
                 "root", CorrelatedLogging.throwableSummary(e)),
             e);
-        throw new IllegalStateException("Falha ao enviar mensagem no WhatsApp - Token nao autorizado: " + errorMessage, e);
+        throw new IllegalStateException("Falha ao enviar mensagem no WhatsApp - Token não autorizado: " + errorMessage, e);
       }
       LOG.error(
           "whatsappClient.send.failed {}",
@@ -180,9 +180,9 @@ public class WhatsAppClient {
       List<String> variaveis) {
     String token = getTenantTokenOrFail(config);
     String phoneNumberId = getPhoneNumberIdOrFail(config);
-    if (to == null || to.isBlank()) throw new IllegalArgumentException("Destino do WhatsApp invalido");
+    if (to == null || to.isBlank()) throw new IllegalArgumentException("Destino do WhatsApp inválido");
     if (templateName == null || templateName.isBlank()) {
-      throw new IllegalArgumentException("Nome do template do WhatsApp nao informado");
+      throw new IllegalArgumentException("Nome do template do WhatsApp não informado");
     }
     String idioma = languageCode == null || languageCode.isBlank() ? "en_US" : languageCode.trim();
 
@@ -285,10 +285,10 @@ public class WhatsAppClient {
     String token = getTenantTokenOrFail(config);
     String wabaId = config == null ? null : config.getWhatsappBusinessAccountId();
     if (wabaId == null || wabaId.isBlank()) {
-      throw new IllegalArgumentException("Conta comercial do WhatsApp nao informada para o tenant");
+      throw new IllegalArgumentException("Conta comercial do WhatsApp não informada para o tenant");
     }
-    if (nome == null || nome.isBlank()) throw new IllegalArgumentException("Nome do template obrigatorio");
-    if (corpo == null || corpo.isBlank()) throw new IllegalArgumentException("Corpo do template obrigatorio");
+    if (nome == null || nome.isBlank()) throw new IllegalArgumentException("Nome do template obrigatório");
+    if (corpo == null || corpo.isBlank()) throw new IllegalArgumentException("Corpo do template obrigatório");
 
     Map<String, Object> componenteDoCorpo = new HashMap<>();
     componenteDoCorpo.put("type", "BODY");
@@ -369,10 +369,10 @@ public class WhatsAppClient {
       String categoria) {
     String token = getTenantTokenOrFail(config);
     if (templateId == null || templateId.isBlank()) {
-      throw new IllegalArgumentException("Id do template obrigatorio para editar");
+      throw new IllegalArgumentException("Id do template obrigatório para editar");
     }
     if (corpo == null || corpo.isBlank()) {
-      throw new IllegalArgumentException("Corpo do template obrigatorio");
+      throw new IllegalArgumentException("Corpo do template obrigatório");
     }
 
     Map<String, Object> componenteDoCorpo = new HashMap<>();
@@ -443,7 +443,7 @@ public class WhatsAppClient {
     String token = getTenantTokenOrFail(config);
     String wabaId = config == null ? null : config.getWhatsappBusinessAccountId();
     if (wabaId == null || wabaId.isBlank()) {
-      throw new IllegalArgumentException("Conta comercial do WhatsApp nao informada para o tenant");
+      throw new IllegalArgumentException("Conta comercial do WhatsApp não informada para o tenant");
     }
 
     try {
@@ -546,7 +546,7 @@ public class WhatsAppClient {
               "phoneNumberId", phoneNumberId,
               "root", CorrelatedLogging.throwableSummary(e)),
           e);
-      throw new IllegalStateException("Falha ao registrar o numero no WhatsApp Cloud API", e);
+      throw new IllegalStateException("Falha ao registrar o número no WhatsApp Cloud API", e);
     }
   }
 
@@ -576,7 +576,7 @@ public class WhatsAppClient {
     String token = getTenantTokenOrFail(config);
     String wabaId = config == null ? null : config.getWhatsappBusinessAccountId();
     if (wabaId == null || wabaId.isBlank()) {
-      throw new IllegalArgumentException("Conta comercial do WhatsApp nao informada para o tenant");
+      throw new IllegalArgumentException("Conta comercial do WhatsApp não informada para o tenant");
     }
 
     LOG.info(
@@ -628,10 +628,10 @@ public class WhatsAppClient {
     String token = accessToken == null ? null : accessToken.trim();
     String normalizedPhoneNumberId = phoneNumberId == null ? null : phoneNumberId.trim();
     if (token == null || token.isBlank()) {
-      throw new IllegalArgumentException("Token do WhatsApp nao configurado para o tenant");
+      throw new IllegalArgumentException("Token do WhatsApp não configurado para o tenant");
     }
     if (normalizedPhoneNumberId == null || normalizedPhoneNumberId.isBlank()) {
-      throw new IllegalArgumentException("phoneNumberId do WhatsApp nao configurado para o tenant");
+      throw new IllegalArgumentException("phoneNumberId do WhatsApp não configurado para o tenant");
     }
 
     LOG.info("whatsappClient.fetchPhoneNumberDetails.started {}", CorrelatedLogging.context("phoneNumberId", normalizedPhoneNumberId));
@@ -649,7 +649,7 @@ public class WhatsAppClient {
       details.displayPhoneNumber = text(payload.path("display_phone_number"));
       details.verifiedName = text(payload.path("verified_name"));
       if (details.id == null || details.id.isBlank()) {
-        throw new IllegalStateException("Meta nao retornou dados validos para o Phone Number ID informado.");
+        throw new IllegalStateException("Meta não retornou dados válidos para o Phone Number ID informado.");
       }
 
       LOG.info(
@@ -679,24 +679,24 @@ public class WhatsAppClient {
           "whatsappClient.fetchPhoneNumberDetails.unexpected {}",
           CorrelatedLogging.context("phoneNumberId", normalizedPhoneNumberId, "root", CorrelatedLogging.throwableSummary(e)),
           e);
-      throw new IllegalStateException("Falha ao validar configuracao do WhatsApp", e);
+      throw new IllegalStateException("Falha ao validar configuração do WhatsApp", e);
     }
   }
 
   private String getTenantTokenOrFail(TenantWhatsAppConfig config) {
-    if (config == null) throw new IllegalArgumentException("Configuracao de WhatsApp invalida");
+    if (config == null) throw new IllegalArgumentException("Configuração de WhatsApp inválida");
     String encrypted = config.getWhatsappAccessTokenEnc();
     if (encrypted == null || encrypted.isBlank()) {
-      throw new IllegalArgumentException("Token do WhatsApp nao configurado para o tenant");
+      throw new IllegalArgumentException("Token do WhatsApp não configurado para o tenant");
     }
     String token = encryptionService.decrypt(encrypted);
-    if (token.isBlank()) throw new IllegalArgumentException("Token do WhatsApp nao configurado para o tenant");
+    if (token.isBlank()) throw new IllegalArgumentException("Token do WhatsApp não configurado para o tenant");
     return token;
   }
 
   private String getPhoneNumberIdOrFail(TenantWhatsAppConfig config) {
     if (config.getWhatsappPhoneNumberId() == null || config.getWhatsappPhoneNumberId().isBlank()) {
-      throw new IllegalArgumentException("phoneNumberId do WhatsApp nao configurado para o tenant");
+      throw new IllegalArgumentException("phoneNumberId do WhatsApp não configurado para o tenant");
     }
     return config.getWhatsappPhoneNumberId();
   }

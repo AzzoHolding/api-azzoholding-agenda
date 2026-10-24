@@ -41,14 +41,14 @@ public class PublicBookingUrlService {
     if (baseUrl.endsWith("/")) baseUrl = baseUrl.substring(0, baseUrl.length() - 1);
 
     if (baseUrl.isBlank() || UNSET.equalsIgnoreCase(baseUrl)) {
-      throw new IllegalStateException("app.public.booking.base-url nao configurada");
+      throw new IllegalStateException("app.public.booking.base-url não configurada");
     }
 
     URI uri;
     try {
       uri = URI.create(baseUrl);
     } catch (Exception e) {
-      throw new IllegalStateException("app.public.booking.base-url invalida", e);
+      throw new IllegalStateException("app.public.booking.base-url inválida", e);
     }
 
     String scheme = uri.getScheme() != null ? uri.getScheme().toLowerCase(Locale.ROOT) : "";
@@ -61,7 +61,7 @@ public class PublicBookingUrlService {
     }
 
     if (isProductionProfile() && isLocalHost(host)) {
-      throw new IllegalStateException("app.public.booking.base-url nao pode apontar para localhost em producao");
+      throw new IllegalStateException("app.public.booking.base-url não pode apontar para localhost em producao");
     }
     return baseUrl;
   }
@@ -79,7 +79,7 @@ public class PublicBookingUrlService {
 
   private String normalizeSlug(String slug) {
     if (slug == null || slug.isBlank()) {
-      throw new IllegalArgumentException("slug do salao obrigatorio");
+      throw new IllegalArgumentException("slug do salão obrigatório");
     }
     return slug.trim();
   }

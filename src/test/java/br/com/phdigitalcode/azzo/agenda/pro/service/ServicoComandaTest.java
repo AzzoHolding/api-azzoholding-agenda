@@ -381,7 +381,7 @@ class ServicoComandaTest {
 
     assertThatThrownBy(() -> service.adicionarItem(comandaId, req))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Preco de venda e obrigatorio para item do tipo PRODUTO.");
+        .hasMessage("Preço de venda é obrigatório para item do tipo PRODUTO.");
 
     verify(comandaItemRepository, never()).save(any());
   }
@@ -466,7 +466,7 @@ class ServicoComandaTest {
 
     assertThatThrownBy(() -> service.adicionarItem(comandaId, pedidoDePacote("500.00", quantidade)))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("A quantidade de um pacote precisa ser um numero inteiro, de 1 em diante.");
+        .hasMessage("A quantidade de um pacote precisa ser um número inteiro, de 1 em diante.");
 
     verify(comandaItemRepository, never()).save(any());
   }
@@ -507,7 +507,7 @@ class ServicoComandaTest {
 
     assertThatThrownBy(() -> service.adicionarItem(comandaId, req))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Comanda nao esta aberta.");
+        .hasMessage("Comanda não esta aberta.");
   }
 
   // ---------------------------------------------------------------- desconto
@@ -522,7 +522,7 @@ class ServicoComandaTest {
 
     assertThatThrownBy(() -> service.aplicarDesconto(comandaId, req))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Desconto nao pode ser maior que 100%.");
+        .hasMessage("Desconto não pode ser maior que 100%.");
   }
 
   @Test
@@ -549,7 +549,7 @@ class ServicoComandaTest {
 
     assertThatThrownBy(() -> service.fechar(comandaId))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Comanda sem itens nao pode ser fechada.");
+        .hasMessage("Comanda sem itens não pode ser fechada.");
   }
 
   @Test
@@ -567,7 +567,7 @@ class ServicoComandaTest {
 
     assertThatThrownBy(() -> service.fechar(comandaId))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Comanda nao esta quitada: pago 100.00, total com gorjeta 110.00.");
+        .hasMessage("Comanda não esta quitada: pago 100.00, total com gorjeta 110.00.");
 
     verify(transacaoRepository, never()).save(any());
   }
@@ -583,7 +583,7 @@ class ServicoComandaTest {
 
     assertThatThrownBy(() -> service.fechar(comandaId))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Comanda nao esta quitada: pago 0, total com gorjeta 100.00.");
+        .hasMessage("Comanda não esta quitada: pago 0, total com gorjeta 100.00.");
   }
 
   // ─── FIN-003: troco e pagamento que nao cabe no saldo ───────────────────────────────────────
@@ -664,7 +664,7 @@ class ServicoComandaTest {
                 service.registrarPagamento(
                     comandaId, pedidoDePagamento(ComandaPagamento.MEIO_DINHEIRO, "80.00")))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Esta comanda ja esta paga por inteiro: feche a comanda.");
+        .hasMessage("Esta comanda já esta paga por inteiro: feche a comanda.");
 
     verify(comandaPagamentoRepository, never()).save(any());
   }
@@ -719,7 +719,7 @@ class ServicoComandaTest {
 
     assertThatThrownBy(() -> service.fechar(comandaId))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("so o dinheiro (recebido: 0) tem troco")
+        .hasMessageContaining("só o dinheiro (recebido: 0) tem troco")
         .hasMessageContaining("passam do total em 20.00");
 
     verify(transacaoRepository, never()).save(any());
@@ -1007,7 +1007,7 @@ class ServicoComandaTest {
 
     assertThatThrownBy(() -> service.registrarPagamento(comandaId, req))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Comanda sem cliente identificado: obrigatorio para pagamento via Pix.");
+        .hasMessage("Comanda sem cliente identificado: obrigatório para pagamento via Pix.");
   }
 
   // ---------------------------------------------------------------- cancelamento
@@ -1054,7 +1054,7 @@ class ServicoComandaTest {
 
     assertThatThrownBy(() -> service.estornar(comandaId, req))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Comanda nao esta fechada.");
+        .hasMessage("Comanda não esta fechada.");
   }
 
   @Test
@@ -1224,7 +1224,7 @@ class ServicoComandaTest {
     // FIN-007: antes o desconto era cortado em R$ 20 e os 50000 pontos debitados mesmo assim.
     assertThatThrownBy(() -> service.resgatarFidelidade(comandaId, req))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("Use no maximo 2000 pontos");
+        .hasMessageContaining("Use no máximo 2000 pontos");
     assertThat(comanda.getDesconto()).isEqualByComparingTo("0.00");
     assertThat(cliente.getLoyaltyPoints()).isEqualTo(100000);
   }
@@ -1344,7 +1344,7 @@ class ServicoComandaTest {
 
     assertThatThrownBy(() -> service.resgatarFidelidade(comandaId, req))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Cliente nao possui pontos suficientes (saldo: 10).");
+        .hasMessage("Cliente não possui pontos suficientes (saldo: 10).");
   }
 
   @Test
@@ -1359,7 +1359,7 @@ class ServicoComandaTest {
 
     assertThatThrownBy(() -> service.resgatarFidelidade(comandaId, req))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Programa de fidelidade nao esta ativo.");
+        .hasMessage("Programa de fidelidade não esta ativo.");
   }
 
   // ─── Preco de tabela e trilha de auditoria (achados do E2E de 2026-09-16) ───
@@ -1421,7 +1421,7 @@ class ServicoComandaTest {
 
     assertThatThrownBy(() -> service.adicionarItem(comandaId, req))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Preco de venda do produto precisa ser maior que zero.");
+        .hasMessage("Preço de venda do produto precisa ser maior que zero.");
     verify(comandaItemRepository, never()).save(any());
   }
 
@@ -1669,7 +1669,7 @@ class ServicoComandaTest {
 
     assertThatThrownBy(() -> service.adicionarItem(comandaId, itemDeServico()))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("ja tem")
+        .hasMessageContaining("já tem")
         .hasMessageContaining("veio do agendamento");
     verify(comandaItemRepository, never()).save(any());
   }
@@ -1699,7 +1699,7 @@ class ServicoComandaTest {
 
     assertThatThrownBy(() -> service.obter(comandaId))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessageContaining("nao encontrada");
+        .hasMessageContaining("não encontrada");
   }
 
   @Test
@@ -1925,7 +1925,7 @@ class ServicoComandaTest {
 
     assertThatThrownBy(() -> service.aplicarCobertura(comandaId, corte.getId(), coberturaDoPacote(deOutro)))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("nao e do cliente da comanda");
+        .hasMessageContaining("não é do cliente da comanda");
   }
 
   @Test
@@ -1938,7 +1938,7 @@ class ServicoComandaTest {
 
     assertThatThrownBy(() -> service.aplicarCobertura(comandaId, corte.getId(), coberturaDoPacote(esgotado)))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("nao tem mais sessoes");
+        .hasMessageContaining("não tem mais sessoes");
   }
 
   @Test
@@ -2041,7 +2041,7 @@ class ServicoComandaTest {
 
     assertThatThrownBy(() -> service.estornar(comandaId, req))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("ja usou 2 sessoes");
+        .hasMessageContaining("já usou 2 sessoes");
     verify(clientPackagePurchaseRepository, never()).delete(any());
   }
 
@@ -2101,7 +2101,7 @@ class ServicoComandaTest {
 
     assertThatThrownBy(() -> service.abrir(req))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("Agendamento nao encontrado");
+        .hasMessageContaining("Agendamento não encontrado");
     verify(comandaRepository, never()).save(any());
   }
 
@@ -2115,7 +2115,7 @@ class ServicoComandaTest {
 
     assertThatThrownBy(() -> service.abrir(req))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("Cliente nao encontrado");
+        .hasMessageContaining("Cliente não encontrado");
     verify(comandaRepository, never()).save(any());
   }
 
@@ -2197,7 +2197,7 @@ class ServicoComandaTest {
 
     assertThatThrownBy(() -> service.abrir(req))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Este agendamento ja tem uma comanda aberta ou cobrada: continue nela.");
+        .hasMessage("Este agendamento já tem uma comanda aberta ou cobrada: continue nela.");
   }
 
   /** Outra violacao de integridade nao pode ser disfarcada de "ja tem comanda". */
@@ -2234,7 +2234,7 @@ class ServicoComandaTest {
 
     assertThatThrownBy(() -> service.registrarPagamento(comandaId, req))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Este sinal ja foi usado em outro pagamento.");
+        .hasMessage("Este sinal já foi usado em outro pagamento.");
   }
 
   /** O sinal so e lido SEM trava onde nao vai ser consumido; o pagamento usa a consulta travada. */
@@ -2251,7 +2251,7 @@ class ServicoComandaTest {
 
     assertThatThrownBy(() -> service.registrarPagamento(comandaId, req))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Nao ha sinal pago disponivel para este agendamento.");
+        .hasMessage("Não ha sinal pago disponível para este agendamento.");
 
     verify(appointmentDepositRepository).findPaidUnusedByAppointmentIdParaConsumo(eq(appointmentId));
     verify(appointmentDepositRepository, never()).findPaidUnusedByAppointmentId(any());
@@ -2277,7 +2277,7 @@ class ServicoComandaTest {
 
     assertThatThrownBy(() -> service.registrarPagamento(comandaId, req))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("Nao ha sinal pago");
+        .hasMessageContaining("Não ha sinal pago");
     assertThat(deposit.getUsedInComandaId()).isNull();
   }
 
@@ -2302,7 +2302,7 @@ class ServicoComandaTest {
 
     assertThatThrownBy(() -> service.abrir(req))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("ja foi cobrado");
+        .hasMessageContaining("já foi cobrado");
     verify(comandaRepository, never()).save(any());
   }
 }

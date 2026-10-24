@@ -44,7 +44,7 @@ public final class PemKeyUtils {
       KeyFactory keyFactory = KeyFactory.getInstance("RSA");
       return keyFactory.generatePublic(new X509EncodedKeySpec(der));
     } catch (IOException | NoSuchAlgorithmException | InvalidKeySpecException e) {
-      throw new IllegalStateException("Falha ao carregar chave publica JWT (RSA/X.509)", e);
+      throw new IllegalStateException("Falha ao carregar chave pública JWT (RSA/X.509)", e);
     }
   }
 
@@ -54,7 +54,7 @@ public final class PemKeyUtils {
    */
   private static String resolvePemContent(String locationOrValue) throws IOException {
     if (locationOrValue == null || locationOrValue.isBlank()) {
-      throw new IllegalStateException("Chave JWT nao configurada");
+      throw new IllegalStateException("Chave JWT não configurada");
     }
     String trimmed = locationOrValue.trim();
     if (trimmed.contains("BEGIN")) {

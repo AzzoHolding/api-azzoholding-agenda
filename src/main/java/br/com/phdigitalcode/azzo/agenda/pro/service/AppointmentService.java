@@ -245,13 +245,13 @@ public class AppointmentService {
       LocalDate date,
       int serviceDurationMinutes,
       int bufferMinutes) {
-    if (tenantId == null) throw new IllegalArgumentException("tenantId obrigatorio");
-    if (professionalId == null) throw new IllegalArgumentException("professionalId obrigatorio");
-    if (date == null) throw new IllegalArgumentException("date obrigatoria");
+    if (tenantId == null) throw new IllegalArgumentException("tenantId obrigatório");
+    if (professionalId == null) throw new IllegalArgumentException("professionalId obrigatório");
+    if (date == null) throw new IllegalArgumentException("date obrigatória");
     if (serviceDurationMinutes <= 0) {
-      throw new IllegalArgumentException("serviceDurationMinutes invalido");
+      throw new IllegalArgumentException("serviceDurationMinutes inválido");
     }
-    if (bufferMinutes < 0) throw new IllegalArgumentException("bufferMinutes invalido");
+    if (bufferMinutes < 0) throw new IllegalArgumentException("bufferMinutes inválido");
   }
 
   private Profissional validarProfissionalDoTenant(UUID tenantId, UUID professionalId) {
@@ -259,7 +259,7 @@ public class AppointmentService {
         .findByIdAndTenantId(professionalId, tenantId)
         .orElseThrow(
             () ->
-                new IllegalArgumentException("Profissional nao encontrado para o tenant informado"));
+                new IllegalArgumentException("Profissional não encontrado para o tenant informado"));
   }
 
   /**

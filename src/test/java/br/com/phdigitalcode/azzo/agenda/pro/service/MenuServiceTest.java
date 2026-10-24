@@ -152,7 +152,7 @@ class MenuServiceTest {
 
     assertThatThrownBy(() -> service.obterMenuAtual())
         .isInstanceOf(IllegalStateException.class)
-        .hasMessageContaining("Role invalida no JWT");
+        .hasMessageContaining("Role inválida no JWT");
   }
 
   @Test

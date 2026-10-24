@@ -101,7 +101,7 @@ public class ServicoRelatorios {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     LocalDate inicio = DataUtil.parseDataISO(from);
     LocalDate fim = DataUtil.parseDataISO(to);
-    if (fim.isBefore(inicio)) throw new IllegalArgumentException("Periodo invalido");
+    if (fim.isBefore(inicio)) throw new IllegalArgumentException("Período inválido");
 
     UUID profissionalId = parseProfessionalId(professionalId, professionalUserId);
 
@@ -151,9 +151,9 @@ public class ServicoRelatorios {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     LocalDate inicio = DataUtil.parseDataISO(dataInicio);
     LocalDate fim = DataUtil.parseDataISO(dataFim);
-    if (inicio == null || fim == null) throw new IllegalArgumentException("Periodo obrigatorio");
-    if (fim.isBefore(inicio)) throw new IllegalArgumentException("Periodo invalido");
-    if (inicio.plusDays(370).isBefore(fim)) throw new IllegalArgumentException("Periodo maximo de 370 dias");
+    if (inicio == null || fim == null) throw new IllegalArgumentException("Período obrigatório");
+    if (fim.isBefore(inicio)) throw new IllegalArgumentException("Período inválido");
+    if (inicio.plusDays(370).isBefore(fim)) throw new IllegalArgumentException("Período máximo de 370 dias");
 
     UUID profissionalId = professionalId != null && !professionalId.isBlank() ? UUID.fromString(professionalId) : null;
 
@@ -806,12 +806,12 @@ public class ServicoRelatorios {
   private UUID parseProfessionalId(String professionalId, String professionalUserId) {
     String raw = !isBlank(professionalId) ? professionalId : professionalUserId;
     if (isBlank(raw)) {
-      throw new IllegalArgumentException("professionalId obrigatorio");
+      throw new IllegalArgumentException("professionalId obrigatório");
     }
     try {
       return UUID.fromString(raw.trim());
     } catch (Exception e) {
-      throw new IllegalArgumentException("professionalId invalido");
+      throw new IllegalArgumentException("professionalId inválido");
     }
   }
 

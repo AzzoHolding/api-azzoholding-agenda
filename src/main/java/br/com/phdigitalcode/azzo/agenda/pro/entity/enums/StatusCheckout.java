@@ -23,6 +23,6 @@ public enum StatusCheckout {
       if (item.name().equalsIgnoreCase(value.trim())) return item;
       if (item.description.equalsIgnoreCase(value.trim())) return item;
     }
-    throw new IllegalArgumentException("Status de checkout invalido: " + value);
+    throw new IllegalArgumentException("Status de checkout inválido: " + value);
   }
 }

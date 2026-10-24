@@ -157,10 +157,10 @@ class FiscalIdempotencyServiceTest {
   void rejeitaSupplierOuResponseTypeNulos() {
     assertThatThrownBy(() -> service.execute(tenantId, "OP", "key", null, String.class))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("supplier obrigatorio");
+        .hasMessage("supplier obrigatório");
     assertThatThrownBy(() -> service.execute(tenantId, "OP", "key", () -> "ok", null))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("responseType obrigatorio");
+        .hasMessage("responseType obrigatório");
 
     verify(fiscalIdempotencyRequestRepository, never()).saveAndFlush(any());
   }

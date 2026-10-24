@@ -165,9 +165,9 @@ public class ReactivationConfigService {
     Cliente client =
         clienteRepository
             .findByIdAndTenantId(clientId, tenantId)
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Cliente nao encontrado"));
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Cliente não encontrado"));
     if (Boolean.TRUE.equals(client.getWhatsappOptOut())) {
-      throw new ResponseStatusException(HttpStatus.CONFLICT, "Cliente ja possui opt-out registrado");
+      throw new ResponseStatusException(HttpStatus.CONFLICT, "Cliente já possui opt-out registrado");
     }
 
     Instant now = Instant.now();
@@ -210,7 +210,7 @@ public class ReactivationConfigService {
     Cliente client =
         clienteRepository
             .findByIdAndTenantId(clientId, tenantId)
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Cliente nao encontrado"));
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Cliente não encontrado"));
 
     Instant now = Instant.now();
     client.setWhatsappOptIn(true);
@@ -338,13 +338,13 @@ public class ReactivationConfigService {
     WhatsAppBookingReactivationCycleEntity cycle =
         cycleRepository
             .findById(cycleId)
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Ciclo nao encontrado"));
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Ciclo não encontrado"));
     if (!tenantId.equals(cycle.getTenantId())) {
-      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Ciclo nao encontrado");
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Ciclo não encontrado");
     }
     if (cycle.getStatus() != WhatsAppBookingReactivationStatus.ACTIVE
         && cycle.getStatus() != WhatsAppBookingReactivationStatus.REACTIVATED) {
-      throw new ResponseStatusException(HttpStatus.CONFLICT, "Ciclo nao pode ser cancelado no status atual");
+      throw new ResponseStatusException(HttpStatus.CONFLICT, "Ciclo não pode ser cancelado no status atual");
     }
     reactivationService.cancelCycle(cycle, "MANUAL_CANCEL");
   }

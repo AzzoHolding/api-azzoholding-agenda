@@ -180,7 +180,7 @@ public class WhatsAppWebhookController {
           "whatsappWebhook.receive.rejected {}",
           CorrelatedLogging.context("reason", "invalid_hmac"));
       response.status = "REJECTED";
-      response.message = "Assinatura invalida";
+      response.message = "Assinatura inválida";
       return response;
     }
 
@@ -200,7 +200,7 @@ public class WhatsAppWebhookController {
           CorrelatedLogging.context("reason", "invalid_json", "root", CorrelatedLogging.throwableSummary(e)),
           e);
       response.status = "IGNORED";
-      response.message = "Payload invalido";
+      response.message = "Payload inválido";
       return response;
     }
 
@@ -577,7 +577,7 @@ public class WhatsAppWebhookController {
 
   private void registrarNotificacaoEnvioIndisponivel(Tenant tenant, String fromPhone, String contactName, String motivo) {
     String customerName = (contactName == null || contactName.isBlank()) ? "Cliente sem nome informado" : contactName;
-    String message = "O WhatsApp do salao nao esta conseguindo enviar mensagens (" + motivo + "). "
+    String message = "O WhatsApp do salão não esta conseguindo enviar mensagens (" + motivo + "). "
         + "Cliente " + customerName + ", telefone " + fromPhone
         + ", mandou mensagem e ficou sem resposta automatica — confira a configuracao do WhatsApp e responda pelo chat.";
     notificationPublisher.publish(
@@ -672,7 +672,7 @@ public class WhatsAppWebhookController {
 
   private boolean isTenantConfigurationError(String error) {
     if (error == null) return false;
-    String lower = error.toLowerCase();
+    String lower = br.com.phdigitalcode.azzo.agenda.pro.util.TextoSemAcento.de(error);
     return lower.contains("token do whatsapp nao configurado")
         || lower.contains("phonenumberid do whatsapp nao configurado")
         || lower.contains("configuracao do whatsapp");
@@ -680,7 +680,7 @@ public class WhatsAppWebhookController {
 
   private String detectMissingRequirement(String error) {
     if (error == null) return "configuracao do WhatsApp";
-    String lower = error.toLowerCase();
+    String lower = br.com.phdigitalcode.azzo.agenda.pro.util.TextoSemAcento.de(error);
     if (lower.contains("token do whatsapp nao configurado")) return "token de acesso do WhatsApp";
     if (lower.contains("phonenumberid do whatsapp nao configurado")) return "phone number id do WhatsApp";
     return "configuracao do WhatsApp";

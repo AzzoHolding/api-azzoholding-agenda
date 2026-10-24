@@ -49,7 +49,7 @@ public class SuggestionService {
     UUID userId = authenticatedUser.idOuNulo();
     Usuario user = userId != null ? usuarioRepository.findById(userId).orElse(null) : null;
     if (user == null) {
-      throw new ApiClientErrorException("Usuario autenticado nao encontrado.", HttpStatus.UNAUTHORIZED.value());
+      throw new ApiClientErrorException("Usuário autenticado não encontrado.", HttpStatus.UNAUTHORIZED.value());
     }
 
     FeedbackSuggestion suggestion = new FeedbackSuggestion();
@@ -126,7 +126,7 @@ public class SuggestionService {
     if (CATEGORY_USABILIDADE.equals(normalized)) return CATEGORY_USABILIDADE;
     if (CATEGORY_OUTRO.equals(normalized)) return CATEGORY_OUTRO;
     throw new ApiClientErrorException(
-        "Categoria invalida. Use BUG, MELHORIA, FUNCIONALIDADE, USABILIDADE ou OUTRO.",
+        "Categoria inválida. Use BUG, MELHORIA, FUNCIONALIDADE, USABILIDADE ou OUTRO.",
         HttpStatus.BAD_REQUEST.value());
   }
 }

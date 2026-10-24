@@ -13,12 +13,12 @@ public enum ChatAppointmentMarker {
 
   public static ChatAppointmentMarker from(String value) {
     if (value == null || value.isBlank()) {
-      throw new IllegalArgumentException("Marcador de agendamento obrigatorio.");
+      throw new IllegalArgumentException("Marcador de agendamento obrigatório.");
     }
     try {
       return ChatAppointmentMarker.valueOf(value.trim().toUpperCase(Locale.ROOT));
     } catch (IllegalArgumentException e) {
-      throw new IllegalArgumentException("Marcador de agendamento invalido: " + value);
+      throw new IllegalArgumentException("Marcador de agendamento inválido: " + value);
     }
   }
 }

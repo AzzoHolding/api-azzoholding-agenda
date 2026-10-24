@@ -157,7 +157,7 @@ public class NfseService {
   @Transactional
   public NfseDtos.Invoice criarRascunho(NfseDtos.Invoice request) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
-    if (request == null) throw new IllegalArgumentException("Payload de NFS-e obrigatorio.");
+    if (request == null) throw new IllegalArgumentException("Payload de NFS-e obrigatório.");
     NfseAmbiente ambiente = parseAmbiente(request.ambiente);
     NfseConfigEntity config = resolveRequiredConfigForInvoice(tenantId, ambiente, request.municipioCodigoIbge);
     String municipioCodigoIbge = resolveMunicipioCodigoIbge(config, request.municipioCodigoIbge);
@@ -215,11 +215,11 @@ public class NfseService {
     NfseInvoiceEntity entity =
         nfseInvoiceRepository
             .findByTenantAndId(tenantId, id)
-            .orElseThrow(() -> new ApiClientErrorException("NFS-e nao encontrada.", 404));
+            .orElseThrow(() -> new ApiClientErrorException("NFS-e não encontrada.", 404));
     if (entity.getFiscalStatus() != NfseFiscalStatus.DRAFT) {
       throw new NfseStateTransitionException("Somente rascunhos podem ser alterados.");
     }
-    if (request == null) throw new IllegalArgumentException("Payload de NFS-e obrigatorio.");
+    if (request == null) throw new IllegalArgumentException("Payload de NFS-e obrigatório.");
     NfseAmbiente ambiente = parseAmbiente(request.ambiente);
     NfseConfigEntity config = resolveRequiredConfigForInvoice(tenantId, ambiente, request.municipioCodigoIbge);
     String municipioCodigoIbge = resolveMunicipioCodigoIbge(config, request.municipioCodigoIbge);
@@ -264,7 +264,7 @@ public class NfseService {
     NfseInvoiceEntity entity =
         nfseInvoiceRepository
             .findByTenantAndId(tenantId, id)
-            .orElseThrow(() -> new ApiClientErrorException("NFS-e nao encontrada.", 404));
+            .orElseThrow(() -> new ApiClientErrorException("NFS-e não encontrada.", 404));
     List<NfseInvoiceItemEntity> items = nfseInvoiceItemRepository.listByTenantAndInvoice(tenantId, id);
     return toInvoiceDto(entity, items);
   }
@@ -287,16 +287,16 @@ public class NfseService {
     NfseInvoiceEntity entity =
         nfseInvoiceRepository
             .findByTenantAndIdForUpdate(tenantId, id)
-            .orElseThrow(() -> new ApiClientErrorException("NFS-e nao encontrada.", 404));
+            .orElseThrow(() -> new ApiClientErrorException("NFS-e não encontrada.", 404));
     if (entity.getFiscalStatus() != NfseFiscalStatus.DRAFT
         && entity.getFiscalStatus() != NfseFiscalStatus.REJECTED) {
-      throw new NfseStateTransitionException("Estado invalido para autorizacao.");
+      throw new NfseStateTransitionException("Estado inválido para autorização.");
     }
 
     aplicarProvedorSelecionado(entity, request != null ? request.provedor : null);
 
     if ("MOCK_NACIONAL".equalsIgnoreCase(entity.getProvedor())) {
-      throw new IllegalArgumentException("Provedor MOCK_NACIONAL nao permitido nesta operacao.");
+      throw new IllegalArgumentException("Provedor MOCK_NACIONAL não permitido nesta operação.");
     }
     if (entity.getFiscalStatus() == NfseFiscalStatus.REJECTED) {
       transicionarFiscalStatus(entity, NfseFiscalStatus.DRAFT, tenantId, id, "RETRY_RESET");
@@ -476,15 +476,15 @@ public class NfseService {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     UUID id = parseUuid(invoiceId);
     if (request == null || isBlank(request.reason)) {
-      throw new IllegalArgumentException("Motivo do cancelamento obrigatorio.");
+      throw new IllegalArgumentException("Motivo do cancelamento obrigatório.");
     }
 
     NfseInvoiceEntity entity =
         nfseInvoiceRepository
             .findByTenantAndIdForUpdate(tenantId, id)
-            .orElseThrow(() -> new ApiClientErrorException("NFS-e nao encontrada.", 404));
+            .orElseThrow(() -> new ApiClientErrorException("NFS-e não encontrada.", 404));
     if (entity.getFiscalStatus() != NfseFiscalStatus.AUTHORIZED) {
-      throw new NfseStateTransitionException("Estado invalido para cancelamento.");
+      throw new NfseStateTransitionException("Estado inválido para cancelamento.");
     }
 
     transicionarFiscalStatus(entity, NfseFiscalStatus.CANCEL_PENDING, tenantId, id, "CANCEL_PENDING");
@@ -584,10 +584,10 @@ public class NfseService {
     LocalDate from = parseRequiredDate(fromRaw, "Periodo inicial (from) obrigatorio.");
     LocalDate to = parseRequiredDate(toRaw, "Periodo final (to) obrigatorio.");
     if (to.isBefore(from)) {
-      throw new IllegalArgumentException("Periodo invalido: 'to' deve ser maior ou igual a 'from'.");
+      throw new IllegalArgumentException("Período inválido: 'to' deve ser maior ou igual a 'from'.");
     }
     if (to.toEpochDay() - from.toEpochDay() > 365) {
-      throw new IllegalArgumentException("Periodo maximo para exportacao contabil e de 365 dias.");
+      throw new IllegalArgumentException("Período máximo para exportação contabil e de 365 dias.");
     }
 
     List<NfseFiscalStatus> statuses = parseFiscalStatusList(statusRaw);
@@ -633,7 +633,7 @@ public class NfseService {
             .orElseThrow(
                 () ->
                     new ApiClientErrorException(
-                        "Configuracao NFS-e nao encontrada para o ambiente informado.", 404));
+                        "Configuração NFS-e não encontrada para o ambiente informado.", 404));
     String configuredMunicipio = normalize(config.getMunicipioCodigoIbge());
     String requestedMunicipio = normalizeOrNull(municipioCodigoIbge);
     if (requestedMunicipio != null && !requestedMunicipio.equals(configuredMunicipio)) {
@@ -649,8 +649,8 @@ public class NfseService {
   }
 
   private void validarInvoiceRequest(NfseDtos.Invoice request, String municipioCodigoIbge, String provedor) {
-    if (request.customer == null) throw new IllegalArgumentException("Tomador obrigatorio.");
-    if (isBlank(request.customer.name)) throw new IllegalArgumentException("Nome do tomador obrigatorio.");
+    if (request.customer == null) throw new IllegalArgumentException("Tomador obrigatório.");
+    if (isBlank(request.customer.name)) throw new IllegalArgumentException("Nome do tomador obrigatório.");
     NfseCustomerType customerType = parseCustomerType(request.customer.type);
     if (customerType == NfseCustomerType.EXTERIOR) {
       if (isBlank(request.customer.countryCode)) {
@@ -664,10 +664,10 @@ public class NfseService {
     if (isBlank(municipioCodigoIbge)) throw new IllegalArgumentException("NFSE_CONFIG_MISSING_MUNICIPIO");
     if (isBlank(provedor)) throw new IllegalArgumentException("NFSE_CONFIG_MISSING_PROVEDOR");
     if (isBlank(request.serieRps)) throw new IllegalArgumentException("NFSE_CONFIG_MISSING_SERIE_RPS");
-    if (isBlank(request.naturezaOperacao)) throw new IllegalArgumentException("NFSE_CONFIG_MISSING_NATUREZA_OPERACAO");
-    if (isBlank(request.itemListaServico)) throw new IllegalArgumentException("NFSE_CONFIG_MISSING_ITEM_LISTA_SERVICO");
+    if (isBlank(request.naturezaOperacao)) throw new IllegalArgumentException("NFSE_CONFIG_MISSING_NATUREZA_OPERAÇÃO");
+    if (isBlank(request.itemListaServico)) throw new IllegalArgumentException("NFSE_CONFIG_MISSING_ITEM_LISTA_SERVIÇO");
     if (request.aliquotaIss == null) throw new IllegalArgumentException("NFSE_CONFIG_MISSING_ALIQUOTA_ISS");
-    if (request.items == null || request.items.isEmpty()) throw new IllegalArgumentException("Ao menos um item e obrigatorio.");
+    if (request.items == null || request.items.isEmpty()) throw new IllegalArgumentException("Ao menos um item é obrigatório.");
     if ("SEFIN_NACIONAL".equalsIgnoreCase(provedor) && isBlank(request.nationalTaxCode)) {
       boolean allItemsMissingNationalTaxCode = request.items.stream().allMatch(item -> isBlank(item.nationalTaxCode));
       if (allItemsMissingNationalTaxCode) {
@@ -801,7 +801,7 @@ public class NfseService {
     NfseFiscalStatus current = entity.getFiscalStatus();
     if (current == target) return;
     if (!nfseFiscalStateMachine.canReach(current, target)) {
-      throw new NfseStateTransitionException("Transicao fiscal NFS-e invalida: " + current + " -> " + target);
+      throw new NfseStateTransitionException("Transicao fiscal NFS-e inválida: " + current + " -> " + target);
     }
     entity.setFiscalStatus(target);
     registrarEvento(tenantId, invoiceId, eventType, target.name(), null, null, null);
@@ -821,25 +821,25 @@ public class NfseService {
     try {
       return NfseAmbiente.valueOf(raw.trim().toUpperCase(Locale.ROOT));
     } catch (Exception ex) {
-      throw new IllegalArgumentException("Ambiente NFS-e invalido.");
+      throw new IllegalArgumentException("Ambiente NFS-e inválido.");
     }
   }
 
   private NfseCustomerType parseCustomerType(String value) {
-    if (isBlank(value)) throw new IllegalArgumentException("Tipo do tomador obrigatorio.");
+    if (isBlank(value)) throw new IllegalArgumentException("Tipo do tomador obrigatório.");
     try {
       return NfseCustomerType.valueOf(value.trim().toUpperCase(Locale.ROOT));
     } catch (Exception ex) {
-      throw new IllegalArgumentException("Tipo do tomador invalido.");
+      throw new IllegalArgumentException("Tipo do tomador inválido.");
     }
   }
 
   private NfseFiscalStatus parseFiscalStatus(String value) {
-    if (isBlank(value)) throw new IllegalArgumentException("Status fiscal invalido.");
+    if (isBlank(value)) throw new IllegalArgumentException("Status fiscal inválido.");
     try {
       return NfseFiscalStatus.valueOf(value.trim().toUpperCase(Locale.ROOT));
     } catch (Exception ex) {
-      throw new IllegalArgumentException("Status fiscal invalido.");
+      throw new IllegalArgumentException("Status fiscal inválido.");
     }
   }
 
@@ -848,7 +848,7 @@ public class NfseService {
     try {
       return NfseAccountingExportFormat.valueOf(raw.trim().toUpperCase(Locale.ROOT));
     } catch (Exception ex) {
-      throw new IllegalArgumentException("Formato de exportacao invalido. Use CSV, XLSX ou ZIP_XML.");
+      throw new IllegalArgumentException("Formato de exportação inválido. Use CSV, XLSX ou ZIP_XML.");
     }
   }
 
@@ -867,7 +867,7 @@ public class NfseService {
     try {
       return LocalDate.parse(value.trim());
     } catch (Exception ex) {
-      throw new IllegalArgumentException("Data invalida. Use formato YYYY-MM-DD.");
+      throw new IllegalArgumentException("Data inválida. Use formato YYYY-MM-DD.");
     }
   }
 
@@ -875,7 +875,7 @@ public class NfseService {
     try {
       return UUID.fromString(raw);
     } catch (Exception ex) {
-      throw new IllegalArgumentException("Identificador NFS-e invalido.");
+      throw new IllegalArgumentException("Identificador NFS-e inválido.");
     }
   }
 
@@ -893,7 +893,7 @@ public class NfseService {
     try {
       return LocalDate.parse(value);
     } catch (Exception ex) {
-      throw new IllegalArgumentException("Data de competencia invalida.");
+      throw new IllegalArgumentException("Data de competencia inválida.");
     }
   }
 
@@ -902,7 +902,7 @@ public class NfseService {
   }
 
   private String normalize(String value) {
-    if (isBlank(value)) throw new IllegalArgumentException("Campo obrigatorio ausente.");
+    if (isBlank(value)) throw new IllegalArgumentException("Campo obrigatório ausente.");
     return value.trim();
   }
 
@@ -1091,7 +1091,7 @@ public class NfseService {
       workbook.write(output);
       return output.toByteArray();
     } catch (IOException ex) {
-      throw new IllegalStateException("Falha ao gerar exportacao XLSX de NFS-e.", ex);
+      throw new IllegalStateException("Falha ao gerar exportação XLSX de NFS-e.", ex);
     }
   }
 

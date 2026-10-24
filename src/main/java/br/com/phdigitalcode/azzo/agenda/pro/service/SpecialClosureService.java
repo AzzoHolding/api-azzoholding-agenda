@@ -186,7 +186,7 @@ public class SpecialClosureService {
     TenantSpecialClosureDate entity =
         closureRepository
             .findByIdAndTenantId(id, tenantId)
-            .orElseThrow(() -> new IllegalArgumentException("Fechamento nao encontrado"));
+            .orElseThrow(() -> new IllegalArgumentException("Fechamento não encontrado"));
     validarTipo(dto.closureType);
     validarDatas(dto);
 
@@ -216,7 +216,7 @@ public class SpecialClosureService {
     TenantSpecialClosureDate entity =
         closureRepository
             .findByIdAndTenantId(id, tenantId)
-            .orElseThrow(() -> new IllegalArgumentException("Fechamento nao encontrado"));
+            .orElseThrow(() -> new IllegalArgumentException("Fechamento não encontrado"));
     LOG.info(
         "[SpecialClosure] Fechamento removido (id={}, closureDate={}, tenantId={})",
         id,
@@ -537,18 +537,18 @@ public class SpecialClosureService {
         && !closureType.isBlank()
         && !TIPOS_VALIDOS.contains(closureType.toUpperCase(Locale.ROOT))) {
       throw new IllegalArgumentException(
-          "Tipo de fechamento invalido. Valores aceitos: " + String.join(", ", TIPOS_VALIDOS));
+          "Tipo de fechamento inválido. Valores aceitos: " + String.join(", ", TIPOS_VALIDOS));
     }
   }
 
   private void validarDatas(SpecialClosureDto dto) {
     if (dto.closureDate == null) {
-      throw new IllegalArgumentException("Data de fechamento obrigatoria");
+      throw new IllegalArgumentException("Data de fechamento obrigatória");
     }
     if (!dto.allDay) {
       if (dto.startTime == null || dto.endTime == null) {
         throw new IllegalArgumentException(
-            "Para fechamento parcial, startTime e endTime sao obrigatorios");
+            "Para fechamento parcial, startTime e endTime são obrigatórios");
       }
       if (!dto.startTime.isBefore(dto.endTime)) {
         throw new IllegalArgumentException(

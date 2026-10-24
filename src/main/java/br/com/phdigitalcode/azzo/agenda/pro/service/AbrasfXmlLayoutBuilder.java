@@ -45,7 +45,7 @@ public class AbrasfXmlLayoutBuilder extends AbstractNfseXmlLayoutBuilder {
 
   @Override
   public String buildAndValidateAuthorizationXml(NfseInvoiceEntity invoice) {
-    if (invoice == null) throw new IllegalArgumentException("NFS-e obrigatoria para gerar XML.");
+    if (invoice == null) throw new IllegalArgumentException("NFS-e obrigatória para gerar XML.");
     String infRpsId = "Rps" + escape(invoice.getId() != null ? invoice.getId().toString().replace("-", "") : "AUTO");
     String emissao = invoice.getCreatedAt() != null
         ? invoice.getCreatedAt().atOffset(ZoneOffset.UTC).format(ABRASF_DATETIME)
@@ -156,7 +156,7 @@ public class AbrasfXmlLayoutBuilder extends AbstractNfseXmlLayoutBuilder {
     String cnpj = digitsOnly(tax != null ? tax.getIssuerCnpj() : null);
     String im = digitsOnly(tax != null ? tax.getIssuerIm() : null);
     if (cnpj.length() != 14) {
-      throw new IllegalArgumentException("NFSE_XML_PRESTADOR_CNPJ_INVALIDO");
+      throw new IllegalArgumentException("NFSE_XML_PRESTADOR_CNPJ_INVÁLIDO");
     }
     if (im.isBlank()) {
       throw new IllegalArgumentException("NFSE_XML_PRESTADOR_IM_AUSENTE");

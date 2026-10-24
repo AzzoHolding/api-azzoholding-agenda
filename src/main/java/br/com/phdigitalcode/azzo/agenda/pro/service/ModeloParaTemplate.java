@@ -40,7 +40,7 @@ public final class ModeloParaTemplate {
    */
   public static Convertido converter(String texto) {
     if (texto == null || texto.isBlank()) {
-      throw new IllegalArgumentException("Modelo de mensagem vazio: nao ha o que aprovar na Meta.");
+      throw new IllegalArgumentException("Modelo de mensagem vazio: não ha o que aprovar na Meta.");
     }
 
     Map<String, Integer> posicaoDaVariavel = new LinkedHashMap<>();

@@ -22,7 +22,7 @@ public class CommunicationChannelDispatcher {
   }
 
   public ChannelSendResult sendText(ChannelSendCommand command) {
-    if (command == null) throw new IllegalArgumentException("Comando de envio obrigatorio.");
+    if (command == null) throw new IllegalArgumentException("Comando de envio obrigatório.");
     return adapters().stream()
         .filter(adapter -> adapter.channel() == command.channel())
         .findFirst()
@@ -31,7 +31,7 @@ public class CommunicationChannelDispatcher {
   }
 
   public ChannelSendResult sendTemplate(ChannelTemplateCommand command) {
-    if (command == null) throw new IllegalArgumentException("Comando de envio obrigatorio.");
+    if (command == null) throw new IllegalArgumentException("Comando de envio obrigatório.");
     return adapters().stream()
         .filter(adapter -> adapter.channel() == command.channel())
         .findFirst()

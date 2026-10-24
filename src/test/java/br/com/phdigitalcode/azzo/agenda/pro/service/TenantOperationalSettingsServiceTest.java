@@ -545,7 +545,7 @@ class TenantOperationalSettingsServiceTest {
   void tipoDeTemplateDesconhecido() {
     assertThatThrownBy(() -> service.getEmailTemplate(tenantId, "INEXISTENTE"))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Tipo de template invalido: INEXISTENTE");
+        .hasMessage("Tipo de template inválido: INEXISTENTE");
   }
 
   // ---------- fechamentos especiais (visao legada do salao) ----------
@@ -579,13 +579,13 @@ class TenantOperationalSettingsServiceTest {
     SalonDtos.SpecialClosureDate semData = new SalonDtos.SpecialClosureDate();
     assertThatThrownBy(() -> service.updateSpecialClosureDates(tenantId, List.of(semData)))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Data especial de fechamento obrigatoria");
+        .hasMessage("Data especial de fechamento obrigatória");
 
     SalonDtos.SpecialClosureDate dataRuim = new SalonDtos.SpecialClosureDate();
     dataRuim.date = "25/12/2026";
     assertThatThrownBy(() -> service.updateSpecialClosureDates(tenantId, List.of(dataRuim)))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Data especial de fechamento invalida");
+        .hasMessage("Data especial de fechamento inválida");
   }
 
   @Test

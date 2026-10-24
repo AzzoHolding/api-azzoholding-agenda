@@ -26,18 +26,18 @@ public record ChannelTemplateCommand(
     String textoEquivalente) {
 
   public ChannelTemplateCommand {
-    if (tenantId == null) throw new IllegalArgumentException("tenantId obrigatorio para envio.");
-    if (channel == null) throw new IllegalArgumentException("Canal obrigatorio para envio.");
+    if (tenantId == null) throw new IllegalArgumentException("tenantId obrigatório para envio.");
+    if (channel == null) throw new IllegalArgumentException("Canal obrigatório para envio.");
     if (recipientExternalId == null || recipientExternalId.isBlank()) {
-      throw new IllegalArgumentException("Destino obrigatorio para envio.");
+      throw new IllegalArgumentException("Destino obrigatório para envio.");
     }
     if (templateName == null || templateName.isBlank()) {
-      throw new IllegalArgumentException("Nome do template obrigatorio para envio.");
+      throw new IllegalArgumentException("Nome do template obrigatório para envio.");
     }
     if (textoEquivalente == null || textoEquivalente.isBlank()) {
       // Sem ele, um canal que nao tem template nao teria o que mandar, e o log guardaria o nome do
       // template em vez do que a pessoa leu.
-      throw new IllegalArgumentException("Texto equivalente obrigatorio para envio por template.");
+      throw new IllegalArgumentException("Texto equivalente obrigatório para envio por template.");
     }
     variaveis = variaveis == null ? List.of() : List.copyOf(variaveis);
   }

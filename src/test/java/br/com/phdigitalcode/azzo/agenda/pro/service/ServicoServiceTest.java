@@ -29,8 +29,8 @@ import br.com.phdigitalcode.azzo.agenda.pro.security.ContextoTenant;
 /**
  * Cobre as regras de negocio de servicos que existem no {@code ServicoServicos} do Quarkus
  * original — validacao de sinal (deposit), resolucao/criacao de categoria por nome, vinculo de
- * profissionais e isolamento por tenant. Verifica o resultado observavel, nao "se o mock foi
- * chamado".
+ * profissionais e isolamento por tenant. Verifica o resultado observavel, nao "se o mock foi"
+ * chamado"."
  */
 class ServicoServiceTest {
 
@@ -94,7 +94,7 @@ class ServicoServiceTest {
 
     assertThatThrownBy(() -> service.criar(req))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("Tipo de sinal e obrigatorio");
+        .hasMessageContaining("Tipo de sinal é obrigatório");
   }
 
   @Test
@@ -105,7 +105,7 @@ class ServicoServiceTest {
 
     assertThatThrownBy(() -> service.criar(req))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("Valor do sinal e obrigatorio");
+        .hasMessageContaining("Valor do sinal é obrigatório");
   }
 
   @Test
@@ -117,7 +117,7 @@ class ServicoServiceTest {
 
     assertThatThrownBy(() -> service.criar(req))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("nao pode ser maior que 100");
+        .hasMessageContaining("não pode ser maior que 100");
   }
 
   @Test
@@ -193,14 +193,14 @@ class ServicoServiceTest {
 
     assertThatThrownBy(() -> service.atualizar(outroId, baseRequest()))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("Servico nao encontrado");
+        .hasMessageContaining("Serviço não encontrado");
   }
 
   @Test
   void deletarSelecionadosComListaVaziaEhRejeitado() {
     assertThatThrownBy(() -> service.deletarSelecionados(List.of()))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("Nenhum servico selecionado");
+        .hasMessageContaining("Nenhum serviço selecionado");
   }
 
   @Test

@@ -178,7 +178,7 @@ class ProcessadorImportacaoEstoqueServiceTest {
     when(importacaoEstoqueJobRepository.findById(JOB_ID)).thenReturn(Optional.of(job));
     when(importacaoEstoqueJobRepository.findById(outro)).thenReturn(Optional.empty());
     when(minioStorageService.baixarArquivo(STORAGE_KEY, TENANT_ID))
-        .thenThrow(new IllegalStateException("Storage MinIO indisponivel para download."));
+        .thenThrow(new IllegalStateException("Storage MinIO indisponível para download."));
 
     service.processarFilaImportacaoEstoque();
 

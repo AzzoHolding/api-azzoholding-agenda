@@ -135,7 +135,7 @@ class AuthServiceImplLoginDeDesligadoTest {
     when(acessoDeProfissional.desativado(usuario)).thenReturn(true);
 
     assertThatThrownBy(() -> service.login(login("errada")))
-        .hasMessageContaining("Credenciais invalidas");
+        .hasMessageContaining("Credenciais inválidas");
     verify(acessoDeProfissional, never()).desativado(any());
   }
 
@@ -160,7 +160,7 @@ class AuthServiceImplLoginDeDesligadoTest {
     usuario.setEmailConfirmationPending(true);
 
     assertThatThrownBy(() -> service.login(login("errada")))
-        .hasMessageContaining("Credenciais invalidas");
+        .hasMessageContaining("Credenciais inválidas");
   }
 
   @Test
@@ -242,7 +242,7 @@ class AuthServiceImplLoginDeDesligadoTest {
 
     assertThatThrownBy(() -> service.resetPassword(redefinir()))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("Token de redefinicao invalido ou expirado");
+        .hasMessage("Token de redefinicao inválido ou expirado");
 
     assertThat(usuario.getPasswordHash()).isEqualTo(hashAntes);
     verify(usuarioRepository, never()).save(any());

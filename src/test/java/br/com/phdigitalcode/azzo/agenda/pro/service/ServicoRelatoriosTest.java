@@ -122,7 +122,7 @@ class ServicoRelatoriosTest {
     void exigeProfessionalId() {
       assertThatThrownBy(() -> service.comissoes("2026-02-01", "2026-02-10", null, null))
           .isInstanceOf(IllegalArgumentException.class)
-          .hasMessageContaining("professionalId obrigatorio");
+          .hasMessageContaining("professionalId obrigatório");
     }
 
     @Test

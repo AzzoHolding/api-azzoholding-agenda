@@ -195,7 +195,7 @@ public class ServicoComanda {
       Agendamento agendamento =
           agendamentoRepository
               .findByIdAndTenantId(appointmentId, tenantId)
-              .orElseThrow(() -> new IllegalArgumentException("Agendamento nao encontrado."));
+              .orElseThrow(() -> new IllegalArgumentException("Agendamento não encontrado."));
       if (clientId == null) {
         clientId = agendamento.getClientId();
       } else if (!clientId.equals(agendamento.getClientId())) {
@@ -208,16 +208,16 @@ public class ServicoComanda {
           comandaRepository.findByAppointmentIdAndTenantId(appointmentId, tenantId)) {
         if (Comanda.STATUS_ABERTA.equals(existente.getStatus())) {
           throw new IllegalArgumentException(
-              "Este agendamento ja tem uma comanda aberta: continue nela.");
+              "Este agendamento já tem uma comanda aberta: continue nela.");
         }
         if (Comanda.STATUS_FECHADA.equals(existente.getStatus())) {
           throw new IllegalArgumentException(
-              "Este agendamento ja foi cobrado. Para cobrar de novo, o dono estorna a comanda.");
+              "Este agendamento já foi cobrado. Para cobrar de novo, o dono estorna a comanda.");
         }
       }
     }
     if (clientId != null && clienteRepository.findByIdAndTenantId(clientId, tenantId).isEmpty()) {
-      throw new IllegalArgumentException("Cliente nao encontrado.");
+      throw new IllegalArgumentException("Cliente não encontrado.");
     }
 
     Comanda comanda = new Comanda();
@@ -233,7 +233,7 @@ public class ServicoComanda {
       // O indice unico da V144 e quem decide; aqui so se traduz a recusa dele.
       if (violouIndice(erro, INDICE_COMANDA_ATIVA_UNICA)) {
         throw new IllegalArgumentException(
-            "Este agendamento ja tem uma comanda aberta ou cobrada: continue nela.");
+            "Este agendamento já tem uma comanda aberta ou cobrada: continue nela.");
       }
       throw erro;
     }
@@ -342,7 +342,7 @@ public class ServicoComanda {
     UUID professionalId = parseUuidOrNull(request.professionalId);
     if (professionalId != null
         && profissionalRepository.findByIdAndTenantId(professionalId, tenantId).isEmpty()) {
-      throw new IllegalArgumentException("Profissional nao encontrado.");
+      throw new IllegalArgumentException("Profissional não encontrado.");
     }
 
     exigirConfirmacaoDeDuplicado(comanda, request, referenciaId);
@@ -368,7 +368,7 @@ public class ServicoComanda {
       Servico servico =
           servicoRepository
               .findByIdAndTenantId(referenciaId, tenantId)
-              .orElseThrow(() -> new ApiClientErrorException("Servico nao encontrado.", 404));
+              .orElseThrow(() -> new ApiClientErrorException("Serviço não encontrado.", 404));
       item.setDescricao(servico.getName());
       // ⚠️ O preco do SERVICO e o do CATALOGO. Aceitar `precoUnitario` de quem chama permitia
       // lancar um servico de R$ 120 por R$ 1 — e isso NAO aparecia como desconto em relatorio
@@ -383,14 +383,14 @@ public class ServicoComanda {
           itemEstoqueRepository
               .findByIdAndTenantId(referenciaId, tenantId)
               .orElseThrow(
-                  () -> new ApiClientErrorException("Produto nao encontrado no estoque.", 404));
+                  () -> new ApiClientErrorException("Produto não encontrado no estoque.", 404));
       if (request.precoUnitario == null) {
         throw new IllegalArgumentException(
-            "Preco de venda e obrigatorio para item do tipo PRODUTO.");
+            "Preço de venda é obrigatório para item do tipo PRODUTO.");
       }
       // Produto por R$ 0,00 seria brinde sem registro de brinde: sai do estoque e nao entra no caixa.
       if (NumericUtil.isZeroOrNegative(request.precoUnitario)) {
-        throw new IllegalArgumentException("Preco de venda do produto precisa ser maior que zero.");
+        throw new IllegalArgumentException("Preço de venda do produto precisa ser maior que zero.");
       }
       // Sem estoque (com o bloqueio de saida ligado), recusa AGORA — e nao so ao fechar, depois de o
       // cliente pagar (M5). Conta tambem o que a comanda ja tem desse produto.
@@ -413,13 +413,13 @@ public class ServicoComanda {
       ServicePackage pacote =
           servicePackageRepository
               .findByIdAndTenantId(referenciaId, tenantId)
-              .orElseThrow(() -> new ApiClientErrorException("Pacote nao encontrado.", 404));
+              .orElseThrow(() -> new ApiClientErrorException("Pacote não encontrado.", 404));
       // Pacote vende por inteiro: 0,5 ou 0,001 pacote nao existe, e o saldo de sessoes sobe com
       // CEILING (criarSaldoDePacoteVendido) — 0,001 pacote por centavos entregava o pacote todo.
       if (item.getQuantidade().compareTo(BigDecimal.ONE) < 0
           || item.getQuantidade().stripTrailingZeros().scale() > 0) {
         throw new IllegalArgumentException(
-            "A quantidade de um pacote precisa ser um numero inteiro, de 1 em diante.");
+            "A quantidade de um pacote precisa ser um número inteiro, de 1 em diante.");
       }
       item.setDescricao(pacote.getNome());
       // ⚠️ O preco do PACOTE e o do CATALOGO, sempre (achado FIN-002, auditoria de 2026-10-06).
@@ -453,7 +453,7 @@ public class ServicoComanda {
         comandaItemRepository
             .findByIdAndComandaId(itemId, comanda.getId())
             .orElseThrow(
-                () -> new ApiClientErrorException("Item nao encontrado na comanda.", 404));
+                () -> new ApiClientErrorException("Item não encontrado na comanda.", 404));
     Map<String, Object> antes = dadosDoItem(item);
     exigirQueRemoverNaoEstoureOTetoDeDesconto(tenantId, comanda, item);
     comandaItemRepository.delete(item);
@@ -586,14 +586,14 @@ public class ServicoComanda {
     Map<String, Object> antes = dadosDoItem(item);
 
     if (!ComandaItem.TIPO_SERVICO.equals(item.getTipo())) {
-      throw new IllegalArgumentException("So servico pode sair de pacote ou assinatura.");
+      throw new IllegalArgumentException("So serviço pode sair de pacote ou assinatura.");
     }
     if (comanda.getClientId() == null) {
       throw new IllegalArgumentException(
-          "Comanda sem cliente nao usa pacote nem assinatura: identifique o cliente primeiro.");
+          "Comanda sem cliente não usa pacote nem assinatura: identifique o cliente primeiro.");
     }
     if (item.getCoberturaTipo() != null) {
-      throw new IllegalArgumentException("Este servico ja esta coberto. Retire a cobertura antes.");
+      throw new IllegalArgumentException("Este serviço já esta coberto. Retire a cobertura antes.");
     }
 
     UUID saldoId = parseUuidOrThrow(request.saldoId, "saldoId invalido.");
@@ -642,7 +642,7 @@ public class ServicoComanda {
   private ComandaItem buscarItemOuFalhar(Comanda comanda, UUID itemId) {
     return comandaItemRepository
         .findByIdAndComandaId(itemId, comanda.getId())
-        .orElseThrow(() -> new ApiClientErrorException("Item nao encontrado na comanda.", 404));
+        .orElseThrow(() -> new ApiClientErrorException("Item não encontrado na comanda.", 404));
   }
 
   /** Sessao e unidade inteira: 1,5 corte nao sai de pacote nenhum. */
@@ -665,16 +665,16 @@ public class ServicoComanda {
       ClientPackageBalance saldo = saldoDePacoteDoCliente(tenantId, comanda, item);
       if (saldo.getSessoesTotais() - saldo.getSessoesUsadas() < sessoes) {
         throw new IllegalArgumentException(
-            "O pacote nao tem mais sessoes de " + saldo.getServiceNome() + " para este servico.");
+            "O pacote não tem mais sessoes de " + saldo.getServiceNome() + " para este serviço.");
       }
     } else if (ComandaItem.COBERTURA_ASSINATURA.equals(item.getCoberturaTipo())) {
       ClientMembershipBalance saldo = saldoDeAssinaturaDoCliente(tenantId, comanda, item);
       if (saldo.getQuantidadeMensal() - saldo.getUsadasNoPeriodo() < sessoes) {
         throw new IllegalArgumentException(
-            "A assinatura ja usou todas as sessoes de " + saldo.getServiceNome() + " deste periodo.");
+            "A assinatura já usou todas as sessoes de " + saldo.getServiceNome() + " deste período.");
       }
     } else {
-      throw new IllegalArgumentException("Tipo de cobertura invalido.");
+      throw new IllegalArgumentException("Tipo de cobertura inválido.");
     }
   }
 
@@ -683,14 +683,14 @@ public class ServicoComanda {
         clientPackageBalanceRepository
             .findById(item.getCoberturaSaldoId())
             .filter(s -> tenantId.equals(s.getTenantId()))
-            .orElseThrow(() -> new IllegalArgumentException("Saldo de pacote nao encontrado."));
+            .orElseThrow(() -> new IllegalArgumentException("Saldo de pacote não encontrado."));
     ClientPackagePurchase compra =
         clientPackagePurchaseRepository
             .findById(saldo.getPurchaseId())
-            .orElseThrow(() -> new IllegalArgumentException("Saldo de pacote nao encontrado."));
+            .orElseThrow(() -> new IllegalArgumentException("Saldo de pacote não encontrado."));
     if (!comanda.getClientId().equals(compra.getClientId())
         || !item.getReferenciaId().equals(saldo.getServiceId())) {
-      throw new IllegalArgumentException("Este pacote nao e do cliente da comanda ou nao cobre este servico.");
+      throw new IllegalArgumentException("Este pacote não é do cliente da comanda ou não cobre este serviço.");
     }
     return saldo;
   }
@@ -701,18 +701,18 @@ public class ServicoComanda {
         clientMembershipBalanceRepository
             .findById(item.getCoberturaSaldoId())
             .filter(s -> tenantId.equals(s.getTenantId()))
-            .orElseThrow(() -> new IllegalArgumentException("Saldo de assinatura nao encontrado."));
+            .orElseThrow(() -> new IllegalArgumentException("Saldo de assinatura não encontrado."));
     ClientMembership assinatura =
         clientMembershipRepository
             .findByIdAndTenantId(saldo.getMembershipId(), tenantId)
-            .orElseThrow(() -> new IllegalArgumentException("Saldo de assinatura nao encontrado."));
+            .orElseThrow(() -> new IllegalArgumentException("Saldo de assinatura não encontrado."));
     if (!comanda.getClientId().equals(assinatura.getClientId())
         || !item.getReferenciaId().equals(saldo.getServiceId())) {
       throw new IllegalArgumentException(
-          "Esta assinatura nao e do cliente da comanda ou nao cobre este servico.");
+          "Esta assinatura não é do cliente da comanda ou não cobre este serviço.");
     }
     if (!assinaturaValeAgora(assinatura)) {
-      throw new IllegalArgumentException("A assinatura do cliente nao esta valendo agora.");
+      throw new IllegalArgumentException("A assinatura do cliente não esta valendo agora.");
     }
     return saldo;
   }
@@ -740,7 +740,7 @@ public class ServicoComanda {
           .map(this::valorDaSessaoDaAssinatura)
           .orElse(BigDecimal.ZERO);
     }
-    throw new IllegalArgumentException("Tipo de cobertura invalido.");
+    throw new IllegalArgumentException("Tipo de cobertura inválido.");
   }
 
   /** O que o cliente pagou pelo pacote dividido pelo total de sessoes dele. */
@@ -781,7 +781,7 @@ public class ServicoComanda {
     if (consumiu == 0) {
       throw new IllegalArgumentException(
           "O saldo de " + item.getDescricao() + " acabou enquanto a comanda estava aberta:"
-              + " retire a cobertura e cobre o servico.");
+              + " retire a cobertura e cobre o serviço.");
     }
   }
 
@@ -798,9 +798,9 @@ public class ServicoComanda {
               .sum();
       if (usadas > 0) {
         throw new IllegalArgumentException(
-            "O cliente ja usou "
+            "O cliente já usou "
                 + usadas
-                + (usadas == 1 ? " sessao" : " sessoes")
+                + (usadas == 1 ? " sessão" : " sessoes")
                 + " do pacote "
                 + compra.getPackageNome()
                 + ": o estorno devolveria o valor inteiro. Estorne antes os atendimentos"
@@ -875,7 +875,7 @@ public class ServicoComanda {
     exigirAberta(comanda);
 
     if (request.percentual.compareTo(new BigDecimal("100")) > 0) {
-      throw new IllegalArgumentException("Desconto nao pode ser maior que 100%.");
+      throw new IllegalArgumentException("Desconto não pode ser maior que 100%.");
     }
     exigirTetoDeDesconto(tenantId, request.percentual);
     Map<String, Object> antesDoDesconto = dadosDoDesconto(comanda);
@@ -939,7 +939,7 @@ public class ServicoComanda {
 
     UUID professionalId = parseUuidOrThrow(request.professionalId, "professionalId invalido.");
     if (profissionalRepository.findByIdAndTenantId(professionalId, tenantId).isEmpty()) {
-      throw new IllegalArgumentException("Profissional nao encontrado.");
+      throw new IllegalArgumentException("Profissional não encontrado.");
     }
     comanda.setGorjeta(request.valor);
     comanda.setGorjetaProfessionalId(professionalId);
@@ -987,7 +987,7 @@ public class ServicoComanda {
     } catch (DataIntegrityViolationException erro) {
       // Rede de seguranca do banco (V144): com a trava do sinal isto nao deveria acontecer.
       if (violouIndice(erro, INDICE_SINAL_UNICO)) {
-        throw new IllegalArgumentException("Este sinal ja foi usado em outro pagamento.");
+        throw new IllegalArgumentException("Este sinal já foi usado em outro pagamento.");
       }
       throw erro;
     }
@@ -1025,7 +1025,7 @@ public class ServicoComanda {
     BigDecimal restante = NumericUtil.maxZero(NumericUtil.subtract(totalComGorjeta, confirmado));
 
     if (restante.signum() == 0) {
-      throw new IllegalArgumentException("Esta comanda ja esta paga por inteiro: feche a comanda.");
+      throw new IllegalArgumentException("Esta comanda já esta paga por inteiro: feche a comanda.");
     }
     if (!ComandaPagamento.MEIO_DINHEIRO.equals(request.meio)
         && request.valor.compareTo(restante) > 0) {
@@ -1050,7 +1050,7 @@ public class ServicoComanda {
       UUID tenantId, Comanda comanda, ComandaPagamento pagamento) {
     if (comanda.getAppointmentId() == null) {
       throw new IllegalArgumentException(
-          "Credito de sinal exige comanda vinculada a um agendamento.");
+          "Crédito de sinal exige comanda vinculada a um agendamento.");
     }
     AppointmentDeposit deposit =
         appointmentDepositRepository
@@ -1061,7 +1061,7 @@ public class ServicoComanda {
             .orElseThrow(
                 () ->
                     new IllegalArgumentException(
-                        "Nao ha sinal pago disponivel para este agendamento."));
+                        "Não ha sinal pago disponível para este agendamento."));
     BigDecimal valorDisponivel = NumericUtil.fromCents(deposit.getAmountCents());
     if (pagamento.getValor().compareTo(valorDisponivel) > 0) {
       throw new IllegalArgumentException(
@@ -1075,11 +1075,11 @@ public class ServicoComanda {
   private Cliente resolverClienteOuFalhar(UUID tenantId, Comanda comanda) {
     if (comanda.getClientId() == null) {
       throw new IllegalArgumentException(
-          "Comanda sem cliente identificado: obrigatorio para pagamento via Pix.");
+          "Comanda sem cliente identificado: obrigatório para pagamento via Pix.");
     }
     return clienteRepository
         .findByIdAndTenantId(comanda.getClientId(), tenantId)
-        .orElseThrow(() -> new ApiClientErrorException("Cliente nao encontrado.", 404));
+        .orElseThrow(() -> new ApiClientErrorException("Cliente não encontrado.", 404));
   }
 
   /**
@@ -1106,7 +1106,7 @@ public class ServicoComanda {
     Comanda comanda =
         comandaRepository
             .findByIdAndTenantParaAtualizacao(id, tenantId)
-            .orElseThrow(() -> new ApiClientErrorException("Comanda nao encontrada.", 404));
+            .orElseThrow(() -> new ApiClientErrorException("Comanda não encontrada.", 404));
     exigirComandaDoProfissional(tenantId, comanda);
     exigirAberta(comanda);
     // A receita desta venda entra HOJE. Com o caixa de hoje ja fechado, ela ficaria fora do que foi
@@ -1117,7 +1117,7 @@ public class ServicoComanda {
 
     List<ComandaItem> itens = comandaItemRepository.findByComandaIdOrderByCreatedAt(comanda.getId());
     if (itens.isEmpty()) {
-      throw new IllegalArgumentException("Comanda sem itens nao pode ser fechada.");
+      throw new IllegalArgumentException("Comanda sem itens não pode ser fechada.");
     }
 
     List<ComandaPagamento> pagamentos =
@@ -1132,7 +1132,7 @@ public class ServicoComanda {
     BigDecimal totalComGorjeta = NumericUtil.add(comanda.getTotal(), comanda.getGorjeta());
     if (totalConfirmado.compareTo(totalComGorjeta) < 0) {
       throw new IllegalArgumentException(
-          "Comanda nao esta quitada: pago "
+          "Comanda não esta quitada: pago "
               + totalConfirmado
               + ", total com gorjeta "
               + totalComGorjeta
@@ -1153,7 +1153,7 @@ public class ServicoComanda {
               .reduce(BigDecimal.ZERO, NumericUtil::add);
       if (excedente.compareTo(recebidoEmDinheiro) > 0) {
         throw new IllegalArgumentException(
-            "Os pagamentos passam do total em " + excedente + ", e so o dinheiro (recebido: "
+            "Os pagamentos passam do total em " + excedente + ", e só o dinheiro (recebido: "
                 + recebidoEmDinheiro + ") tem troco. Peca ao dono para cancelar a comanda e refazer.");
       }
     }
@@ -1544,7 +1544,7 @@ public class ServicoComanda {
     Comanda comanda =
         comandaRepository
             .findByIdAndTenantParaAtualizacao(id, tenantId)
-            .orElseThrow(() -> new ApiClientErrorException("Comanda nao encontrada.", 404));
+            .orElseThrow(() -> new ApiClientErrorException("Comanda não encontrada.", 404));
     exigirFechada(comanda);
     // O estorno apaga a receita do dia em que a venda FECHOU. Se esse caixa ja foi contado e
     // fechado, estornar tiraria dinheiro de um dia assinado — fecha certinho hoje, estorna amanha e
@@ -1673,15 +1673,15 @@ public class ServicoComanda {
     TenantLoyaltySettings config =
         tenantLoyaltySettingsRepository.findByTenantId(tenantId).orElse(null);
     if (config == null || !config.isAtivo()) {
-      throw new IllegalArgumentException("Programa de fidelidade nao esta ativo.");
+      throw new IllegalArgumentException("Programa de fidelidade não esta ativo.");
     }
     Cliente cliente =
         clienteRepository
             .findByIdAndTenantId(comanda.getClientId(), tenantId)
-            .orElseThrow(() -> new ApiClientErrorException("Cliente nao encontrado.", 404));
+            .orElseThrow(() -> new ApiClientErrorException("Cliente não encontrado.", 404));
     if (cliente.getLoyaltyPoints() < request.pontos) {
       throw new IllegalArgumentException(
-          "Cliente nao possui pontos suficientes (saldo: " + cliente.getLoyaltyPoints() + ").");
+          "Cliente não possui pontos suficientes (saldo: " + cliente.getLoyaltyPoints() + ").");
     }
 
     BigDecimal valorResgate =
@@ -1696,7 +1696,7 @@ public class ServicoComanda {
           restante.multiply(config.getPontosPorResgateReal()).setScale(0, RoundingMode.DOWN).intValue();
       throw new IllegalArgumentException(
           "O resgate (R$ " + valorResgate + ") passa do que falta pagar na comanda (R$ " + restante
-              + "). Use no maximo " + maximo + " pontos.");
+              + "). Use no máximo " + maximo + " pontos.");
     }
     comanda.setDesconto(NumericUtil.add(comanda.getDesconto(), valorResgate));
     comanda.setPontosFidelidadeResgatados(comanda.getPontosFidelidadeResgatados() + request.pontos);
@@ -1756,12 +1756,12 @@ public class ServicoComanda {
   Comanda buscarOuFalhar(UUID id, UUID tenantId) {
     return comandaRepository
         .findByIdAndTenantId(id, tenantId)
-        .orElseThrow(() -> new ApiClientErrorException("Comanda nao encontrada.", 404));
+        .orElseThrow(() -> new ApiClientErrorException("Comanda não encontrada.", 404));
   }
 
   void exigirAberta(Comanda comanda) {
     if (!Comanda.STATUS_ABERTA.equals(comanda.getStatus())) {
-      throw new IllegalArgumentException("Comanda nao esta aberta.");
+      throw new IllegalArgumentException("Comanda não esta aberta.");
     }
   }
 
@@ -1816,7 +1816,7 @@ public class ServicoComanda {
         tenantId, "POS_COMANDA_ACCESS", "COMANDA", comanda.getId().toString(),
         Map.of("profissionalId", profissionalId.toString()),
         "Profissional tentou acessar a comanda de outro profissional.");
-    throw new ApiClientErrorException("Comanda nao encontrada.", 404);
+    throw new ApiClientErrorException("Comanda não encontrada.", 404);
   }
 
   /**
@@ -1846,7 +1846,7 @@ public class ServicoComanda {
             ? " (veio do agendamento)"
             : "";
     throw new IllegalArgumentException(
-        "Esta comanda ja tem \""
+        "Esta comanda já tem \""
             + repetido.getDescricao()
             + "\""
             + origem
@@ -1855,7 +1855,7 @@ public class ServicoComanda {
 
   void exigirFechada(Comanda comanda) {
     if (!Comanda.STATUS_FECHADA.equals(comanda.getStatus())) {
-      throw new IllegalArgumentException("Comanda nao esta fechada.");
+      throw new IllegalArgumentException("Comanda não esta fechada.");
     }
   }
 

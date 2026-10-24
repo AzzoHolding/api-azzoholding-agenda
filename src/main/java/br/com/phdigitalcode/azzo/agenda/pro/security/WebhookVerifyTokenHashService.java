@@ -18,7 +18,7 @@ public class WebhookVerifyTokenHashService {
       byte[] bytes = digest.digest(normalized.getBytes(StandardCharsets.UTF_8));
       return toHex(bytes);
     } catch (NoSuchAlgorithmException e) {
-      throw new IllegalStateException("SHA-256 nao disponivel", e);
+      throw new IllegalStateException("SHA-256 não disponível", e);
     }
   }
 

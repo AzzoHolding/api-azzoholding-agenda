@@ -100,7 +100,7 @@ public class MetaPlatformService {
         .filter(candidate -> EVENT_TYPE_DATA_DELETION.equals(candidate.getEventType()))
         .orElse(null);
     if (log == null) {
-      throw new ApiClientErrorException("Solicitacao de exclusao nao encontrada.", HttpStatus.NOT_FOUND.value());
+      throw new ApiClientErrorException("Solicitação de exclusão não encontrada.", HttpStatus.NOT_FOUND.value());
     }
 
     DataDeletionStatusResponse response = new DataDeletionStatusResponse();

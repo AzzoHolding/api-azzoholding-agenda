@@ -197,16 +197,16 @@ public class ServicoFinanceiro {
     TransactionCategory cat =
         transactionCategoryRepository
             .findByIdAndTenantId(id, tenantId)
-            .orElseThrow(() -> new ApiClientErrorException("Categoria nao encontrada", 404));
+            .orElseThrow(() -> new ApiClientErrorException("Categoria não encontrada", 404));
 
     String normalized = normalizeNullable(novoNome);
-    if (normalized == null) throw new IllegalArgumentException("Nome da categoria e obrigatorio");
+    if (normalized == null) throw new IllegalArgumentException("Nome da categoria é obrigatório");
 
     // Unicidade dentro do tenant (ignorando case)
     TransactionCategory existente =
         transactionCategoryRepository.findByTenantAndName(tenantId, normalized).orElse(null);
     if (existente != null && !existente.getId().equals(id)) {
-      throw new IllegalArgumentException("Ja existe uma categoria com este nome");
+      throw new IllegalArgumentException("Já existe uma categoria com este nome");
     }
 
     String nomeAnterior = cat.getName();
@@ -232,12 +232,12 @@ public class ServicoFinanceiro {
     TransactionCategory cat =
         transactionCategoryRepository
             .findByIdAndTenantId(id, tenantId)
-            .orElseThrow(() -> new ApiClientErrorException("Categoria nao encontrada", 404));
+            .orElseThrow(() -> new ApiClientErrorException("Categoria não encontrada", 404));
 
     long vinculadas = countTransactionsByCategory(tenantId, id);
     if (vinculadas > 0) {
       throw new IllegalStateException(
-          "Nao e possivel excluir: existem " + vinculadas + " lancamento(s) vinculado(s) a esta categoria");
+          "Não é possível excluir: existem " + vinculadas + " lancamento(s) vinculado(s) a esta categoria");
     }
 
     registrarAuditoriaFinanceiro(
@@ -317,7 +317,7 @@ public class ServicoFinanceiro {
     Transacao t =
         transacaoRepository
             .findAtivaByIdAndTenant(id, tenantId)
-            .orElseThrow(() -> new ApiClientErrorException("Transacao nao encontrada", 404));
+            .orElseThrow(() -> new ApiClientErrorException("Transação não encontrada", 404));
 
     // Snapshot para auditoria e deteccao de mudancas que afetam a comissao.
     Map<String, Object> before = buildAuditPayloadFromTransacao(t);
@@ -396,7 +396,7 @@ public class ServicoFinanceiro {
     Transacao t =
         transacaoRepository
             .findAtivaByIdAndTenant(id, tenantId)
-            .orElseThrow(() -> new ApiClientErrorException("Transacao nao encontrada", 404));
+            .orElseThrow(() -> new ApiClientErrorException("Transação não encontrada", 404));
 
     Map<String, Object> before = buildAuditPayloadFromTransacao(t);
 
@@ -424,7 +424,7 @@ public class ServicoFinanceiro {
     Transacao t =
         transacaoRepository
             .findAtivaByIdAndTenant(id, tenantId)
-            .orElseThrow(() -> new ApiClientErrorException("Transacao nao encontrada", 404));
+            .orElseThrow(() -> new ApiClientErrorException("Transação não encontrada", 404));
 
     boolean antes = t.isReconciled();
     t.setReconciled(!antes);
@@ -618,7 +618,7 @@ public class ServicoFinanceiro {
         recurringTransactionRepository
             .findByIdAndTenantId(id, tenantId)
             .filter(RecurringTransaction::isActive)
-            .orElseThrow(() -> new ApiClientErrorException("Recorrencia nao encontrada", 404));
+            .orElseThrow(() -> new ApiClientErrorException("Recorrencia não encontrada", 404));
     RecurringTransactionResponse antes = toRecurringResponse(rt);
     rt.setActive(false);
     registrarAuditoriaFinanceiro(
@@ -791,21 +791,21 @@ public class ServicoFinanceiro {
 
   private TipoTransacao resolveTipoTransacao(String value) {
     String normalized = normalizeNullable(value);
-    if (normalized == null) throw new IllegalArgumentException("type e obrigatorio");
+    if (normalized == null) throw new IllegalArgumentException("type é obrigatório");
     try {
       return TipoTransacao.valueOf(normalized.toUpperCase());
     } catch (IllegalArgumentException ex) {
-      throw new IllegalArgumentException("type invalido");
+      throw new IllegalArgumentException("type inválido");
     }
   }
 
   private MetodoPagamento resolveMetodoPagamento(String value) {
     String normalized = normalizeNullable(value);
-    if (normalized == null) throw new IllegalArgumentException("paymentMethod e obrigatorio");
+    if (normalized == null) throw new IllegalArgumentException("paymentMethod é obrigatório");
     try {
       return MetodoPagamento.valueOf(normalized.toUpperCase());
     } catch (IllegalArgumentException ex) {
-      throw new IllegalArgumentException("paymentMethod invalido");
+      throw new IllegalArgumentException("paymentMethod inválido");
     }
   }
 
@@ -816,7 +816,7 @@ public class ServicoFinanceiro {
 
   private TransactionCategory resolveTransactionCategory(UUID tenantId, String categoryName) {
     String normalized = normalizeNullable(categoryName);
-    if (normalized == null) throw new IllegalArgumentException("Categoria da transacao obrigatoria");
+    if (normalized == null) throw new IllegalArgumentException("Categoria da transação obrigatória");
     return transactionCategoryRepository
         .findByTenantAndName(tenantId, normalized)
         .orElseGet(
@@ -858,7 +858,7 @@ public class ServicoFinanceiro {
     UUID profissional = parseUuidNullable(req.professionalId);
     if (profissional != null
         && profissionalRepository.findByIdAndTenantId(profissional, tenantId).isEmpty()) {
-      throw new ApiClientErrorException("Profissional nao encontrado", 404);
+      throw new ApiClientErrorException("Profissional não encontrado", 404);
     }
     exigirDoSalao("ItemEstoque", parseUuidNullable(req.productId), tenantId, "Produto nao encontrado");
     exigirDoSalao(

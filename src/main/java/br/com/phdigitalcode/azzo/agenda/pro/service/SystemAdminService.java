@@ -301,7 +301,7 @@ public class SystemAdminService {
     try {
       eventId = UUID.fromString(id);
     } catch (IllegalArgumentException e) {
-      throw new IllegalArgumentException("id de auditoria invalido.");
+      throw new IllegalArgumentException("id de auditoria inválido.");
     }
 
     Object[] row = (Object[]) entityManager.createNativeQuery("""
@@ -340,7 +340,7 @@ public class SystemAdminService {
         .findFirst()
         .orElse(null);
 
-    if (row == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Evento de auditoria nao encontrado.");
+    if (row == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Evento de auditoria não encontrado.");
 
     SystemAdminDtos.GlobalAuditDetailResponse item = new SystemAdminDtos.GlobalAuditDetailResponse();
     item.id = toString(row[0]);
@@ -378,7 +378,7 @@ public class SystemAdminService {
 
     UUID tenantUuid = parseUuidOrNull(tenantId);
     if (tenantId != null && !tenantId.isBlank() && tenantUuid == null) {
-      throw new IllegalArgumentException("tenantId invalido.");
+      throw new IllegalArgumentException("tenantId inválido.");
     }
 
     StringBuilder sql = new StringBuilder("""
@@ -455,9 +455,9 @@ public class SystemAdminService {
   @Transactional(readOnly = true)
   public SystemAdminDtos.GlobalSuggestionItem getGlobalSuggestionDetail(String id) {
     UUID suggestionId = parseUuidOrNull(id);
-    if (suggestionId == null) throw new IllegalArgumentException("id de sugestao invalido.");
+    if (suggestionId == null) throw new IllegalArgumentException("id de sugestao inválido.");
     FeedbackSuggestion entity = feedbackSuggestionRepository.findById(suggestionId)
-        .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sugestao nao encontrada."));
+        .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sugestao não encontrada."));
     String tenantName = (String) entityManager.createNativeQuery("SELECT name FROM tenants WHERE id = :tenantId")
         .setParameter("tenantId", entity.getTenantId())
         .getResultStream()
@@ -469,10 +469,10 @@ public class SystemAdminService {
   @Transactional
   public SystemAdminDtos.GlobalSuggestionItem updateGlobalSuggestion(String id, SystemAdminDtos.SuggestionUpdateRequest request) {
     UUID suggestionId = parseUuidOrNull(id);
-    if (suggestionId == null) throw new IllegalArgumentException("id de sugestao invalido.");
+    if (suggestionId == null) throw new IllegalArgumentException("id de sugestao inválido.");
 
     FeedbackSuggestion entity = feedbackSuggestionRepository.findById(suggestionId)
-        .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sugestao nao encontrada."));
+        .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sugestao não encontrada."));
 
     String nextStatus = normalizeSuggestionStatus(request != null ? request.status : null, entity.getStatus());
     String normalizedResponse = normalizeOptional(request != null ? request.adminResponse : null);
@@ -512,19 +512,19 @@ public class SystemAdminService {
     UUID userId = parseUuidOrNull(userIdRaw);
 
     if (tenantId == null && userId == null) {
-      throw new IllegalArgumentException("Informe tenantId ou userId para revogar sessao.");
+      throw new IllegalArgumentException("Informe tenantId ou userId para revogar sessão.");
     }
 
     if (tenantId != null && tenantRepository.findById(tenantId).isEmpty()) {
-      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Tenant nao encontrado.");
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Tenant não encontrado.");
     }
 
     long revoked;
     if (userId != null) {
       Usuario user = usuarioRepository.findById(userId)
-          .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Usuario nao encontrado."));
+          .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Usuário não encontrado."));
       if (tenantId != null && user.getTenantId() != null && !tenantId.equals(user.getTenantId())) {
-        throw new IllegalArgumentException("userId nao pertence ao tenant informado.");
+        throw new IllegalArgumentException("userId não pertence ao tenant informado.");
       }
       revoked = refreshTokenRepository.revokeAllByUser(userId, Instant.now());
       tenantId = user.getTenantId();
@@ -549,7 +549,7 @@ public class SystemAdminService {
 
     UUID tenantUuid = parseUuidOrNull(tenantId);
     if (tenantId != null && !tenantId.isBlank() && tenantUuid == null) {
-      throw new IllegalArgumentException("tenantId invalido.");
+      throw new IllegalArgumentException("tenantId inválido.");
     }
 
     StringBuilder sql = new StringBuilder("""
@@ -605,11 +605,11 @@ public class SystemAdminService {
   public SystemAdminDtos.RevokeSessionsResponse revokeSessionToken(SystemAdminDtos.RevokeSessionTokenRequest request) {
     String refreshTokenIdRaw = request != null ? request.refreshTokenId : null;
     UUID refreshTokenId = parseUuidOrNull(refreshTokenIdRaw);
-    if (refreshTokenId == null) throw new IllegalArgumentException("refreshTokenId invalido.");
+    if (refreshTokenId == null) throw new IllegalArgumentException("refreshTokenId inválido.");
 
     UUID tenantId = parseUuidOrNull(request != null ? request.tenantId : null);
     if (tenantId != null && tenantRepository.findById(tenantId).isEmpty()) {
-      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Tenant nao encontrado.");
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Tenant não encontrado.");
     }
 
     int updated = entityManager.createNativeQuery("""
@@ -635,19 +635,19 @@ public class SystemAdminService {
   @Transactional
   public SystemAdminDtos.MfaResetResponse resetUserMfa(String userId, SystemAdminDtos.MfaResetRequest request) {
     UUID userUuid = parseUuidOrNull(userId);
-    if (userUuid == null) throw new IllegalArgumentException("userId invalido.");
+    if (userUuid == null) throw new IllegalArgumentException("userId inválido.");
 
     Usuario user = usuarioRepository.findById(userUuid)
-        .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Usuario nao encontrado."));
+        .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Usuário não encontrado."));
 
     UUID tenantId = parseUuidOrNull(request != null ? request.tenantId : null);
     if (tenantId != null && !tenantId.equals(user.getTenantId())) {
-      throw new IllegalArgumentException("userId nao pertence ao tenant informado.");
+      throw new IllegalArgumentException("userId não pertence ao tenant informado.");
     }
 
     String reason = normalizeOptional(request != null ? request.reason : null);
     if (reason == null) {
-      throw new IllegalArgumentException("reason obrigatorio para reset de MFA.");
+      throw new IllegalArgumentException("reason obrigatório para reset de MFA.");
     }
 
     boolean revokeSessions = request == null || request.revokeSessions == null || request.revokeSessions;
@@ -707,7 +707,7 @@ public class SystemAdminService {
   @Transactional
   public SystemAdminDtos.PlanItem updatePlanStatus(String planId, SystemAdminDtos.PlanStatusUpdateRequest request) {
     if (request == null || request.active == null) {
-      throw new IllegalArgumentException("active obrigatorio");
+      throw new IllegalArgumentException("active obrigatório");
     }
     Product product = requirePlan(planId);
     product.setActive(Boolean.TRUE.equals(request.active));
@@ -750,7 +750,7 @@ public class SystemAdminService {
   @Transactional
   public SystemAdminDtos.EmailTemplateDetailResponse saveEmailTemplate(String type, SystemAdminDtos.EmailTemplateUpsertRequest request) {
     EmailTemplateType templateType = parseEmailTemplateType(type);
-    if (request == null) throw new IllegalArgumentException("payload obrigatorio");
+    if (request == null) throw new IllegalArgumentException("payload obrigatório");
 
     String subjectTemplate = normalizeRequired(request.subjectTemplate, "Assunto obrigatorio.");
     String htmlTemplate = normalizeRequired(request.htmlTemplate, "HTML obrigatorio.");
@@ -782,10 +782,10 @@ public class SystemAdminService {
   public SystemAdminDtos.EmailTemplateDetailResponse updateEmailTemplateStatus(String type, SystemAdminDtos.EmailTemplateStatusUpdateRequest request) {
     EmailTemplateType templateType = parseEmailTemplateType(type);
     if (request == null || request.active == null) {
-      throw new IllegalArgumentException("active obrigatorio.");
+      throw new IllegalArgumentException("active obrigatório.");
     }
     EmailTemplateConfig config = emailTemplateConfigRepository.findGlobalByType(templateType)
-        .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Template ainda nao foi criado."));
+        .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Template ainda não foi criado."));
     config.setActive(Boolean.TRUE.equals(request.active));
     config.setUpdatedBy(authenticatedUser.idOuNulo());
     config.setUpdatedAt(Instant.now());
@@ -797,7 +797,7 @@ public class SystemAdminService {
   @Transactional(readOnly = true)
   public SystemAdminDtos.EmailTemplatePreviewResponse previewEmailTemplate(String type, SystemAdminDtos.EmailTemplateUpsertRequest request) {
     EmailTemplateType templateType = parseEmailTemplateType(type);
-    if (request == null) throw new IllegalArgumentException("payload obrigatorio");
+    if (request == null) throw new IllegalArgumentException("payload obrigatório");
 
     EmailTemplateRendererService.RenderedTemplate preview = emailTemplateRendererService.preview(
         templateType,
@@ -837,10 +837,10 @@ public class SystemAdminService {
     try {
       id = UUID.fromString(planId);
     } catch (IllegalArgumentException e) {
-      throw new IllegalArgumentException("planId invalido");
+      throw new IllegalArgumentException("planId inválido");
     }
     return productRepository.findById(id)
-        .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Plano nao encontrado."));
+        .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Plano não encontrado."));
   }
 
   private SystemAdminDtos.EmailTemplateDetailResponse toEmailTemplateDetail(
@@ -863,7 +863,7 @@ public class SystemAdminService {
   }
 
   private void applyPlanRequest(Product product, SystemAdminDtos.PlanUpsertRequest request) {
-    if (request == null) throw new IllegalArgumentException("payload obrigatorio");
+    if (request == null) throw new IllegalArgumentException("payload obrigatório");
     String name = normalizeRequired(request.name, "Nome do plano obrigatorio");
     String currency = normalizeRequired(request.currency, "Moeda obrigatoria").toUpperCase(Locale.ROOT);
     BigDecimal price = request.price != null
@@ -875,14 +875,14 @@ public class SystemAdminService {
     boolean active = request.active == null || Boolean.TRUE.equals(request.active);
     boolean trial = Boolean.TRUE.equals(request.trial);
 
-    if (price.compareTo(BigDecimal.ZERO) < 0) throw new IllegalArgumentException("price invalido");
-    if (validityMonths <= 0) throw new IllegalArgumentException("validityMonths invalido");
-    if (validityDays != null && validityDays <= 0) throw new IllegalArgumentException("validityDays invalido");
+    if (price.compareTo(BigDecimal.ZERO) < 0) throw new IllegalArgumentException("price inválido");
+    if (validityMonths <= 0) throw new IllegalArgumentException("validityMonths inválido");
+    if (validityDays != null && validityDays <= 0) throw new IllegalArgumentException("validityDays inválido");
     if (request.maxProfessionals != null && request.maxProfessionals < 0) {
-      throw new IllegalArgumentException("maxProfessionals invalido");
+      throw new IllegalArgumentException("maxProfessionals inválido");
     }
     if (trial && price.compareTo(BigDecimal.ZERO) > 0) {
-      throw new IllegalArgumentException("Plano trial nao pode ter cobranca.");
+      throw new IllegalArgumentException("Plano trial não pode ter cobranca.");
     }
 
     product.setName(name);
@@ -902,22 +902,22 @@ public class SystemAdminService {
 
   private EmailTemplateType parseEmailTemplateType(String rawType) {
     if (rawType == null || rawType.isBlank()) {
-      throw new IllegalArgumentException("type obrigatorio.");
+      throw new IllegalArgumentException("type obrigatório.");
     }
     try {
       return EmailTemplateType.valueOf(rawType.trim().toUpperCase(Locale.ROOT));
     } catch (IllegalArgumentException e) {
-      throw new IllegalArgumentException("Tipo de template invalido.");
+      throw new IllegalArgumentException("Tipo de template inválido.");
     }
   }
 
   private void validateEmailTemplateConfig(EmailTemplateConfig config) {
-    if (config == null) throw new IllegalArgumentException("Template invalido.");
+    if (config == null) throw new IllegalArgumentException("Template inválido.");
     if (!isValidEmailOrNull(config.getFromEmail())) {
-      throw new IllegalArgumentException("fromEmail invalido.");
+      throw new IllegalArgumentException("fromEmail inválido.");
     }
     if (!isValidEmailOrNull(config.getReplyTo())) {
-      throw new IllegalArgumentException("replyTo invalido.");
+      throw new IllegalArgumentException("replyTo inválido.");
     }
   }
 
@@ -1067,7 +1067,7 @@ public class SystemAdminService {
         ? (fallback == null || fallback.isBlank() ? "OPEN" : fallback.trim().toUpperCase(Locale.ROOT))
         : rawStatus.trim().toUpperCase(Locale.ROOT);
     if (!"OPEN".equals(status) && !"CLOSED".equals(status)) {
-      throw new IllegalArgumentException("Status de sugestao invalido. Use OPEN ou CLOSED.");
+      throw new IllegalArgumentException("Status de sugestao inválido. Use OPEN ou CLOSED.");
     }
     return status;
   }

@@ -185,7 +185,7 @@ public class EstoqueController {
       return LocalDate.parse(valor.trim());
     } catch (DateTimeParseException e) {
       throw new ApiClientErrorException(
-          campo + " invalido. Use AAAA-MM-DD.", HttpStatus.BAD_REQUEST.value());
+          campo + " inválido. Use AAAA-MM-DD.", HttpStatus.BAD_REQUEST.value());
     }
   }
 
@@ -240,7 +240,7 @@ public class EstoqueController {
         || arquivo.getOriginalFilename() == null
         || arquivo.getOriginalFilename().isBlank()) {
       throw new ApiClientErrorException(
-          "Arquivo de importacao obrigatorio.", HttpStatus.BAD_REQUEST.value());
+          "Arquivo de importação obrigatório.", HttpStatus.BAD_REQUEST.value());
     }
     try {
       byte[] bytesArquivo = arquivo.getBytes();
@@ -252,10 +252,10 @@ public class EstoqueController {
       return servicoEstoque.criarImportacao(tipoImportacao, dryRun, hashSha256, storageKey);
     } catch (IOException exception) {
       throw new ApiClientErrorException(
-          "Falha ao processar arquivo de importacao.", HttpStatus.BAD_REQUEST.value());
+          "Falha ao processar arquivo de importação.", HttpStatus.BAD_REQUEST.value());
     } catch (IllegalStateException exception) {
       throw new ApiClientErrorException(
-          "Storage de importacao indisponivel.", HttpStatus.SERVICE_UNAVAILABLE.value());
+          "Storage de importação indisponível.", HttpStatus.SERVICE_UNAVAILABLE.value());
     }
   }
 
@@ -294,7 +294,7 @@ public class EstoqueController {
       }
       return hex.toString();
     } catch (NoSuchAlgorithmException e) {
-      throw new IllegalStateException("Algoritmo SHA-256 indisponivel.", e);
+      throw new IllegalStateException("Algoritmo SHA-256 indisponível.", e);
     }
   }
 

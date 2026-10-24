@@ -12,13 +12,13 @@ public record ChannelSendCommand(
     String content) {
 
   public ChannelSendCommand {
-    if (tenantId == null) throw new IllegalArgumentException("tenantId obrigatorio para envio.");
-    if (channel == null) throw new IllegalArgumentException("Canal obrigatorio para envio.");
+    if (tenantId == null) throw new IllegalArgumentException("tenantId obrigatório para envio.");
+    if (channel == null) throw new IllegalArgumentException("Canal obrigatório para envio.");
     if (recipientExternalId == null || recipientExternalId.isBlank()) {
-      throw new IllegalArgumentException("Destino obrigatorio para envio.");
+      throw new IllegalArgumentException("Destino obrigatório para envio.");
     }
     if (content == null || content.isBlank()) {
-      throw new IllegalArgumentException("Conteudo obrigatorio para envio.");
+      throw new IllegalArgumentException("Conteúdo obrigatório para envio.");
     }
   }
 }

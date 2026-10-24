@@ -52,7 +52,7 @@ public class FiscalRuleValidationService {
   }
 
   public void validarCriacao(FiscalDtos.Invoice invoice, FiscalDtos.TaxConfig taxConfig) {
-    if (invoice == null) throw new IllegalArgumentException("Invoice obrigatoria");
+    if (invoice == null) throw new IllegalArgumentException("Invoice obrigatória");
     if (invoice.items == null || invoice.items.isEmpty()) {
       throw new IllegalArgumentException("Invoice deve possuir ao menos um item");
     }
@@ -87,15 +87,15 @@ public class FiscalRuleValidationService {
   }
 
   private void validarItemBasico(FiscalDtos.InvoiceItem item) {
-    if (item == null) throw new IllegalArgumentException("Item fiscal invalido");
+    if (item == null) throw new IllegalArgumentException("Item fiscal inválido");
     if (item.quantity <= 0) {
       throw new IllegalArgumentException("Quantidade do item deve ser maior que zero");
     }
     if (item.unitPrice < 0) {
-      throw new IllegalArgumentException("Valor unitario do item nao pode ser negativo");
+      throw new IllegalArgumentException("Valor unitario do item não pode ser negativo");
     }
     if (item.totalPrice < 0) {
-      throw new IllegalArgumentException("Valor total do item nao pode ser negativo");
+      throw new IllegalArgumentException("Valor total do item não pode ser negativo");
     }
 
     long esperado = (long) item.quantity * item.unitPrice;
@@ -108,7 +108,7 @@ public class FiscalRuleValidationService {
     if (ncm == null || ncm.isBlank()) return;
     String value = ncm.trim();
     if (!value.matches("^[0-9]{8}$")) {
-      throw new IllegalArgumentException("NCM invalido. Informe 8 digitos numericos.");
+      throw new IllegalArgumentException("NCM inválido. Informe 8 digitos numericos.");
     }
     if (fiscalCodeCatalogService.hasCatalogForType("NCM")
         && !fiscalCodeCatalogService.existsActive("NCM", value, LocalDate.now())) {
@@ -118,7 +118,7 @@ public class FiscalRuleValidationService {
 
   private void validarCfop(String cfop) {
     if (cfop == null || !cfop.matches("^[0-9]{4}$")) {
-      throw new IllegalArgumentException("CFOP invalido. Informe 4 digitos numericos.");
+      throw new IllegalArgumentException("CFOP inválido. Informe 4 digitos numericos.");
     }
     if (fiscalCodeCatalogService.hasCatalogForType("CFOP")
         && !fiscalCodeCatalogService.existsActive("CFOP", cfop, LocalDate.now())) {
@@ -129,11 +129,11 @@ public class FiscalRuleValidationService {
   private void validarCstPorRegime(String regime, String cst) {
     String codigo = cst == null ? "" : cst.trim();
     if (codigo.isBlank()) {
-      throw new IllegalArgumentException("CST/CSOSN obrigatorio no item fiscal");
+      throw new IllegalArgumentException("CST/CSOSN obrigatório no item fiscal");
     }
     if ("SIMPLES_NACIONAL".equals(regime)) {
       if (!CSOSN_SUPORTADOS.contains(codigo)) {
-        throw new IllegalArgumentException("CSOSN invalido para Simples Nacional");
+        throw new IllegalArgumentException("CSOSN inválido para Simples Nacional");
       }
       if (fiscalCodeCatalogService.hasCatalogForType("CSOSN")
           && !fiscalCodeCatalogService.existsActive("CSOSN", codigo, LocalDate.now())) {
@@ -142,7 +142,7 @@ public class FiscalRuleValidationService {
       return;
     }
     if (!CST_SUPORTADOS.contains(codigo)) {
-      throw new IllegalArgumentException("CST invalido para o regime tributario informado");
+      throw new IllegalArgumentException("CST inválido para o regime tributario informado");
     }
     if (fiscalCodeCatalogService.hasCatalogForType("CST")
         && !fiscalCodeCatalogService.existsActive("CST", codigo, LocalDate.now())) {
@@ -164,7 +164,7 @@ public class FiscalRuleValidationService {
     double pOrigem = origem != null ? origem : 0d;
     double pDestino = destino != null ? destino : 0d;
     if (pOrigem < 0d || pDestino < 0d) {
-      throw new IllegalArgumentException("Percentuais de partilha nao podem ser negativos");
+      throw new IllegalArgumentException("Percentuais de partilha não podem ser negativos");
     }
     double total = pOrigem + pDestino;
     if (Math.abs(total - 100d) > 0.0001d) {
@@ -178,7 +178,7 @@ public class FiscalRuleValidationService {
             ? "SIMPLES_NACIONAL"
             : regime.trim().toUpperCase(Locale.ROOT);
     if (!REGIMES_SUPORTADOS.contains(value)) {
-      throw new IllegalArgumentException("Regime tributario nao suportado");
+      throw new IllegalArgumentException("Regime tributario não suportado");
     }
     return value;
   }

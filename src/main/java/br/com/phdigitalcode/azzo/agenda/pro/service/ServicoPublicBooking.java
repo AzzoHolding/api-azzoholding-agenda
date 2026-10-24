@@ -166,10 +166,10 @@ public class ServicoPublicBooking {
       String slug, String date, String serviceId, String serviceIds, String professionalId) {
     Tenant tenant = obterTenantPorSlug(slug);
     LocalDate data = DataUtil.parseDataISO(date);
-    if (data == null) throw new IllegalArgumentException("Data invalida");
+    if (data == null) throw new IllegalArgumentException("Data inválida");
 
     List<Servico> selectedServices = resolveSelectedServices(tenant.getId(), serviceId, serviceIds);
-    if (selectedServices.isEmpty()) throw new IllegalArgumentException("Servico nao encontrado");
+    if (selectedServices.isEmpty()) throw new IllegalArgumentException("Serviço não encontrado");
 
     UUID profissionalUuid = professionalId == null || professionalId.isBlank() ? null : UUID.fromString(professionalId);
     if (profissionalUuid != null) {
@@ -177,12 +177,12 @@ public class ServicoPublicBooking {
           .findByIdAndTenantIdAndIsActiveTrue(profissionalUuid, tenant.getId())
           .filter(Profissional::isAcceptsAppointments)
           .orElse(null);
-      if (profissional == null) throw new IllegalArgumentException("Profissional nao encontrado");
+      if (profissional == null) throw new IllegalArgumentException("Profissional não encontrado");
       for (Servico servico : selectedServices) {
         if (servico.getProfissionais() != null
             && !servico.getProfissionais().isEmpty()
             && servico.getProfissionais().stream().noneMatch(p -> p.getId().equals(profissionalUuid))) {
-          throw new IllegalArgumentException("Profissional nao atende o servico selecionado");
+          throw new IllegalArgumentException("Profissional não atende o serviço selecionado");
         }
       }
     }
@@ -238,7 +238,7 @@ public class ServicoPublicBooking {
 
     UUID professionalUuid = UUID.fromString(request.professionalId);
     LocalDate data = DataUtil.parseDataISO(request.date);
-    if (data == null) throw new IllegalArgumentException("Data invalida");
+    if (data == null) throw new IllegalArgumentException("Data inválida");
     LocalTime startTime = parseTimeOrThrow(request.startTime);
     String normalizedStartTime = startTime.format(TIME_FMT);
     List<ResolvedPublicItem> selectedItems = resolveRequestItems(tenant.getId(), request);
@@ -249,27 +249,27 @@ public class ServicoPublicBooking {
     // Horario que ja passou: a tela de horarios nao oferece, mas o POST aceitava — marcar ontem
     // pelo link criava um atendimento "pendente" no passado (analise de 2026-09-16, A3).
     if (data.atTime(startTime).atZone(ZONE_BR).isBefore(java.time.ZonedDateTime.now(ZONE_BR))) {
-      throw new IllegalArgumentException("Esse horario ja passou. Escolha outro horario.");
+      throw new IllegalArgumentException("Esse horário já passou. Escolha outro horário.");
     }
     if (!tenantOperationalSettingsService.isBusinessOpenAt(tenant.getId(), data, startTime, endTime)) {
       throw new IllegalArgumentException("Salão fechado ou fora do horário de funcionamento.");
     }
     // Verificar fechamentos especiais (all_day e parciais, incluindo do profissional)
     if (specialClosureService.isClosedAt(tenant.getId(), professionalUuid, data, startTime, endTime)) {
-      throw new IllegalArgumentException("Salao ou profissional com fechamento especial no horario informado");
+      throw new IllegalArgumentException("Salão ou profissional com fechamento especial no horário informado");
     }
 
     Profissional profissional = profissionalRepository
         .findByIdAndTenantIdAndIsActiveTrue(professionalUuid, tenant.getId())
         .filter(Profissional::isAcceptsAppointments)
         .orElse(null);
-    if (profissional == null) throw new IllegalArgumentException("Profissional nao encontrado");
+    if (profissional == null) throw new IllegalArgumentException("Profissional não encontrado");
     for (ResolvedPublicItem item : selectedItems) {
       Servico servico = item.service();
       if (servico.getProfissionais() != null
           && !servico.getProfissionais().isEmpty()
           && servico.getProfissionais().stream().noneMatch(p -> p.getId().equals(professionalUuid))) {
-        throw new IllegalArgumentException("Profissional nao atende o servico selecionado");
+        throw new IllegalArgumentException("Profissional não atende o serviço selecionado");
       }
     }
 
@@ -278,7 +278,7 @@ public class ServicoPublicBooking {
         data,
         startTime,
         endTime)) {
-      throw new IllegalArgumentException("O profissional nao atende neste horario");
+      throw new IllegalArgumentException("O profissional não atende neste horário");
     }
 
     // O sinal exige CPF/CNPJ — conferido ANTES de gravar qualquer coisa.
@@ -300,10 +300,10 @@ public class ServicoPublicBooking {
             .stream()
             .filter(a -> a.getStatus() != StatusAgendamento.CANCELLED)
             .anyMatch(a -> overlaps(a, startTime, endTime));
-    if (conflito) throw new IllegalArgumentException("Horario indisponivel");
+    if (conflito) throw new IllegalArgumentException("Horário indisponível");
 
     String normalizedPhone = normalizePhone(request.customerPhone);
-    if (normalizedPhone == null) throw new IllegalArgumentException("Telefone do cliente invalido");
+    if (normalizedPhone == null) throw new IllegalArgumentException("Telefone do cliente inválido");
 
     // O original faz clienteRepository.list("tenantId = ?1", tenant.id) (ordem nao especificada
     // pelo banco) e compara telefone normalizado sem variantes de DDI — nao usa o
@@ -405,7 +405,7 @@ public class ServicoPublicBooking {
   @Transactional
   public PublicBookingDtos.BookingFunnelEventResponse registrarEventoFunil(
       String slug, PublicBookingDtos.BookingFunnelEventRequest request) {
-    if (request == null) throw new IllegalArgumentException("Payload do evento de funil obrigatorio.");
+    if (request == null) throw new IllegalArgumentException("Payload do evento de funil obrigatório.");
     Tenant tenant = obterTenantPorSlug(slug);
 
     UUID sessionId = parseUuidOrThrow(request.sessionId, "sessionId invalido.");
@@ -457,7 +457,7 @@ public class ServicoPublicBooking {
 
   private Tenant obterTenantPorSlug(String slug) {
     return tenantRepository.findBySlug(slug)
-        .orElseThrow(() -> new IllegalArgumentException("Salao nao encontrado"));
+        .orElseThrow(() -> new IllegalArgumentException("Salão não encontrado"));
   }
 
   private void persistItems(Agendamento appointment, List<ResolvedPublicItem> items) {
@@ -502,7 +502,7 @@ public class ServicoPublicBooking {
     for (UUID id : ids) {
       Servico servico = servicoRepository.findByIdAndTenantId(id, tenantId).orElse(null);
       if (servico == null || !servico.isActive()) {
-        throw new IllegalArgumentException("Servico nao encontrado");
+        throw new IllegalArgumentException("Serviço não encontrado");
       }
       services.add(servico);
     }
@@ -516,13 +516,13 @@ public class ServicoPublicBooking {
     List<ResolvedPublicItem> resolvedItems = new ArrayList<>();
     for (PublicBookingDtos.ItemRequest item : requestedItems) {
       if (item == null || item.serviceId == null || item.serviceId.isBlank()) {
-        throw new IllegalArgumentException("Item de agendamento invalido");
+        throw new IllegalArgumentException("Item de agendamento inválido");
       }
       UUID serviceId = UUID.fromString(item.serviceId);
       Servico servico = servicoRepository.findByIdAndTenantId(serviceId, tenantId)
           .filter(Servico::isActive)
           .orElse(null);
-      if (servico == null) throw new IllegalArgumentException("Servico nao encontrado");
+      if (servico == null) throw new IllegalArgumentException("Serviço não encontrado");
       int quantity = item.quantity <= 0 ? 1 : item.quantity;
       resolvedItems.add(new ResolvedPublicItem(servico, quantity));
     }
@@ -581,7 +581,7 @@ public class ServicoPublicBooking {
     try {
       return LocalTime.parse(value);
     } catch (Exception e) {
-      throw new IllegalArgumentException("Horario inicial invalido");
+      throw new IllegalArgumentException("Horário inicial inválido");
     }
   }
 

@@ -10,8 +10,8 @@ public class OnboardingDtos {
   private OnboardingDtos() {}
 
   public record AcceptTermsRequest(
-      @NotBlank(message = "termsVersion obrigatorio") String termsVersion,
-      @NotBlank(message = "privacyVersion obrigatorio") String privacyVersion) {}
+      @NotBlank(message = "termsVersion obrigatório") String termsVersion,
+      @NotBlank(message = "privacyVersion obrigatório") String privacyVersion) {}
 
   public record OnboardingStatusResponse(
       boolean onboardingComplete,

@@ -151,6 +151,6 @@ public class ProfissionaisController {
         && jwtPrincipal.userId() != null) {
       return jwtPrincipal.userId();
     }
-    throw new ApiClientErrorException("Nao autenticado", 401);
+    throw new ApiClientErrorException("Não autenticado", 401);
   }
 }

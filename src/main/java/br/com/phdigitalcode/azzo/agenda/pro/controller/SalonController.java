@@ -67,22 +67,22 @@ public class SalonController {
   @PreAuthorize("hasRole('OWNER')")
   public SalonDtos.SalonProfile atualizarLogo(@RequestPart(name = "file", required = false) MultipartFile arquivo) {
     if (arquivo == null || arquivo.getOriginalFilename() == null || arquivo.getOriginalFilename().isBlank()) {
-      throw new ApiClientErrorException("Imagem do estabelecimento obrigatoria.", HttpStatus.BAD_REQUEST.value());
+      throw new ApiClientErrorException("Imagem do estabelecimento obrigatória.", HttpStatus.BAD_REQUEST.value());
     }
 
     try {
       byte[] bytesArquivo = arquivo.getBytes();
       if (bytesArquivo.length <= 0) {
-        throw new ApiClientErrorException("Imagem do estabelecimento obrigatoria.", HttpStatus.BAD_REQUEST.value());
+        throw new ApiClientErrorException("Imagem do estabelecimento obrigatória.", HttpStatus.BAD_REQUEST.value());
       }
       if (bytesArquivo.length > maxLogoBytes) {
-        throw new ApiClientErrorException("Imagem excede o tamanho maximo permitido.", HttpStatus.BAD_REQUEST.value());
+        throw new ApiClientErrorException("Imagem excede o tamanho máximo permitido.", HttpStatus.BAD_REQUEST.value());
       }
 
       String contentType = detectarContentType(bytesArquivo, arquivo.getOriginalFilename());
       if (!MIME_TYPES_PERMITIDOS.contains(contentType)) {
         throw new ApiClientErrorException(
-            "Formato de imagem nao suportado. Use JPG, PNG ou WEBP.", HttpStatus.BAD_REQUEST.value());
+            "Formato de imagem não suportado. Use JPG, PNG ou WEBP.", HttpStatus.BAD_REQUEST.value());
       }
 
       return servicoSalonProfile.atualizarLogo(bytesArquivo, arquivo.getOriginalFilename(), contentType);
@@ -91,7 +91,7 @@ public class SalonController {
     } catch (IOException exception) {
       throw new ApiClientErrorException("Falha ao processar imagem do estabelecimento.", HttpStatus.BAD_REQUEST.value());
     } catch (IllegalStateException exception) {
-      throw new ApiClientErrorException("Storage de imagens indisponivel.", HttpStatus.SERVICE_UNAVAILABLE.value());
+      throw new ApiClientErrorException("Storage de imagens indisponível.", HttpStatus.SERVICE_UNAVAILABLE.value());
     }
   }
 

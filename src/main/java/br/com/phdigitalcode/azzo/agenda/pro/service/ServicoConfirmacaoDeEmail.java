@@ -86,17 +86,17 @@ public class ServicoConfirmacaoDeEmail {
   @Transactional
   public GenericMessageResponse confirmar(String tokenPuro) {
     if (tokenPuro == null || tokenPuro.isBlank()) {
-      throw new ApiClientErrorException("Link de confirmacao invalido ou expirado", 400);
+      throw new ApiClientErrorException("Link de confirmacao inválido ou expirado", 400);
     }
     Instant agora = Instant.now();
     EmailVerificationToken token =
         tokenRepository
             .findActiveByHash(sha256Hex(tokenPuro.trim()), agora)
-            .orElseThrow(() -> new ApiClientErrorException("Link de confirmacao invalido ou expirado", 400));
+            .orElseThrow(() -> new ApiClientErrorException("Link de confirmacao inválido ou expirado", 400));
     Usuario usuario =
         usuarioRepository
             .findById(token.getUserId())
-            .orElseThrow(() -> new ApiClientErrorException("Link de confirmacao invalido ou expirado", 400));
+            .orElseThrow(() -> new ApiClientErrorException("Link de confirmacao inválido ou expirado", 400));
 
     usuario.setEmailConfirmationPending(false);
     usuarioRepository.save(usuario);
@@ -163,7 +163,7 @@ public class ServicoConfirmacaoDeEmail {
   private String montarLink(String tokenPuro) {
     String base = publicFrontendBaseUrl == null ? "" : publicFrontendBaseUrl.trim();
     if (base.isBlank() || "__unset__".equalsIgnoreCase(base)) {
-      throw new IllegalStateException("PUBLIC_BOOKING_BASE_URL nao configurado para confirmacao de e-mail");
+      throw new IllegalStateException("PUBLIC_BOOKING_BASE_URL não configurado para confirmacao de e-mail");
     }
     if (base.endsWith("/")) base = base.substring(0, base.length() - 1);
     return base + "/confirmar-email?token=" + tokenPuro;
@@ -200,7 +200,7 @@ public class ServicoConfirmacaoDeEmail {
       for (byte b : bytes) sb.append(String.format("%02x", b));
       return sb.toString();
     } catch (NoSuchAlgorithmException e) {
-      throw new IllegalStateException("SHA-256 nao disponivel", e);
+      throw new IllegalStateException("SHA-256 não disponível", e);
     }
   }
 }

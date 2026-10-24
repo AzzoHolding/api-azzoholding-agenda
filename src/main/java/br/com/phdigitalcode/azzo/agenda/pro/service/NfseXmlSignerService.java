@@ -56,9 +56,9 @@ public class NfseXmlSignerService {
   }
 
   public String sign(String xml, String signingSecret) {
-    if (xml == null || xml.isBlank()) throw new IllegalArgumentException("XML NFS-e obrigatorio para assinatura.");
+    if (xml == null || xml.isBlank()) throw new IllegalArgumentException("XML NFS-e obrigatório para assinatura.");
     if (signingSecret == null || signingSecret.isBlank()) {
-      throw new IllegalArgumentException("Assinatura NFS-e requer segredo de sessao/certificado.");
+      throw new IllegalArgumentException("Assinatura NFS-e requer segredo de sessão/certificado.");
     }
     try {
       return signWithXmlDsig(xml, signingSecret);
@@ -72,7 +72,7 @@ public class NfseXmlSignerService {
     FiscalCertificateService.KeyMaterial keyMaterial = fiscalCertificateService.loadActiveKeyMaterial(certificatePassword);
     Document document = parseXml(xml);
     Element root = document.getDocumentElement();
-    if (root == null) throw new IllegalArgumentException("XML NFS-e invalido para assinatura.");
+    if (root == null) throw new IllegalArgumentException("XML NFS-e inválido para assinatura.");
 
     String referenceId = ensureReferenceId(root);
     XMLSignatureFactory factory = XMLSignatureFactory.getInstance("DOM");

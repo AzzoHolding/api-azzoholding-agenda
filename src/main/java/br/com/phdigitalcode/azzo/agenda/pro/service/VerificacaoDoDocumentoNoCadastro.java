@@ -36,10 +36,10 @@ public class VerificacaoDoDocumentoNoCadastro {
   public void verificarOuFalhar(String cpfCnpj) {
     String digitos = DocumentoValidator.digitos(cpfCnpj);
     if (digitos == null || digitos.isBlank()) {
-      throw new IllegalArgumentException("CPF/CNPJ obrigatorio para ativar plano gratuito");
+      throw new IllegalArgumentException("CPF/CNPJ obrigatório para ativar plano gratuito");
     }
     if (!DocumentoValidator.cpfOuCnpjValido(digitos)) {
-      throw new IllegalArgumentException("CPF/CNPJ invalido");
+      throw new IllegalArgumentException("CPF/CNPJ inválido");
     }
     if (digitos.length() != 14) return;
 
@@ -53,7 +53,7 @@ public class VerificacaoDoDocumentoNoCadastro {
     String situacao = consulta == null ? null : consulta.situacaoCadastral;
     if (situacao != null && !"Ativa".equalsIgnoreCase(situacao)) {
       throw new IllegalArgumentException(
-          "CNPJ com situacao " + situacao + " na Receita Federal. Informe um CNPJ ativo.");
+          "CNPJ com situação " + situacao + " na Receita Federal. Informe um CNPJ ativo.");
     }
   }
 }

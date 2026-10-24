@@ -106,7 +106,7 @@ public class TelegramWebhookController {
     UUID tenantId = parseTenantId(tenantIdRaw);
     if (tenantId == null) {
       response.status = "IGNORED";
-      response.message = "tenantId invalido";
+      response.message = "tenantId inválido";
       return response;
     }
 
@@ -122,7 +122,7 @@ public class TelegramWebhookController {
           "telegramWebhook.receive.rejected {}",
           CorrelatedLogging.context("tenantId", tenantId, "reason", "invalid_secret_token"));
       response.status = "REJECTED";
-      response.message = "Secret token invalido";
+      response.message = "Secret token inválido";
       return response;
     }
 
@@ -135,7 +135,7 @@ public class TelegramWebhookController {
           CorrelatedLogging.context("tenantId", tenantId, "root", CorrelatedLogging.throwableSummary(ex)),
           ex);
       response.status = "IGNORED";
-      response.message = "Payload invalido";
+      response.message = "Payload inválido";
       return response;
     }
 
@@ -152,7 +152,7 @@ public class TelegramWebhookController {
     String providerMessageId = text(messageNode.path("message_id"));
     if (chatId == null || content == null) {
       response.status = "IGNORED";
-      response.message = "Mensagem sem chatId ou conteudo";
+      response.message = "Mensagem sem chatId ou conteúdo";
       return response;
     }
 

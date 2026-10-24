@@ -99,7 +99,7 @@ class MenuCatalogServiceTest {
   void saveCatalogItemExigePayload() {
     assertThatThrownBy(() -> service.saveCatalogItem(null))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Payload obrigatorio");
+        .hasMessage("Payload obrigatório");
   }
 
   @Test
@@ -113,7 +113,7 @@ class MenuCatalogServiceTest {
 
     assertThatThrownBy(() -> service.saveCatalogItem(request))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Item pai invalido");
+        .hasMessage("Item pai inválido");
   }
 
   @Test
@@ -200,7 +200,7 @@ class MenuCatalogServiceTest {
 
     assertThatThrownBy(() -> service.saveCatalogItem(request))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Ja existe um menu com esta rota");
+        .hasMessage("Já existe um menu com esta rota");
   }
 
   @Test
@@ -227,7 +227,7 @@ class MenuCatalogServiceTest {
 
     assertThatThrownBy(() -> service.saveCatalogItem(request))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Item pai nao encontrado");
+        .hasMessage("Item pai não encontrado");
   }
 
   @Test

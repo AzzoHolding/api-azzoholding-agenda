@@ -212,7 +212,7 @@ class ServicoOnboardingTest {
 
     assertThatThrownBy(() -> service.completeOnboarding(tenantId))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessageContaining("servico");
+        .hasMessageContaining("serviço");
   }
 
   @Test

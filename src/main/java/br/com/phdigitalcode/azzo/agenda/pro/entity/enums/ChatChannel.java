@@ -12,7 +12,7 @@ public enum ChatChannel {
     try {
       return ChatChannel.valueOf(value.trim().toUpperCase(Locale.ROOT));
     } catch (IllegalArgumentException e) {
-      throw new IllegalArgumentException("Canal de chat invalido: " + value);
+      throw new IllegalArgumentException("Canal de chat inválido: " + value);
     }
   }
 }

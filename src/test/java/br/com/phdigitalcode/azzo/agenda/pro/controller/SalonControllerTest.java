@@ -89,7 +89,7 @@ class SalonControllerTest {
 
     assertThatThrownBy(() -> controller.atualizarLogo(arquivo("logo.webp", conteudo)))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessageContaining("Formato de imagem nao suportado");
+        .hasMessageContaining("Formato de imagem não suportado");
     verify(servicoSalonProfile, never()).atualizarLogo(any(), any(), any());
   }
 
@@ -99,7 +99,7 @@ class SalonControllerTest {
   void arquivoNuloEQuatrocentosSemTocarNoService() {
     assertThatThrownBy(() -> controller.atualizarLogo(null))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("Imagem do estabelecimento obrigatoria.")
+        .hasMessage("Imagem do estabelecimento obrigatória.")
         .extracting(e -> ((ApiClientErrorException) e).getStatus())
         .isEqualTo(400);
 
@@ -110,7 +110,7 @@ class SalonControllerTest {
   void arquivoComNomeEmBrancoEQuatrocentos() {
     assertThatThrownBy(() -> controller.atualizarLogo(arquivo("   ", PNG_MAGIC_BYTES)))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("Imagem do estabelecimento obrigatoria.");
+        .hasMessage("Imagem do estabelecimento obrigatória.");
 
     verify(servicoSalonProfile, never()).atualizarLogo(any(), any(), any());
   }
@@ -119,7 +119,7 @@ class SalonControllerTest {
   void arquivoVazioEQuatrocentos() {
     assertThatThrownBy(() -> controller.atualizarLogo(arquivo("logo.png", new byte[0])))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("Imagem do estabelecimento obrigatoria.");
+        .hasMessage("Imagem do estabelecimento obrigatória.");
   }
 
   @Test
@@ -127,7 +127,7 @@ class SalonControllerTest {
     byte[] grande = new byte[(int) MAX_LOGO_BYTES + 1];
     assertThatThrownBy(() -> controller.atualizarLogo(arquivo("logo.png", grande)))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("Imagem excede o tamanho maximo permitido.")
+        .hasMessage("Imagem excede o tamanho máximo permitido.")
         .extracting(e -> ((ApiClientErrorException) e).getStatus())
         .isEqualTo(400);
 
@@ -140,7 +140,7 @@ class SalonControllerTest {
 
     assertThatThrownBy(() -> controller.atualizarLogo(arquivo("arquivo.txt", textoQualquer)))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("Formato de imagem nao suportado. Use JPG, PNG ou WEBP.");
+        .hasMessage("Formato de imagem não suportado. Use JPG, PNG ou WEBP.");
 
     verifyNoInteractions(servicoSalonProfile);
   }
@@ -165,7 +165,7 @@ class SalonControllerTest {
 
     assertThatThrownBy(() -> controller.atualizarLogo(arquivo("logo.png", PNG_MAGIC_BYTES)))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("Storage de imagens indisponivel.")
+        .hasMessage("Storage de imagens indisponível.")
         .extracting(e -> ((ApiClientErrorException) e).getStatus())
         .isEqualTo(503);
   }
@@ -173,11 +173,11 @@ class SalonControllerTest {
   @Test
   void erroDoServiceNaoEReembalhadoPeloControlador() {
     when(servicoSalonProfile.atualizarLogo(any(), any(), any()))
-        .thenThrow(new ApiClientErrorException("Salao nao encontrado", 400));
+        .thenThrow(new ApiClientErrorException("Salão não encontrado", 400));
 
     assertThatThrownBy(() -> controller.atualizarLogo(arquivo("logo.png", PNG_MAGIC_BYTES)))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("Salao nao encontrado");
+        .hasMessage("Salão não encontrado");
   }
 
   // ─── removerLogo ────────────────────────────────────────────────────────

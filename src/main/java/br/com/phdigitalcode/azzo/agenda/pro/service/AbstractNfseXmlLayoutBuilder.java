@@ -29,12 +29,12 @@ abstract class AbstractNfseXmlLayoutBuilder implements NfseXmlLayoutBuilder {
       factory.setXIncludeAware(false);
       Document document = factory.newDocumentBuilder().parse(new InputSource(new StringReader(xml)));
       if (document == null || document.getDocumentElement() == null) {
-        throw new IllegalArgumentException("XML NFS-e invalido.");
+        throw new IllegalArgumentException("XML NFS-e inválido.");
       }
     } catch (IllegalArgumentException ex) {
       throw ex;
     } catch (Exception ex) {
-      throw new IllegalArgumentException("XML NFS-e invalido.", ex);
+      throw new IllegalArgumentException("XML NFS-e inválido.", ex);
     }
   }
 

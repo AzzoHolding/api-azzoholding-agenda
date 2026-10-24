@@ -89,10 +89,10 @@ public class ServicoAnonimizacaoTitular {
   private AnonimizacaoResponse anonimizarNoSalao(
       UUID tenantId, UUID clientId, UUID autorId, String descricao) {
     Cliente cliente = clienteRepository.findByIdAndTenantId(clientId, tenantId)
-        .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Cliente nao encontrado"));
+        .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Cliente não encontrado"));
 
     if (cliente.getAnonymizedAt() != null) {
-      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Cliente ja foi anonimizado");
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Cliente já foi anonimizado");
     }
 
     Instant now = Instant.now();

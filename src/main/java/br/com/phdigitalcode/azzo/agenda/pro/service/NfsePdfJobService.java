@@ -69,7 +69,7 @@ public class NfsePdfJobService {
     NfseInvoiceEntity invoice = obterInvoiceOuFalhar(tenantId, invoiceId);
     if (invoice.getFiscalStatus() != NfseFiscalStatus.AUTHORIZED
         && invoice.getFiscalStatus() != NfseFiscalStatus.CANCELLED) {
-      throw new IllegalArgumentException("PDF da NFS-e so pode ser gerado para documento autorizado/cancelado.");
+      throw new IllegalArgumentException("PDF da NFS-e só pode ser gerado para documento autorizado/cancelado.");
     }
 
     NfsePdfJobEntity activeJob = nfsePdfJobRepository.findActiveJob(tenantId, invoice.getId()).orElse(null);
@@ -94,9 +94,9 @@ public class NfsePdfJobService {
     NfsePdfJobEntity job =
         nfsePdfJobRepository
             .findByTenantIdAndId(tenantId, parsedJobId)
-            .orElseThrow(() -> new ApiClientErrorException("Job PDF NFS-e nao encontrado.", 404));
+            .orElseThrow(() -> new ApiClientErrorException("Job PDF NFS-e não encontrado.", 404));
     if (!invoice.getId().equals(job.getInvoiceId())) {
-      throw new ApiClientErrorException("Job PDF NFS-e nao encontrado para a invoice informada.", 404);
+      throw new ApiClientErrorException("Job PDF NFS-e não encontrado para a invoice informada.", 404);
     }
     return toResponse(job);
   }
@@ -109,21 +109,21 @@ public class NfsePdfJobService {
     NfsePdfJobEntity job =
         nfsePdfJobRepository
             .findByTenantIdAndId(tenantId, parsedJobId)
-            .orElseThrow(() -> new ApiClientErrorException("Job PDF NFS-e nao encontrado.", 404));
+            .orElseThrow(() -> new ApiClientErrorException("Job PDF NFS-e não encontrado.", 404));
     if (!invoice.getId().equals(job.getInvoiceId())) {
-      throw new ApiClientErrorException("Job PDF NFS-e nao encontrado para a invoice informada.", 404);
+      throw new ApiClientErrorException("Job PDF NFS-e não encontrado para a invoice informada.", 404);
     }
     if (!"DONE".equalsIgnoreCase(job.getStatus())) {
-      throw new ApiClientErrorException("PDF da NFS-e ainda nao esta pronto para download.", 409);
+      throw new ApiClientErrorException("PDF da NFS-e ainda não esta pronto para download.", 409);
     }
     if (isDownloadConsumido(job)) {
-      throw new ApiClientErrorException("PDF da NFS-e ja foi baixado e removido.", 410);
+      throw new ApiClientErrorException("PDF da NFS-e já foi baixado e removido.", 410);
     }
     if (isDownloadExpirado(job)) {
       minioStorageService.removerArquivoFiscalDanfe(job.getPdfStorageKey(), job.getTenantId());
       job.setPdfStorageKey(null);
       invoice.setPdfStorageKey(null);
-      throw new ApiClientErrorException("PDF da NFS-e expirado e removido apos 24 horas.", 410);
+      throw new ApiClientErrorException("PDF da NFS-e expirado e removido após 24 horas.", 410);
     }
 
     byte[] arquivo =
@@ -131,7 +131,7 @@ public class NfsePdfJobService {
             ? minioStorageService.baixarArquivo(job.getPdfStorageKey(), tenantId)
             : nfsePdfRenderService.render(invoice, null);
     if (arquivo == null || arquivo.length == 0) {
-      throw new ApiClientErrorException("Arquivo PDF da NFS-e indisponivel para download.", 410);
+      throw new ApiClientErrorException("Arquivo PDF da NFS-e indisponível para download.", 410);
     }
 
     job.setDownloadCount((job.getDownloadCount() == null ? 0 : job.getDownloadCount()) + 1);
@@ -151,7 +151,7 @@ public class NfsePdfJobService {
     UUID id = parseUuid(invoiceId, "id da NFS-e invalido.");
     return nfseInvoiceRepository
         .findByTenantAndId(tenantId, id)
-        .orElseThrow(() -> new ApiClientErrorException("NFS-e nao encontrada.", 404));
+        .orElseThrow(() -> new ApiClientErrorException("NFS-e não encontrada.", 404));
   }
 
   private UUID obterUsuarioAtualOuFalhar() {

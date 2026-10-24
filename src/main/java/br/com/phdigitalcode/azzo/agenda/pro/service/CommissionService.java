@@ -224,7 +224,7 @@ public class CommissionService {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     LocalDate start = parseRequiredDate(from, "from obrigatorio");
     LocalDate end = parseRequiredDate(to, "to obrigatorio");
-    if (end.isBefore(start)) throw new IllegalArgumentException("Periodo invalido");
+    if (end.isBefore(start)) throw new IllegalArgumentException("Período inválido");
     UUID professionalUuid = parseUuidNullable(professionalId, "professionalId invalido");
     String normalizedStatus = normalizeStatusNullable(status);
 
@@ -299,7 +299,7 @@ public class CommissionService {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     LocalDate start = parseRequiredDate(from, "from obrigatorio");
     LocalDate end = parseRequiredDate(to, "to obrigatorio");
-    if (end.isBefore(start)) throw new IllegalArgumentException("Periodo invalido");
+    if (end.isBefore(start)) throw new IllegalArgumentException("Período inválido");
 
     Profissional professional = getProfessionalOrFail(tenantId, professionalId);
     List<CommissionEntry> entries =
@@ -355,9 +355,9 @@ public class CommissionService {
     UUID actorUserId = authenticatedUser.idOuNulo();
     LocalDate start = parseRequiredDate(request.periodStart, "periodStart obrigatorio");
     LocalDate end = parseRequiredDate(request.periodEnd, "periodEnd obrigatorio");
-    if (end.isBefore(start)) throw new IllegalArgumentException("Periodo invalido");
+    if (end.isBefore(start)) throw new IllegalArgumentException("Período inválido");
     if (cycleRepository.findByTenantIdAndPeriodStartAndPeriodEnd(tenantId, start, end).isPresent()) {
-      throw new IllegalArgumentException("Ja existe fechamento de comissao para este periodo");
+      throw new IllegalArgumentException("Já existe fechamento de comissão para este período");
     }
 
     CommissionCycle cycle = new CommissionCycle();
@@ -384,9 +384,9 @@ public class CommissionService {
     CommissionCycle cycle =
         cycleRepository
             .findByTenantIdAndId(tenantId, cycleId)
-            .orElseThrow(() -> new IllegalArgumentException("Ciclo de comissao nao encontrado"));
+            .orElseThrow(() -> new IllegalArgumentException("Ciclo de comissão não encontrado"));
     if ("PAID".equals(cycle.getStatus())) {
-      throw new IllegalArgumentException("Ciclo de comissao ja pago");
+      throw new IllegalArgumentException("Ciclo de comissão já pago");
     }
 
     CommissionDtos.CycleResponse before = toCycleResponse(cycle);
@@ -425,7 +425,7 @@ public class CommissionService {
     // Negativo e permitido: e o DESCONTO de comissao — o unico jeito de acertar o que foi pago a
     // mais (analise de 2026-09-16, M4). Zero nao muda nada e continua recusado.
     if (request.amount == null || request.amount.signum() == 0) {
-      throw new IllegalArgumentException("amount nao pode ser zero");
+      throw new IllegalArgumentException("amount não pode ser zero");
     }
 
     Instant effectiveAt = parseInstantNullable(request.effectiveAt);
@@ -727,25 +727,25 @@ public class CommissionService {
   private CommissionRuleSet getRuleSetOrFail(UUID tenantId, UUID ruleSetId) {
     return ruleSetRepository
         .findByTenantIdAndId(tenantId, ruleSetId)
-        .orElseThrow(() -> new IllegalArgumentException("Regra de comissao nao encontrada"));
+        .orElseThrow(() -> new IllegalArgumentException("Regra de comissão não encontrada"));
   }
 
   private Profissional getProfessionalOrFail(UUID tenantId, UUID professionalId) {
     return profissionalRepository
         .findById(professionalId)
         .filter(item -> tenantId.equals(item.getTenantId()))
-        .orElseThrow(() -> new IllegalArgumentException("Profissional nao encontrado"));
+        .orElseThrow(() -> new IllegalArgumentException("Profissional não encontrado"));
   }
 
   private void applyRuleSet(
       CommissionRuleSet entity, CommissionDtos.RuleSetUpsertRequest request, UUID tenantId) {
     String scopeType = requiredUpper(request.scopeType, "scopeType obrigatorio");
     if (!"GLOBAL".equals(scopeType) && !"PROFESSIONAL".equals(scopeType)) {
-      throw new IllegalArgumentException("scopeType invalido");
+      throw new IllegalArgumentException("scopeType inválido");
     }
     UUID professionalId = parseUuidNullable(request.professionalId, "professionalId invalido");
     if ("GLOBAL".equals(scopeType) && professionalId != null) {
-      throw new IllegalArgumentException("Regra global nao pode informar profissional");
+      throw new IllegalArgumentException("Regra global não pode informar profissional");
     }
     if ("PROFESSIONAL".equals(scopeType) && professionalId == null) {
       throw new IllegalArgumentException("Regra do profissional exige professionalId");
@@ -813,12 +813,12 @@ public class CommissionService {
     switch (rule.getTargetType()) {
       case "GENERAL" -> {
         if (rule.getTargetId() != null || rule.getTargetCode() != null) {
-          throw new IllegalArgumentException("Regra geral nao aceita alvo especifico");
+          throw new IllegalArgumentException("Regra geral não aceita alvo específico");
         }
       }
       case "SERVICE" -> {
         if (rule.getTargetId() == null || rule.getTargetCode() != null) {
-          throw new IllegalArgumentException("Servico exige targetId");
+          throw new IllegalArgumentException("Serviço exige targetId");
         }
         ensureCount("services", tenantId, rule.getTargetId(), "Servico nao encontrado");
       }
@@ -833,7 +833,7 @@ public class CommissionService {
           throw new IllegalArgumentException("Categoria exige targetCode");
         }
       }
-      default -> throw new IllegalArgumentException("targetType invalido");
+      default -> throw new IllegalArgumentException("targetType inválido");
     }
   }
 
@@ -1323,7 +1323,7 @@ public class CommissionService {
     try {
       return Instant.parse(value.trim());
     } catch (Exception e) {
-      throw new IllegalArgumentException("Data/hora invalida");
+      throw new IllegalArgumentException("Data/hora inválida");
     }
   }
 
@@ -1331,7 +1331,7 @@ public class CommissionService {
     if (value == null || value.isBlank()) return null;
     String normalized = value.trim().toUpperCase(Locale.ROOT);
     if (!VALID_ENTRY_STATUS.contains(normalized)) {
-      throw new IllegalArgumentException("status invalido");
+      throw new IllegalArgumentException("status inválido");
     }
     return normalized;
   }

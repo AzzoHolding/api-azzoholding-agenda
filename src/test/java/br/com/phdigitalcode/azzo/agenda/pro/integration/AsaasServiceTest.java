@@ -157,7 +157,7 @@ class AsaasServiceTest {
   void tokenInvalidoRejeita() {
     assertThatThrownBy(() -> service().processWebhook("outro-token", payload("PAYMENT_CONFIRMED", "CONFIRMED", "sub_1")))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("Token de webhook invalido");
+        .hasMessage("Token de webhook inválido");
 
     verify(webhookEventLogRepository, never()).save(any());
     verify(integrationLogRepository, never()).save(any());
@@ -168,7 +168,7 @@ class AsaasServiceTest {
   void tokenNaoConfiguradoRejeita() {
     assertThatThrownBy(() -> service(true, "__unset__").processWebhook("__unset__", payload("PAYMENT_CONFIRMED", "CONFIRMED", "sub_1")))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("ASAAS_WEBHOOK_TOKEN nao configurado");
+        .hasMessage("ASAAS_WEBHOOK_TOKEN não configurado");
   }
 
   @Test
@@ -213,7 +213,7 @@ class AsaasServiceTest {
 
     assertThatThrownBy(() -> service().processWebhook(TOKEN, payload))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Webhook Asaas invalido");
+        .hasMessage("Webhook Asaas inválido");
   }
 
   @Test
@@ -234,7 +234,7 @@ class AsaasServiceTest {
 
     assertThatThrownBy(() -> service().processWebhook(TOKEN, payload("PAYMENT_CONFIRMED", "CONFIRMED", "sub_1")))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Nao foi possivel identificar tenant para o webhook Asaas");
+        .hasMessage("Não foi possível identificar tenant para o webhook Asaas");
 
     verify(webhookEventLogRepository, never()).save(any());
   }

@@ -62,6 +62,6 @@ public class StorageProxyController {
   }
 
   private static ApiClientErrorException naoEncontrado() {
-    return new ApiClientErrorException("Arquivo nao encontrado", 404);
+    return new ApiClientErrorException("Arquivo não encontrado", 404);
   }
 }

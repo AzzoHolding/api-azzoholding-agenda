@@ -126,7 +126,7 @@ public class ServicoOnboarding {
   public void updateStep(UUID tenantId, int step) {
     Tenant tenant = buscarTenantOuFalhar(tenantId);
     if (step < 0) {
-      throw new ApiClientErrorException("Step invalido.", HttpStatus.BAD_REQUEST.value());
+      throw new ApiClientErrorException("Step inválido.", HttpStatus.BAD_REQUEST.value());
     }
     if (tenant.getOnboardingStep() == null || step > tenant.getOnboardingStep()) {
       tenant.setOnboardingStep(step);
@@ -149,11 +149,11 @@ public class ServicoOnboarding {
     }
     if (!hasServices) {
       throw new ApiClientErrorException(
-          "Cadastre pelo menos um servico antes de concluir o onboarding.", UNPROCESSABLE_ENTITY);
+          "Cadastre pelo menos um serviço antes de concluir o onboarding.", UNPROCESSABLE_ENTITY);
     }
     if (!hasAssignments) {
       throw new ApiClientErrorException(
-          "Vincule pelo menos um profissional a um servico antes de concluir o onboarding.", UNPROCESSABLE_ENTITY);
+          "Vincule pelo menos um profissional a um serviço antes de concluir o onboarding.", UNPROCESSABLE_ENTITY);
     }
 
     tenant.setOnboardingComplete(true);
@@ -173,7 +173,7 @@ public class ServicoOnboarding {
 
   private Tenant buscarTenantOuFalhar(UUID tenantId) {
     return tenantRepository.findById(tenantId)
-        .orElseThrow(() -> new ApiClientErrorException("Tenant nao encontrado.", HttpStatus.NOT_FOUND.value()));
+        .orElseThrow(() -> new ApiClientErrorException("Tenant não encontrado.", HttpStatus.NOT_FOUND.value()));
   }
 
   private long contarProfissionaisAtivos(UUID tenantId) {

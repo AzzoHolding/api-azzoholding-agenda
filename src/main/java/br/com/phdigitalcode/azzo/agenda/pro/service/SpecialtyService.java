@@ -55,14 +55,14 @@ public class SpecialtyService {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Specialty specialty = specialtyRepository.findById(id)
         .filter(item -> tenantId.equals(item.getTenantId()))
-        .orElseThrow(() -> new IllegalArgumentException("Especialidade nao encontrada"));
+        .orElseThrow(() -> new IllegalArgumentException("Especialidade não encontrada"));
 
     String name = normalizeName(request.name);
     String description = normalizeDescription(request.description);
 
     Specialty sameName = specialtyRepository.findByTenantAndName(tenantId, name).orElse(null);
     if (sameName != null && !sameName.getId().equals(specialty.getId())) {
-      throw new IllegalArgumentException("Ja existe especialidade com este nome");
+      throw new IllegalArgumentException("Já existe especialidade com este nome");
     }
 
     specialty.setName(name);
@@ -75,14 +75,14 @@ public class SpecialtyService {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Specialty specialty = specialtyRepository.findById(id)
         .filter(item -> tenantId.equals(item.getTenantId()))
-        .orElseThrow(() -> new IllegalArgumentException("Especialidade nao encontrada"));
+        .orElseThrow(() -> new IllegalArgumentException("Especialidade não encontrada"));
     specialtyRepository.delete(specialty);
   }
 
   @Transactional
   public int deletarSelecionadas(List<UUID> ids) {
     if (ids == null || ids.isEmpty()) {
-      throw new IllegalArgumentException("Nenhuma especialidade selecionada para remocao");
+      throw new IllegalArgumentException("Nenhuma especialidade selecionada para remoção");
     }
     int removedCount = 0;
     for (UUID id : ids) {
@@ -118,7 +118,7 @@ public class SpecialtyService {
 
   private String normalizeName(String value) {
     String trimmed = value == null ? "" : value.trim();
-    if (trimmed.isBlank()) throw new IllegalArgumentException("Nome da especialidade e obrigatorio");
+    if (trimmed.isBlank()) throw new IllegalArgumentException("Nome da especialidade é obrigatório");
     return trimmed;
   }
 
@@ -127,7 +127,7 @@ public class SpecialtyService {
     String trimmed = value.trim();
     if (trimmed.isBlank()) return null;
     if (trimmed.length() > 500) {
-      throw new IllegalArgumentException("Descricao da especialidade deve ter no maximo 500 caracteres");
+      throw new IllegalArgumentException("Descrição da especialidade deve ter no máximo 500 caracteres");
     }
     return trimmed;
   }

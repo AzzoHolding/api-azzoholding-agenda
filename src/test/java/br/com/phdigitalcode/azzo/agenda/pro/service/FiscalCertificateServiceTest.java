@@ -70,7 +70,7 @@ class FiscalCertificateServiceTest {
   void salvarComRequestNuloLancaIllegalArgument() {
     assertThatThrownBy(() -> service.salvar(null))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Request obrigatorio");
+        .hasMessage("Request obrigatório");
   }
 
   @Test
@@ -80,7 +80,7 @@ class FiscalCertificateServiceTest {
 
     assertThatThrownBy(() -> service.salvar(request))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("pfxBase64 obrigatorio");
+        .hasMessage("pfxBase64 obrigatório");
   }
 
   @Test
@@ -90,7 +90,7 @@ class FiscalCertificateServiceTest {
 
     assertThatThrownBy(() -> service.salvar(request))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("password obrigatoria");
+        .hasMessage("password obrigatória");
   }
 
   @Test
@@ -102,7 +102,7 @@ class FiscalCertificateServiceTest {
 
     assertThatThrownBy(() -> service.salvar(request))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("pfxBase64 invalido");
+        .hasMessage("pfxBase64 inválido");
   }
 
   @Test
@@ -185,7 +185,7 @@ class FiscalCertificateServiceTest {
 
     assertThatThrownBy(() -> service.remover("nao-e-uuid"))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("id de certificado invalido");
+        .hasMessage("id de certificado inválido");
   }
 
   @Test
@@ -196,7 +196,7 @@ class FiscalCertificateServiceTest {
 
     assertThatThrownBy(() -> service.remover(id.toString()))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("Certificado fiscal nao encontrado.")
+        .hasMessage("Certificado fiscal não encontrado.")
         .satisfies(ex -> assertThat(((ApiClientErrorException) ex).getStatus()).isEqualTo(404));
   }
 
@@ -223,7 +223,7 @@ class FiscalCertificateServiceTest {
 
     assertThatThrownBy(() -> service.ativar(id.toString()))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("Certificado fiscal nao encontrado.");
+        .hasMessage("Certificado fiscal não encontrado.");
   }
 
   @Test

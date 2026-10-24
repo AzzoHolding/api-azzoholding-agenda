@@ -105,7 +105,7 @@ class AbrasfXmlLayoutBuilderTest {
 
     assertThatThrownBy(() -> builder.buildAndValidateAuthorizationXml(invoiceBase()))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("NFSE_XML_PRESTADOR_CNPJ_INVALIDO");
+        .hasMessage("NFSE_XML_PRESTADOR_CNPJ_INVÁLIDO");
   }
 
   @Test
@@ -123,7 +123,7 @@ class AbrasfXmlLayoutBuilderTest {
   void invoiceNulaLancaIllegalArgument() {
     assertThatThrownBy(() -> builder.buildAndValidateAuthorizationXml(null))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("NFS-e obrigatoria para gerar XML.");
+        .hasMessage("NFS-e obrigatória para gerar XML.");
   }
 
   @Test

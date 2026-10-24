@@ -142,7 +142,7 @@ class ProfissionalAceitaAgendamentoTest {
     req.userId = UUID.randomUUID().toString();
 
     assertThatThrownBy(() -> service.atualizar(p.getId(), req))
-        .hasMessage("Este profissional ja tem login proprio");
+        .hasMessage("Este profissional já tem login próprio");
     verify(profissionalRepository, never()).save(any());
   }
 
@@ -167,8 +167,8 @@ class ProfissionalAceitaAgendamentoTest {
 
   /**
    * A tela manda `commissionRate: null` quando o campo fica em branco, e a coluna e NOT NULL: em
-   * producao (2026-09-16) todo cadastro sem comissao morria com "null value in column
-   * commission_rate" e a mensagem generica de erro inesperado.
+   * producao (2026-09-16) todo cadastro sem comissao morria com "null value in column"
+   * commission_rate" e a mensagem generica de erro inesperado."
    */
   @Test
   @DisplayName("comissao ausente vira zero no cadastro e mantem o valor na edicao")

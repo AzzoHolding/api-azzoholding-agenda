@@ -77,7 +77,7 @@ public class ServicoExportacaoTitular {
   public Map<String, Object> exportar(UUID clientId) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Cliente cliente = clienteRepository.findByIdAndTenantId(clientId, tenantId)
-        .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Cliente nao encontrado"));
+        .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Cliente não encontrado"));
     Instant agora = Instant.now();
 
     Map<String, Object> exportacao = new LinkedHashMap<>();

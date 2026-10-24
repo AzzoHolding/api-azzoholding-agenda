@@ -86,7 +86,7 @@ class ServicoTenantPaymentWebhookTest {
 
     assertThatThrownBy(() -> service.receber(TOKEN, payload("PAYMENT_CONFIRMED", "pay_1", null)))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("Token de webhook invalido")
+        .hasMessage("Token de webhook inválido")
         .extracting(e -> ((ApiClientErrorException) e).getStatus())
         .isEqualTo(401);
 
@@ -101,12 +101,12 @@ class ServicoTenantPaymentWebhookTest {
 
     assertThatThrownBy(() -> service.receber(TOKEN, payload("   ", "pay_1", null)))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("Payload de webhook invalido")
+        .hasMessage("Payload de webhook inválido")
         .extracting(e -> ((ApiClientErrorException) e).getStatus())
         .isEqualTo(400);
     assertThatThrownBy(() -> service.receber(TOKEN, null))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("Payload de webhook invalido");
+        .hasMessage("Payload de webhook inválido");
   }
 
   @Test

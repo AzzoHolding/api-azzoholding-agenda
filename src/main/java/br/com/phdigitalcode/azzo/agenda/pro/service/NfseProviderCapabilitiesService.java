@@ -44,7 +44,7 @@ public class NfseProviderCapabilitiesService {
   @Transactional
   public NfseDtos.ProviderCapabilities salvarProviderCapabilities(NfseDtos.ProviderCapabilities request) {
     if (request == null) {
-      throw new IllegalArgumentException("Capacidades do provedor sao obrigatorias.");
+      throw new IllegalArgumentException("Capacidades do provedor são obrigatórias.");
     }
     if (isBlank(request.municipioCodigoIbge)) {
       throw new IllegalArgumentException("NFSE_PROVIDER_CAP_MISSING_MUNICIPIO");
@@ -89,12 +89,12 @@ public class NfseProviderCapabilitiesService {
     try {
       return NfseCancelMode.valueOf(raw.trim().toUpperCase(Locale.ROOT));
     } catch (Exception ex) {
-      throw new IllegalArgumentException("Cancel mode NFS-e invalido.");
+      throw new IllegalArgumentException("Cancel mode NFS-e inválido.");
     }
   }
 
   private String normalize(String value) {
-    if (isBlank(value)) throw new IllegalArgumentException("Campo obrigatorio ausente.");
+    if (isBlank(value)) throw new IllegalArgumentException("Campo obrigatório ausente.");
     return value.trim();
   }
 

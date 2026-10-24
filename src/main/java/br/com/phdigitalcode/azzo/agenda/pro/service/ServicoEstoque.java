@@ -334,7 +334,7 @@ public class ServicoEstoque {
     LocalDate ate = fim != null ? fim : hoje;
     if (ate.isBefore(de)) {
       throw new ApiClientErrorException(
-          "O fim do periodo nao pode ser antes do inicio.", HttpStatus.BAD_REQUEST.value());
+          "O fim do período não pode ser antes do início.", HttpStatus.BAD_REQUEST.value());
     }
 
     List<ItemEstoque> itens = itemEstoqueRepository.findByTenantId(tenantId);
@@ -496,7 +496,7 @@ public class ServicoEstoque {
         servicoInsumoRepository.findByTenantServiceAndItem(tenantId, serviceId, itemId).orElse(null);
     if (existente != null && Boolean.TRUE.equals(existente.getAtivo())) {
       throw new ApiClientErrorException(
-          "Este item ja esta vinculado ao servico.", HttpStatus.CONFLICT.value());
+          "Este item já esta vinculado ao serviço.", HttpStatus.CONFLICT.value());
     }
     if (existente != null) {
       existente.setQuantidadeConsumo(request.quantidadeConsumo);
@@ -622,7 +622,7 @@ public class ServicoEstoque {
       response.expiresAt = minioStorageService.calcularExpiracaoUrlAssinada().toString();
     } catch (IllegalStateException exception) {
       throw new ApiClientErrorException(
-          "Storage de importacao indisponivel.", HttpStatus.SERVICE_UNAVAILABLE.value());
+          "Storage de importação indisponível.", HttpStatus.SERVICE_UNAVAILABLE.value());
     }
     return response;
   }
@@ -663,7 +663,7 @@ public class ServicoEstoque {
           TipoImportacaoEstoque.valueOf(tipoImportacaoRaw == null ? "" : tipoImportacaoRaw.trim());
     } catch (RuntimeException exception) {
       throw new ApiClientErrorException(
-          "tipoImportacao invalido. Use ITENS, ENTRADAS ou AJUSTES.", HttpStatus.BAD_REQUEST.value());
+          "tipoImportacao inválido. Use ITENS, ENTRADAS ou AJUSTES.", HttpStatus.BAD_REQUEST.value());
     }
 
     String formato =
@@ -672,7 +672,7 @@ public class ServicoEstoque {
             : EstoqueTextoUtil.normalizarTextoBase(formatoRaw).toLowerCase(Locale.ROOT);
     if (!"xlsx".equals(formato) && !"csv".equals(formato)) {
       throw new ApiClientErrorException(
-          "formato invalido. Use xlsx ou csv.", HttpStatus.BAD_REQUEST.value());
+          "formato inválido. Use xlsx ou csv.", HttpStatus.BAD_REQUEST.value());
     }
 
     List<String> cabecalho = cabecalhoModelo(tipoImportacao);
@@ -777,7 +777,7 @@ public class ServicoEstoque {
       workbook.write(outputStream);
       return outputStream.toByteArray();
     } catch (Exception exception) {
-      throw new IllegalStateException("Falha ao gerar modelo de importacao.", exception);
+      throw new IllegalStateException("Falha ao gerar modelo de importação.", exception);
     }
   }
 
@@ -1270,12 +1270,12 @@ public class ServicoEstoque {
     if ((semEntradaNoEstoque || quantidadeDiferente) && (explicacao == null || explicacao.isBlank())) {
       throw new ApiClientErrorException(
           semEntradaNoEstoque
-              ? "Recebimento sem entrada no estoque: explique na observacao o que foi recebido."
+              ? "Recebimento sem entrada no estoque: explique na observação o que foi recebido."
               : "A quantidade que entra no estoque ("
                   + request.quantidadeEstoque.stripTrailingZeros().toPlainString()
                   + ") e diferente da recebida ("
                   + quantidadeRecebida
-                  + "): explique a conversao na observacao.",
+                  + "): explique a conversao na observação.",
           HttpStatus.BAD_REQUEST.value());
     }
 
@@ -1451,7 +1451,7 @@ public class ServicoEstoque {
         .orElseThrow(
             () ->
                 new ApiClientErrorException(
-                    "Item de estoque nao encontrado.", HttpStatus.NOT_FOUND.value()));
+                    "Item de estoque não encontrado.", HttpStatus.NOT_FOUND.value()));
   }
 
   private ServicoInsumo obterInsumoOuFalhar(UUID id, UUID tenantId) {
@@ -1460,7 +1460,7 @@ public class ServicoEstoque {
         .orElseThrow(
             () ->
                 new ApiClientErrorException(
-                    "Vinculo servico-insumo nao encontrado.", HttpStatus.NOT_FOUND.value()));
+                    "Vinculo serviço-insumo não encontrado.", HttpStatus.NOT_FOUND.value()));
   }
 
   private EstoqueInventario obterInventarioOuFalhar(UUID inventarioId) {
@@ -1588,7 +1588,7 @@ public class ServicoEstoque {
         return new Cursor(Instant.parse(cursorCreatedAt), UUID.fromString(cursorId));
       } catch (RuntimeException exception) {
         throw new ApiClientErrorException(
-            "Cursor invalido. Use cursorCreatedAt (ISO-8601) e cursorId (UUID).",
+            "Cursor inválido. Use cursorCreatedAt (ISO-8601) e cursorId (UUID).",
             HttpStatus.BAD_REQUEST.value());
       }
     }

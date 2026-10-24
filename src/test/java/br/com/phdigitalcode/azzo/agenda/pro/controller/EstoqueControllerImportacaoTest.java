@@ -124,7 +124,7 @@ class EstoqueControllerImportacaoTest {
   void arquivoAusenteEQuatrocentosSemTocarNoStorage() {
     assertThatThrownBy(() -> controller.criarImportacao(null, "ITENS", null))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("Arquivo de importacao obrigatorio.")
+        .hasMessage("Arquivo de importação obrigatório.")
         .extracting(e -> ((ApiClientErrorException) e).getStatus())
         .isEqualTo(400);
 
@@ -136,7 +136,7 @@ class EstoqueControllerImportacaoTest {
     assertThatThrownBy(
             () -> controller.criarImportacao(arquivo("   ", new byte[] {1}), "ITENS", null))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("Arquivo de importacao obrigatorio.");
+        .hasMessage("Arquivo de importação obrigatório.");
 
     verify(servicoEstoque, never()).criarImportacao(any(), any(), any(), any());
   }
@@ -146,7 +146,7 @@ class EstoqueControllerImportacaoTest {
     assertThatThrownBy(
             () -> controller.criarImportacao(arquivo(null, new byte[] {1}), "ITENS", null))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("Arquivo de importacao obrigatorio.");
+        .hasMessage("Arquivo de importação obrigatório.");
   }
 
   @Test
@@ -157,7 +157,7 @@ class EstoqueControllerImportacaoTest {
 
     assertThatThrownBy(() -> controller.criarImportacao(ilegivel, "ENTRADAS", null))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("Falha ao processar arquivo de importacao.")
+        .hasMessage("Falha ao processar arquivo de importação.")
         .extracting(e -> ((ApiClientErrorException) e).getStatus())
         .isEqualTo(400);
 
@@ -173,7 +173,7 @@ class EstoqueControllerImportacaoTest {
     assertThatThrownBy(
             () -> controller.criarImportacao(arquivo("x.xlsx", new byte[] {1}), "ITENS", null))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("Storage de importacao indisponivel.")
+        .hasMessage("Storage de importação indisponível.")
         .extracting(e -> ((ApiClientErrorException) e).getStatus())
         .isEqualTo(503);
 

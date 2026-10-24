@@ -70,7 +70,7 @@ public class ServicoSalonProfile {
   public SalonDtos.SalonProfile obterPrivado() {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Tenant tenant = tenantRepository.findById(tenantId).orElse(null);
-    if (tenant == null) throw new IllegalArgumentException("Salao nao encontrado");
+    if (tenant == null) throw new IllegalArgumentException("Salão não encontrado");
     TenantAddress tenantAddress = tenantAddressRepository.findById(tenantId).orElse(null);
     return toPrivateProfile(tenant, tenantAddress);
   }
@@ -79,17 +79,17 @@ public class ServicoSalonProfile {
   public SalonDtos.SalonProfile atualizarPrivado(SalonDtos.SalonProfile request) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Tenant tenant = tenantRepository.findById(tenantId).orElse(null);
-    if (tenant == null) throw new IllegalArgumentException("Salao nao encontrado");
+    if (tenant == null) throw new IllegalArgumentException("Salão não encontrado");
 
     String document = onlyDigitsOrNull(request.salonCpfCnpj);
     if (document == null || document.isBlank()) {
-      throw new IllegalArgumentException("CPF ou CNPJ do salao e obrigatorio.");
+      throw new IllegalArgumentException("CPF ou CNPJ do salão é obrigatório.");
     }
     if (document.length() != 11 && document.length() != 14) {
       throw new IllegalArgumentException("CPF deve ter 11 digitos ou CNPJ deve ter 14 digitos.");
     }
     if (!br.com.phdigitalcode.azzo.agenda.pro.util.DocumentoValidator.cpfOuCnpjValido(document)) {
-      throw new IllegalArgumentException("CPF/CNPJ invalido. Confira os numeros.");
+      throw new IllegalArgumentException("CPF/CNPJ inválido. Confira os números.");
     }
 
     registrarTrocaDeDocumentoOuFalhar(tenant, document);
@@ -155,15 +155,15 @@ public class ServicoSalonProfile {
     if (novo.equals(tenant.getSlug())) return;
     if (novo.length() < SLUG_MIN || novo.length() > SLUG_MAX || !FORMATO_DO_SLUG.matcher(novo).matches()) {
       throw new ApiClientErrorException(
-          "Endereco de agendamento invalido: use de " + SLUG_MIN + " a " + SLUG_MAX
-              + " caracteres, so letras minusculas, numeros e hifen (sem hifen no comeco, no fim ou repetido).",
+          "Endereço de agendamento inválido: use de " + SLUG_MIN + " a " + SLUG_MAX
+              + " caracteres, so letras minusculas, números e hifen (sem hifen no comeco, no fim ou repetido).",
           400);
     }
     boolean emUsoPorOutro =
         tenantRepository.findBySlug(novo).map(outro -> !outro.getId().equals(tenant.getId())).orElse(false);
     if (emUsoPorOutro) {
       throw new ApiClientErrorException(
-          "Este endereco de agendamento ja esta em uso por outro salao. Escolha outro.", 409);
+          "Este endereço de agendamento já esta em uso por outro salão. Escolha outro.", 409);
     }
     tenant.setSlug(novo);
   }
@@ -196,7 +196,7 @@ public class ServicoSalonProfile {
   public SalonDtos.SalonProfile atualizarLogo(byte[] arquivo, String nomeArquivo, String contentType) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Tenant tenant = tenantRepository.findById(tenantId).orElse(null);
-    if (tenant == null) throw new IllegalArgumentException("Salao nao encontrado");
+    if (tenant == null) throw new IllegalArgumentException("Salão não encontrado");
 
     String logoAnterior = tenant.getLogo();
     String novaLogo = minioStorageService.salvarArquivoSalaoLogo(arquivo, nomeArquivo, contentType, tenantId);
@@ -215,7 +215,7 @@ public class ServicoSalonProfile {
   public SalonDtos.SalonProfile removerLogo() {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Tenant tenant = tenantRepository.findById(tenantId).orElse(null);
-    if (tenant == null) throw new IllegalArgumentException("Salao nao encontrado");
+    if (tenant == null) throw new IllegalArgumentException("Salão não encontrado");
 
     String logoAnterior = tenant.getLogo();
     tenant.setLogo(null);
@@ -238,7 +238,7 @@ public class ServicoSalonProfile {
   @Transactional(readOnly = true)
   public SalonDtos.PublicSalonProfile obterPublico(String slug) {
     Tenant tenant = tenantRepository.findBySlug(slug).orElse(null);
-    if (tenant == null) throw new IllegalArgumentException("Salao nao encontrado");
+    if (tenant == null) throw new IllegalArgumentException("Salão não encontrado");
 
     SalonDtos.PublicSalonProfile dto = new SalonDtos.PublicSalonProfile();
     dto.salonName = tenant.getName();
@@ -296,9 +296,9 @@ public class ServicoSalonProfile {
     int trocas = tenant.getDocumentChangeCount() == null ? 0 : tenant.getDocumentChangeCount();
     if (trocas >= LIMITE_DE_TROCAS_DO_DOCUMENTO) {
       throw new ApiClientErrorException(
-          "O CPF/CNPJ do salao ja foi alterado "
+          "O CPF/CNPJ do salão já foi alterado "
               + LIMITE_DE_TROCAS_DO_DOCUMENTO
-              + " vezes e nao pode mais ser trocado por aqui. Para corrigir, fale com o suporte.",
+              + " vezes e não pode mais ser trocado por aqui. Para corrigir, fale com o suporte.",
           409);
     }
     tenant.setDocumentChangeCount(trocas + 1);

@@ -120,7 +120,7 @@ public class MenuService {
     try {
       return PapelUsuario.valueOf(roleValue);
     } catch (IllegalArgumentException e) {
-      throw new IllegalStateException("Role invalida no JWT: " + roleValue);
+      throw new IllegalStateException("Role inválida no JWT: " + roleValue);
     }
   }
 }

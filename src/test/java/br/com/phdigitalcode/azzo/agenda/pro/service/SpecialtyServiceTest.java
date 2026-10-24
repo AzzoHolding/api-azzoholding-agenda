@@ -80,7 +80,7 @@ class SpecialtyServiceTest {
 
     assertThatThrownBy(() -> service.criar(req))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("Nome da especialidade e obrigatorio");
+        .hasMessageContaining("Nome da especialidade é obrigatório");
   }
 
   @Test
@@ -91,7 +91,7 @@ class SpecialtyServiceTest {
 
     assertThatThrownBy(() -> service.criar(req))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("no maximo 500 caracteres");
+        .hasMessageContaining("no máximo 500 caracteres");
   }
 
   @Test
@@ -126,7 +126,7 @@ class SpecialtyServiceTest {
 
     assertThatThrownBy(() -> service.atualizar(id, req))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("Ja existe especialidade com este nome");
+        .hasMessageContaining("Já existe especialidade com este nome");
   }
 
   @Test
@@ -143,7 +143,7 @@ class SpecialtyServiceTest {
 
     assertThatThrownBy(() -> service.atualizar(id, req))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("Especialidade nao encontrada");
+        .hasMessageContaining("Especialidade não encontrada");
   }
 
   @Test

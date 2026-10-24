@@ -40,19 +40,19 @@ class FiscalXmlSignerServiceTest {
   void xmlNuloOuVazioLancaIllegalArgument() {
     assertThatThrownBy(() -> service.sign(null, "senha"))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("XML fiscal obrigatorio para assinatura.");
+        .hasMessage("XML fiscal obrigatório para assinatura.");
     assertThatThrownBy(() -> service.sign("   ", "senha"))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("XML fiscal obrigatorio para assinatura.");
+        .hasMessage("XML fiscal obrigatório para assinatura.");
   }
 
   @Test
   void senhaNulaOuVaziaLancaIllegalArgument() {
     assertThatThrownBy(() -> service.sign("<a/>", null))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Senha do certificado obrigatoria para assinatura fiscal.");
+        .hasMessage("Senha do certificado obrigatória para assinatura fiscal.");
     assertThatThrownBy(() -> service.sign("<a/>", "  "))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Senha do certificado obrigatoria para assinatura fiscal.");
+        .hasMessage("Senha do certificado obrigatória para assinatura fiscal.");
   }
 }

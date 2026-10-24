@@ -73,7 +73,7 @@ class MetaPlatformServiceTest {
   @Test
   void deauthorizeConvertBadRequestQuandoSignedRequestInvalido() {
     when(metaSignedRequestService.parseAndValidateSignedRequest("corpo"))
-        .thenThrow(new IllegalArgumentException("signed_request invalido."));
+        .thenThrow(new IllegalArgumentException("signed_request inválido."));
 
     assertThatThrownBy(() -> service.deauthorize("corpo"))
         .isInstanceOf(ApiClientErrorException.class)
@@ -147,7 +147,7 @@ class MetaPlatformServiceTest {
 
     assertThatThrownBy(() -> service.dataDeletionStatus("abc"))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessageContaining("Solicitacao de exclusao nao encontrada.")
+        .hasMessageContaining("Solicitação de exclusão não encontrada.")
         .extracting(e -> ((ApiClientErrorException) e).getStatus())
         .isEqualTo(404);
   }

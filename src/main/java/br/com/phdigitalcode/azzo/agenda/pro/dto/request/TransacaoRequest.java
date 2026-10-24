@@ -14,23 +14,23 @@ public class TransacaoRequest {
   public String productId;
   public String productCategory;
 
-  @NotBlank(message = "type e obrigatorio")
+  @NotBlank(message = "type é obrigatório")
   public String type; // INCOME | EXPENSE
 
-  @NotBlank(message = "category e obrigatoria")
+  @NotBlank(message = "category é obrigatória")
   public String category;
 
-  @NotBlank(message = "description e obrigatoria")
-  @Size(max = 500, message = "description deve ter no maximo 500 caracteres")
+  @NotBlank(message = "description é obrigatória")
+  @Size(max = 500, message = "description deve ter no máximo 500 caracteres")
   public String description;
 
   @Positive(message = "amount deve ser maior que zero")
   public BigDecimal amount;
 
-  @NotBlank(message = "paymentMethod e obrigatorio")
+  @NotBlank(message = "paymentMethod é obrigatório")
   public String paymentMethod; // CASH|CREDIT_CARD|DEBIT_CARD|PIX|OTHER
 
-  @NotBlank(message = "date e obrigatoria")
+  @NotBlank(message = "date é obrigatória")
   public String date; // ISO instant ou yyyy-MM-dd
 
   @AssertTrue(message = "Informe amount em reais")

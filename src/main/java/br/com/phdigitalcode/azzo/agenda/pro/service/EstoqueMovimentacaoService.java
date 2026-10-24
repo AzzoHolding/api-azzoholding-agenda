@@ -230,7 +230,7 @@ public class EstoqueMovimentacaoService {
     if (tipoMovimentacao == TipoMovimentacaoEstoque.AJUSTE
         && saldoPosterior.compareTo(saldoAnterior) == 0) {
       throw new ApiClientErrorException(
-          "O saldo do item ja e esse — nao ha o que ajustar.", HttpStatus.BAD_REQUEST.value());
+          "O saldo do item já e esse — não ha o que ajustar.", HttpStatus.BAD_REQUEST.value());
     }
     if (tipoMovimentacao == TipoMovimentacaoEstoque.SAIDA
         && saldoPosterior.compareTo(BigDecimal.ZERO) < 0
@@ -330,7 +330,7 @@ public class EstoqueMovimentacaoService {
       return MetodoPagamento.valueOf(codigo).name();
     } catch (IllegalArgumentException e) {
       throw new ApiClientErrorException(
-          "Forma de pagamento invalida. Use CASH, CREDIT_CARD, DEBIT_CARD, PIX ou OTHER.",
+          "Forma de pagamento inválida. Use CASH, CREDIT_CARD, DEBIT_CARD, PIX ou OTHER.",
           HttpStatus.BAD_REQUEST.value());
     }
   }
@@ -338,7 +338,7 @@ public class EstoqueMovimentacaoService {
   private static void validarQuantidade(TipoMovimentacaoEstoque tipo, BigDecimal quantidade) {
     if (quantidade == null || quantidade.signum() < 0) {
       throw new ApiClientErrorException(
-          "Quantidade invalida — informe um numero positivo.", HttpStatus.BAD_REQUEST.value());
+          "Quantidade inválida — informe um número positivo.", HttpStatus.BAD_REQUEST.value());
     }
     if (tipo != TipoMovimentacaoEstoque.AJUSTE && quantidade.signum() == 0) {
       throw new ApiClientErrorException(
@@ -570,7 +570,7 @@ public class EstoqueMovimentacaoService {
         .orElseThrow(
             () ->
                 new ApiClientErrorException(
-                    "Item de estoque nao encontrado.", HttpStatus.NOT_FOUND.value()));
+                    "Item de estoque não encontrado.", HttpStatus.NOT_FOUND.value()));
   }
 
   /** Sem linha de configuracao o bloqueio e considerado <b>ativo</b>, como no original. */
@@ -622,7 +622,7 @@ public class EstoqueMovimentacaoService {
     } catch (IllegalArgumentException e) {
       // O original deixa o IllegalArgumentException de valueOf subir (vira 500). Aqui vira 400.
       throw new ApiClientErrorException(
-          "Tipo de movimentacao invalido.", HttpStatus.BAD_REQUEST.value());
+          "Tipo de movimentacao inválido.", HttpStatus.BAD_REQUEST.value());
     }
   }
 
@@ -632,7 +632,7 @@ public class EstoqueMovimentacaoService {
       return OrigemMovimentacaoEstoque.valueOf(codigo);
     } catch (IllegalArgumentException e) {
       throw new ApiClientErrorException(
-          "Origem de movimentacao invalida.", HttpStatus.BAD_REQUEST.value());
+          "Origem de movimentacao inválida.", HttpStatus.BAD_REQUEST.value());
     }
   }
 

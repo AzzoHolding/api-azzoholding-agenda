@@ -92,7 +92,7 @@ public class ServicoTenantWhatsapp {
       config.setWhatsappAccessTokenEnc(encryptionService.encrypt(accessToken));
       config.setWhatsappTokenSource(TOKEN_SOURCE_MANUAL);
     } else if (!hasAccessTokenConfigured(config)) {
-      throw new IllegalArgumentException("Token do WhatsApp e obrigatorio na primeira configuracao");
+      throw new IllegalArgumentException("Token do WhatsApp é obrigatório na primeira configuração");
     }
     // O registro e do NUMERO, e nao da configuracao. Trocar de numero sem limpar isto deixava a
     // flag marcada pelo numero ANTIGO: o registro automatico pulava (ele comeca por "ja
@@ -172,7 +172,7 @@ public class ServicoTenantWhatsapp {
 
       response.success = ok;
       response.whatsappEnabled = config.isWhatsappEnabled();
-      response.message = "Conexao validada com sucesso.";
+      response.message = "Conexão validada com sucesso.";
       registrarAuditoria(tenantId, "WHATSAPP_CONNECTION_TEST", tenantId.toString(), null, java.util.Map.of("success", ok), true);
       return response;
     } catch (IllegalArgumentException | IllegalStateException ex) {
@@ -189,7 +189,7 @@ public class ServicoTenantWhatsapp {
         whatsAppClient.fetchPhoneNumberDetails(trimToNull(request.accessToken), trimToNull(request.phoneNumberId));
     TenantWhatsAppDtos.ValidateResponse response = new TenantWhatsAppDtos.ValidateResponse();
     response.success = true;
-    response.message = "Conexao com a Meta validada com sucesso.";
+    response.message = "Conexão com a Meta validada com sucesso.";
     response.phoneNumberId = details.id;
     response.displayPhoneNumber = details.displayPhoneNumber;
     response.verifiedName = details.verifiedName;
@@ -371,7 +371,7 @@ public class ServicoTenantWhatsapp {
       config.setWhatsappEnabled(true);
       response.success = true;
       response.registrationPin = pin;
-      response.message = "Numero registrado no WhatsApp Cloud API. Guarde o PIN: sem ele o numero nao migra de provedor.";
+      response.message = "Número registrado no WhatsApp Cloud API. Guarde o PIN: sem ele o número não migra de provedor.";
 
       try {
         whatsAppClient.inscreverNoWebhook(config);
@@ -491,18 +491,18 @@ public class ServicoTenantWhatsapp {
    */
   private String mapTestConnectionError(Exception error) {
     String original = error == null || error.getMessage() == null ? "" : error.getMessage().trim();
-    String message = original.toLowerCase();
+    String message = br.com.phdigitalcode.azzo.agenda.pro.util.TextoSemAcento.de(original);
     if (message.contains("token do whatsapp nao configurado")) {
-      return "Token de acesso do WhatsApp nao configurado. Salve a configuracao antes de testar.";
+      return "Token de acesso do WhatsApp não configurado. Salve a configuração antes de testar.";
     }
     if (message.contains("phonenumberid do whatsapp nao configurado")) {
-      return "Phone Number ID do WhatsApp nao configurado. Revise os dados e tente novamente.";
+      return "Phone Number ID do WhatsApp não configurado. Revise os dados e tente novamente.";
     }
     if (message.contains("invalid oauth access token")
         || message.contains("token nao autorizado")
         || message.contains("token n")
         || message.contains("not authorized")) {
-      return "Falha ao validar a conexao com o WhatsApp. Revise o token de acesso informado e tente novamente.";
+      return "Falha ao validar a conexão com o WhatsApp. Revise o token de acesso informado e tente novamente.";
     }
     // 133010: o numero existe e esta verificado (ler os dados dele funciona), mas falta o registro
     // no Cloud API — um passo unico, feito no painel da Meta, que o Azzo nao executa.
@@ -517,7 +517,7 @@ public class ServicoTenantWhatsapp {
           original);
     }
     if (original.isBlank()) {
-      return "Falha ao validar a conexao com o WhatsApp. Revise as credenciais configuradas e tente novamente.";
+      return "Falha ao validar a conexão com o WhatsApp. Revise as credenciais configuradas e tente novamente.";
     }
     return "Falha ao enviar pelo WhatsApp. A Meta respondeu: " + original;
   }

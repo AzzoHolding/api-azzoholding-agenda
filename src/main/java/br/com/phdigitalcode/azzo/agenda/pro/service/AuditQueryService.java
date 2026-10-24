@@ -187,12 +187,12 @@ public class AuditQueryService {
     UUID uuid = UUID.fromString(id);
     AuditEvent event = auditEventRepository.findById(uuid)
         .filter(e -> tenantId.equals(e.getTenantId()))
-        .orElseThrow(() -> new IllegalArgumentException("Evento de auditoria nao encontrado"));
+        .orElseThrow(() -> new IllegalArgumentException("Evento de auditoria não encontrado"));
     if (AuditConstants.Module.SYSTEM.equalsIgnoreCase(event.getModule())) {
-      throw new IllegalArgumentException("Evento de auditoria nao encontrado");
+      throw new IllegalArgumentException("Evento de auditoria não encontrado");
     }
     if (event.getActorUserId() == null) {
-      throw new IllegalArgumentException("Evento de auditoria nao encontrado");
+      throw new IllegalArgumentException("Evento de auditoria não encontrado");
     }
     Map<UUID, String> actorNamesById = resolveActorNames(tenantId, List.of(event));
     AuditDtos.AuditEventDetail detail = toDetail(event, actorNamesById);
@@ -292,14 +292,14 @@ public class AuditQueryService {
    * igual a "nao encontrado" para nao confirmar que o id existe.
    */
   public ExportDownload downloadExport(UUID tenantId, String exportId) {
-    if (exportId == null || exportId.isBlank()) throw new IllegalArgumentException("exportId invalido");
+    if (exportId == null || exportId.isBlank()) throw new IllegalArgumentException("exportId inválido");
     ExportEntry entry = exportStore.get(exportId.trim());
     if (entry == null || Instant.now().isAfter(entry.expiresAt())) {
       exportStore.remove(exportId.trim());
-      throw new IllegalArgumentException("Export nao encontrado ou expirado");
+      throw new IllegalArgumentException("Export não encontrado ou expirado");
     }
     if (tenantId == null || !tenantId.equals(entry.tenantId())) {
-      throw new IllegalArgumentException("Export nao encontrado ou expirado");
+      throw new IllegalArgumentException("Export não encontrado ou expirado");
     }
     String contentType = "CSV".equals(entry.format())
         ? "text/csv; charset=UTF-8"

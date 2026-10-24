@@ -69,7 +69,7 @@ public class ServicoTenantTelegram {
     if (botToken != null) {
       config.setTelegramBotTokenEnc(encryptionService.encrypt(botToken));
     } else if (!hasBotTokenConfigured(config)) {
-      throw new IllegalArgumentException("Token do bot do Telegram e obrigatorio na primeira configuracao.");
+      throw new IllegalArgumentException("Token do bot do Telegram é obrigatório na primeira configuração.");
     }
 
     String webhookSecretToken = trimToNull(request.webhookSecretToken);
@@ -105,7 +105,7 @@ public class ServicoTenantTelegram {
       tenantTelegramConfigRepository.save(config);
       response.success = true;
       response.telegramEnabled = true;
-      response.message = "Conexao com o Telegram validada com sucesso.";
+      response.message = "Conexão com o Telegram validada com sucesso.";
       registrarAuditoria(tenantId, "TELEGRAM_CONNECTION_TEST", Map.of("success", true), true);
       return response;
     } catch (IllegalArgumentException | IllegalStateException ex) {
@@ -121,7 +121,7 @@ public class ServicoTenantTelegram {
     TelegramBotClient.BotProfile profile = telegramBotClient.getMe(trimToNull(request.botToken));
     TenantTelegramDtos.ValidateResponse response = new TenantTelegramDtos.ValidateResponse();
     response.success = true;
-    response.message = "Conexao com o Telegram validada com sucesso.";
+    response.message = "Conexão com o Telegram validada com sucesso.";
     response.botUsername = profile.username;
     response.botDisplayName = profile.displayName;
     return response;
@@ -257,7 +257,7 @@ public class ServicoTenantTelegram {
 
     String webhookUrl = buildWebhookUrl(config.getTenantId());
     if (webhookUrl == null) {
-      throw new IllegalStateException("URL publica base nao configurada para registrar webhook do Telegram.");
+      throw new IllegalStateException("URL pública base não configurada para registrar webhook do Telegram.");
     }
     ensureWebhookSecret(config);
     telegramBotClient.setWebhook(config, webhookUrl, decrypt(config.getTelegramWebhookSecretTokenEnc()));

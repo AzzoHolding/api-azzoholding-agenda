@@ -71,12 +71,12 @@ public class FiscalCertificateService {
 
   @Transactional
   public FiscalDtos.CertificateResponse salvar(FiscalDtos.CertificateUpsertRequest request) {
-    if (request == null) throw new IllegalArgumentException("Request obrigatorio");
+    if (request == null) throw new IllegalArgumentException("Request obrigatório");
     if (request.pfxBase64 == null || request.pfxBase64.isBlank()) {
-      throw new IllegalArgumentException("pfxBase64 obrigatorio");
+      throw new IllegalArgumentException("pfxBase64 obrigatório");
     }
     if (request.password == null || request.password.isBlank()) {
-      throw new IllegalArgumentException("password obrigatoria");
+      throw new IllegalArgumentException("password obrigatória");
     }
 
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
@@ -110,7 +110,7 @@ public class FiscalCertificateService {
     FiscalCertificateEntity entity =
         fiscalCertificateRepository
             .findByTenantAndId(tenantId, id)
-            .orElseThrow(() -> new ApiClientErrorException("Certificado fiscal nao encontrado.", 404));
+            .orElseThrow(() -> new ApiClientErrorException("Certificado fiscal não encontrado.", 404));
     String oldStatus = entity.getStatus();
     entity.setStatus("DELETED");
     auditar(
@@ -128,7 +128,7 @@ public class FiscalCertificateService {
     FiscalCertificateEntity entity =
         fiscalCertificateRepository
             .findByTenantAndId(tenantId, id)
-            .orElseThrow(() -> new ApiClientErrorException("Certificado fiscal nao encontrado.", 404));
+            .orElseThrow(() -> new ApiClientErrorException("Certificado fiscal não encontrado.", 404));
     fiscalCertificateRepository.deactivateAllActive(tenantId);
     String oldStatus = entity.getStatus();
     entity.setStatus("ACTIVE");
@@ -177,7 +177,7 @@ public class FiscalCertificateService {
     try {
       return UUID.fromString(value);
     } catch (Exception e) {
-      throw new IllegalArgumentException("id de certificado invalido");
+      throw new IllegalArgumentException("id de certificado inválido");
     }
   }
 
@@ -185,7 +185,7 @@ public class FiscalCertificateService {
     try {
       return Base64.getDecoder().decode(value);
     } catch (Exception e) {
-      throw new IllegalArgumentException("pfxBase64 invalido");
+      throw new IllegalArgumentException("pfxBase64 inválido");
     }
   }
 
@@ -220,12 +220,12 @@ public class FiscalCertificateService {
 
       Object key = keyStore.getKey(alias, password);
       if (!(key instanceof PrivateKey privateKey)) {
-        throw new IllegalArgumentException("Chave privada invalida no certificado PFX");
+        throw new IllegalArgumentException("Chave privada inválida no certificado PFX");
       }
 
       java.security.cert.Certificate certificate = keyStore.getCertificate(alias);
       if (!(certificate instanceof X509Certificate x509)) {
-        throw new IllegalArgumentException("Certificado do PFX nao e X509");
+        throw new IllegalArgumentException("Certificado do PFX não é X509");
       }
       return new KeyMaterial(privateKey, x509);
     } catch (IllegalArgumentException e) {

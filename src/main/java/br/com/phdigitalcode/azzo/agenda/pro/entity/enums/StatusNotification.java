@@ -22,6 +22,6 @@ public enum StatusNotification {
       if (item.name().equalsIgnoreCase(value.trim())) return item;
       if (item.description.equalsIgnoreCase(value.trim())) return item;
     }
-    throw new IllegalArgumentException("Status de notificacao invalido: " + value);
+    throw new IllegalArgumentException("Status de notificação inválido: " + value);
   }
 }

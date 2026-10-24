@@ -234,7 +234,7 @@ class AuthServiceImplRegistrarTest {
   @Test
   void recusaVersaoDeTermoInativaAntesDeCriarQualquerCoisa() {
     when(termsService.requireActiveVersion(AuditConstants.TermsDocumentType.TERMS_OF_USE, VERSAO))
-        .thenThrow(new IllegalArgumentException("Versao de termo desativada para aceite"));
+        .thenThrow(new IllegalArgumentException("Versão de termo desativada para aceite"));
 
     assertThatThrownBy(() -> service.registrar(request(CPF), "req-1", null))
         .isInstanceOf(IllegalArgumentException.class)

@@ -125,7 +125,7 @@ public class AsaasPendingPaymentCleanupService {
 
   private String requiredApiKey() {
     if (asaasApiKey == null || asaasApiKey.isBlank() || "__unset__".equals(asaasApiKey)) {
-      throw new IllegalStateException("ASAAS_API_KEY nao configurada");
+      throw new IllegalStateException("ASAAS_API_KEY não configurada");
     }
     return asaasApiKey.trim();
   }

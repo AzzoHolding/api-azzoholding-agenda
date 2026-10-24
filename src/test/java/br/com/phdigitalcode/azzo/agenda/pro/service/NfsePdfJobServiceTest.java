@@ -81,7 +81,7 @@ class NfsePdfJobServiceTest {
 
     assertThatThrownBy(() -> service.solicitarGeracao(invoiceId.toString()))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("NFS-e nao encontrada.");
+        .hasMessage("NFS-e não encontrada.");
   }
 
   @Test
@@ -99,7 +99,7 @@ class NfsePdfJobServiceTest {
 
     assertThatThrownBy(() -> service.solicitarGeracao(invoice.getId().toString()))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("PDF da NFS-e so pode ser gerado para documento autorizado/cancelado.");
+        .hasMessage("PDF da NFS-e só pode ser gerado para documento autorizado/cancelado.");
   }
 
   @Test
@@ -151,7 +151,7 @@ class NfsePdfJobServiceTest {
 
     assertThatThrownBy(() -> service.consultarJob(invoice.getId().toString(), jobId.toString()))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("Job PDF NFS-e nao encontrado.");
+        .hasMessage("Job PDF NFS-e não encontrado.");
   }
 
   @Test
@@ -165,7 +165,7 @@ class NfsePdfJobServiceTest {
 
     assertThatThrownBy(() -> service.consultarJob(invoice.getId().toString(), job.getId().toString()))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("Job PDF NFS-e nao encontrado para a invoice informada.");
+        .hasMessage("Job PDF NFS-e não encontrado para a invoice informada.");
   }
 
   @Test
@@ -209,7 +209,7 @@ class NfsePdfJobServiceTest {
 
     assertThatThrownBy(() -> service.baixarPdf(invoice.getId().toString(), job.getId().toString()))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("PDF da NFS-e ainda nao esta pronto para download.")
+        .hasMessage("PDF da NFS-e ainda não esta pronto para download.")
         .satisfies(ex -> assertThat(((ApiClientErrorException) ex).getStatus()).isEqualTo(409));
   }
 
@@ -225,7 +225,7 @@ class NfsePdfJobServiceTest {
 
     assertThatThrownBy(() -> service.baixarPdf(invoice.getId().toString(), job.getId().toString()))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("PDF da NFS-e ja foi baixado e removido.")
+        .hasMessage("PDF da NFS-e já foi baixado e removido.")
         .satisfies(ex -> assertThat(((ApiClientErrorException) ex).getStatus()).isEqualTo(410));
   }
 
@@ -242,7 +242,7 @@ class NfsePdfJobServiceTest {
 
     assertThatThrownBy(() -> service.baixarPdf(invoice.getId().toString(), job.getId().toString()))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("PDF da NFS-e expirado e removido apos 24 horas.");
+        .hasMessage("PDF da NFS-e expirado e removido após 24 horas.");
 
     verify(minioStorageService).removerArquivoFiscalDanfe("key-1", job.getTenantId());
     assertThat(job.getPdfStorageKey()).isNull();
@@ -302,7 +302,7 @@ class NfsePdfJobServiceTest {
 
     assertThatThrownBy(() -> service.baixarPdf(invoice.getId().toString(), job.getId().toString()))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("Arquivo PDF da NFS-e indisponivel para download.");
+        .hasMessage("Arquivo PDF da NFS-e indisponível para download.");
   }
 
   // ─── processarPendentes ─────────────────────────────────────────────────
