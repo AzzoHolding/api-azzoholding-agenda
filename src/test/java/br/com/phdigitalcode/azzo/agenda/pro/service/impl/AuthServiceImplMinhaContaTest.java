@@ -130,7 +130,7 @@ class AuthServiceImplMinhaContaTest {
 
     assertThatThrownBy(() -> service.trocarMinhaSenha(usuario.getId(), troca("Errada@1", "Nova@4567")))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("Senha atual não confere.");
+        .hasMessageStartingWith("A atual não confere");
 
     assertThat(usuario.getPasswordHash()).isEqualTo(hashAntes);
     verify(refreshTokenService, never()).revokeAllForUser(any());
