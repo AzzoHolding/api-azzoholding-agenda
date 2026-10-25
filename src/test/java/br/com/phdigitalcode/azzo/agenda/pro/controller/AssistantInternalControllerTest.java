@@ -206,7 +206,7 @@ class AssistantInternalControllerTest {
   @Test
   void obterHorariosFuncionamentoDelegaParaTenantOperationalSettingsService() {
     List<SalonDtos.BusinessHour> hours = List.of(new SalonDtos.BusinessHour());
-    when(tenantOperationalSettingsService.getBusinessHours(tenantId)).thenReturn(hours);
+    when(tenantOperationalSettingsService.getBusinessHoursDaTabela(tenantId)).thenReturn(hours);
 
     assertThat(controller.obterHorariosFuncionamento(tenantId.toString())).isSameAs(hours);
   }
