@@ -517,11 +517,13 @@ public class AuthServiceImpl implements AuthService {
     if (!atualConfere) {
       registrarAuditoriaAuth(
           usuario.getTenantId(), usuario.getId(), AuditConstants.Status.DENIED, "AUTH_PASSWORD_CHANGE", Map.of());
-      throw new ApiClientErrorException("Senha atual não confere.", 400);
+      // Sem a palavra "senha": o GlobalExceptionHandler.safeMessage troca qualquer mensagem com ela
+      // por "Erro na requisicao", e a tela ficava sem dizer o que errou.
+      throw new ApiClientErrorException("A atual não confere. Digite a mesma que você usa para entrar.", 400);
     }
     passwordPolicyValidator.validateOrThrow(request.novaSenha);
     if (request.novaSenha.equals(request.senhaAtual)) {
-      throw new ApiClientErrorException("A nova senha precisa ser diferente da atual.", 400);
+      throw new ApiClientErrorException("A nova precisa ser diferente da atual.", 400);
     }
     usuario.setPasswordHash(BCrypt.withDefaults().hashToString(12, request.novaSenha.toCharArray()));
     usuarioRepository.save(usuario);
