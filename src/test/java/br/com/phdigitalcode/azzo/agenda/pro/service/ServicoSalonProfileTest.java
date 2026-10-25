@@ -84,7 +84,7 @@ class ServicoSalonProfileTest {
     Tenant tenant = tenant(tenantId);
     when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
     when(tenantAddressRepository.findById(tenantId)).thenReturn(Optional.empty());
-    when(tenantOperationalSettingsService.getBusinessHours(tenantId)).thenReturn(List.of());
+    when(tenantOperationalSettingsService.getBusinessHoursDaTabela(tenantId)).thenReturn(List.of());
     when(tenantOperationalSettingsService.getSpecialClosureDates(tenantId)).thenReturn(List.of());
     when(publicBookingUrlService.buildPublicBookingUrl("salao-qa")).thenReturn("https://qa.local/agendar/salao-qa");
     String storageKey = "tenant/" + tenantId + "/salao/logo/logo.webp";
@@ -116,7 +116,7 @@ class ServicoSalonProfileTest {
     tenant.setLogo("https://cdn.externo/logo.png");
     when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
     when(tenantAddressRepository.findById(tenantId)).thenReturn(Optional.empty());
-    when(tenantOperationalSettingsService.getBusinessHours(tenantId)).thenReturn(List.of());
+    when(tenantOperationalSettingsService.getBusinessHoursDaTabela(tenantId)).thenReturn(List.of());
     when(tenantOperationalSettingsService.getSpecialClosureDates(tenantId)).thenReturn(List.of());
     when(publicBookingUrlService.buildPublicBookingUrl("salao-qa")).thenReturn("https://qa.local/agendar/salao-qa");
 
@@ -133,7 +133,7 @@ class ServicoSalonProfileTest {
     Tenant tenant = tenant(tenantId);
     when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
     when(tenantAddressRepository.findById(tenantId)).thenReturn(Optional.empty());
-    when(tenantOperationalSettingsService.getBusinessHours(tenantId)).thenReturn(List.of());
+    when(tenantOperationalSettingsService.getBusinessHoursDaTabela(tenantId)).thenReturn(List.of());
     SalonDtos.SpecialClosureDate item = new SalonDtos.SpecialClosureDate();
     item.date = "2026-12-25";
     item.reason = "Natal";
@@ -178,7 +178,7 @@ class ServicoSalonProfileTest {
     when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
     when(tenantAddressRepository.findById(tenantId)).thenReturn(Optional.empty());
     when(tenantAddressRepository.save(any(TenantAddress.class))).thenAnswer(inv -> inv.getArgument(0));
-    when(tenantOperationalSettingsService.getBusinessHours(tenantId)).thenReturn(List.of());
+    when(tenantOperationalSettingsService.getBusinessHoursDaTabela(tenantId)).thenReturn(List.of());
     when(tenantOperationalSettingsService.getSpecialClosureDates(tenantId)).thenReturn(List.of());
     when(publicBookingUrlService.buildPublicBookingUrl("novo-slug")).thenReturn("https://qa.local/agendar/novo-slug");
 
@@ -211,7 +211,7 @@ class ServicoSalonProfileTest {
     when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
     when(tenantAddressRepository.findById(tenantId)).thenReturn(Optional.of(existingAddress));
     when(tenantAddressRepository.save(any(TenantAddress.class))).thenAnswer(inv -> inv.getArgument(0));
-    when(tenantOperationalSettingsService.getBusinessHours(tenantId)).thenReturn(List.of());
+    when(tenantOperationalSettingsService.getBusinessHoursDaTabela(tenantId)).thenReturn(List.of());
     when(tenantOperationalSettingsService.getSpecialClosureDates(tenantId)).thenReturn(List.of());
     when(publicBookingUrlService.buildPublicBookingUrl(any())).thenReturn("https://qa.local/agendar/slug");
 
@@ -243,7 +243,7 @@ class ServicoSalonProfileTest {
     when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
     when(tenantAddressRepository.findById(tenantId)).thenReturn(Optional.empty());
     when(tenantAddressRepository.save(any(TenantAddress.class))).thenAnswer(inv -> inv.getArgument(0));
-    when(tenantOperationalSettingsService.getBusinessHours(tenantId)).thenReturn(List.of());
+    when(tenantOperationalSettingsService.getBusinessHoursDaTabela(tenantId)).thenReturn(List.of());
     when(tenantOperationalSettingsService.getSpecialClosureDates(tenantId)).thenReturn(List.of());
     when(publicBookingUrlService.buildPublicBookingUrl(any())).thenReturn("https://qa.local/agendar/salao-qa");
     return tenant;
@@ -320,7 +320,7 @@ class ServicoSalonProfileTest {
     Tenant tenant = tenant(tenantId);
     tenant.setLogo("logokey.webp");
     when(tenantRepository.findBySlug("salao-qa")).thenReturn(Optional.of(tenant));
-    when(tenantOperationalSettingsService.getBusinessHours(tenantId)).thenReturn(List.of());
+    when(tenantOperationalSettingsService.getBusinessHoursDaTabela(tenantId)).thenReturn(List.of());
     when(publicBookingUrlService.buildPublicBookingUrl("salao-qa")).thenReturn("https://qa.local/agendar/salao-qa");
     when(minioStorageService.gerarUrlAssinadaLeitura("logokey.webp", tenantId))
         .thenReturn("https://cdn.qa.local/logokey.webp");
@@ -349,7 +349,7 @@ class ServicoSalonProfileTest {
     tenant.setLogo("logokey.webp");
     when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
     when(tenantAddressRepository.findById(tenantId)).thenReturn(Optional.empty());
-    when(tenantOperationalSettingsService.getBusinessHours(tenantId)).thenReturn(List.of());
+    when(tenantOperationalSettingsService.getBusinessHoursDaTabela(tenantId)).thenReturn(List.of());
     when(tenantOperationalSettingsService.getSpecialClosureDates(tenantId)).thenReturn(List.of());
     when(publicBookingUrlService.buildPublicBookingUrl("salao-qa")).thenReturn("https://qa.local/agendar/salao-qa");
     when(minioStorageService.gerarUrlAssinadaLeitura("logokey.webp", tenantId))

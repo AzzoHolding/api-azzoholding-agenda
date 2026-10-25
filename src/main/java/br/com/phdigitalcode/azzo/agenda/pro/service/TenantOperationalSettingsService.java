@@ -655,6 +655,34 @@ public class TenantOperationalSettingsService {
   // Business Hours — tabela relacional (V75/V76)
   // ============================================================
 
+  /**
+   * O expediente da tabela {@code tenant_business_hours} (a que a tela de Horarios grava), no formato
+   * antigo ({@code "Domingo"}, {@code "09:00"}), de segunda a domingo. O assistente e o perfil do salao
+   * liam o JSON antigo ({@link #getBusinessHours}), que a tela nao atualiza mais: o dono abria o domingo
+   * e o assistente continuava dizendo que o salao fechava (teste do "hoje", 25/10/2026).
+   */
+  @Transactional
+  public List<SalonDtos.BusinessHour> getBusinessHoursDaTabela(UUID tenantId) {
+    return getBusinessHoursFromTable(tenantId).stream()
+        .sorted(java.util.Comparator.comparingInt(r -> diaDaSemana(r.dayOfWeek).getValue()))
+        .map(r -> defaultHour(
+            fromBusinessHoursKey(r.dayOfWeek == null ? "monday" : r.dayOfWeek.trim().toLowerCase(Locale.ROOT)),
+            r.enabled, hhmm(r.openTime), hhmm(r.closeTime)))
+        .toList();
+  }
+
+  private static DayOfWeek diaDaSemana(String dia) {
+    try {
+      return DayOfWeek.valueOf(dia.trim().toUpperCase(Locale.ROOT));
+    } catch (RuntimeException e) {
+      return DayOfWeek.MONDAY;
+    }
+  }
+
+  private static String hhmm(String hora) {
+    return hora != null && hora.length() >= 5 ? hora.substring(0, 5) : hora;
+  }
+
   @Transactional
   public List<SettingsDtos.BusinessHoursItemResponse> getBusinessHoursFromTable(UUID tenantId) {
     List<TenantBusinessHours> rows =
