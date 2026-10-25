@@ -758,6 +758,51 @@ class WhatsAppWebhookControllerTest {
     assertThat(response.status).isEqualTo("OK");
     assertThat(response.success).isEqualTo(1);
     verify(assistantApiClient, never()).processarMensagem(any(), any(), any(), any());
+    // Teste de midia de 25/10/2026: o cliente ficava sem resposta nenhuma.
+    verify(whatsAppClient).sendMessage(any(), eq("5511988887777"), eq(WhatsAppWebhookController.RESPOSTA_A_MIDIA));
+  }
+
+  @Test
+  void audioEmModoManualNaoRecebeRespostaAutomatica() {
+    WhatsAppWebhookController controller = controllerWithoutSecret();
+    String payload = "{\"entry\":[{\"changes\":[{\"value\":{"
+        + "\"metadata\":{\"phone_number_id\":\"" + phoneNumberId + "\"},"
+        + "\"messages\":[{\"id\":\"wamid-audio\",\"from\":\"5511988887777\",\"type\":\"audio\"}]"
+        + "}}]}]}";
+    ChatService.InboundProcessingResult inbound = new ChatService.InboundProcessingResult();
+    inbound.conversation = conversation();
+    inbound.client = cliente();
+    inbound.manualModeEnabled = true;
+    when(chatService.processInboundWhatsAppMessage(eq(tenantId), eq("5511988887777"), eq("[Audio recebido]"), any(), any()))
+        .thenReturn(inbound);
+
+    WhatsAppWebhookController.WebhookResponse response = controller.receive(null, payload);
+
+    assertThat(response.success).isEqualTo(1);
+    verify(whatsAppClient, never()).sendMessage(any(), any(), any());
+  }
+
+  @Test
+  void botaoTocadoVaiAoAssistenteComoTexto() {
+    WhatsAppWebhookController controller = controllerWithoutSecret();
+    String payload = "{\"entry\":[{\"changes\":[{\"value\":{"
+        + "\"metadata\":{\"phone_number_id\":\"" + phoneNumberId + "\"},"
+        + "\"messages\":[{\"id\":\"wamid-botao\",\"from\":\"5511988887777\",\"type\":\"button\","
+        + "\"button\":{\"text\":\"Confirmar\",\"payload\":\"CONFIRMAR\"}}]}}]}]}";
+    ChatService.InboundProcessingResult inbound = new ChatService.InboundProcessingResult();
+    inbound.conversation = conversation();
+    inbound.client = cliente();
+    when(chatService.processInboundWhatsAppMessage(eq(tenantId), eq("5511988887777"), eq("Confirmar"), any(), any()))
+        .thenReturn(inbound);
+    when(assistantApiClient.processarMensagem(any(), any(), any(), any(AssistantMessageRequest.class)))
+        .thenReturn(new AssistantMessageResponse("Presença confirmada!"));
+
+    controller.receive(null, payload);
+
+    org.mockito.ArgumentCaptor<AssistantMessageRequest> pedido = org.mockito.ArgumentCaptor.forClass(AssistantMessageRequest.class);
+    verify(assistantApiClient).processarMensagem(any(), eq("5511988887777"), any(), pedido.capture());
+    assertThat(pedido.getValue().message).isEqualTo("Confirmar");
+    verify(whatsAppClient).sendMessage(any(), eq("5511988887777"), eq("Presença confirmada!"));
   }
 
   // ---- POST receive: opt-out -----------------------------------------------
