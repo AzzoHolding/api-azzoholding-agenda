@@ -13,3 +13,7 @@ key.pem
 .idea/
 *.iml
 .vscode/
+
+# Logs de queda da JVM (falta de memoria na maquina local)
+hs_err_pid*.log
+replay_pid*.log
