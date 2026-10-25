@@ -462,6 +462,27 @@ class WhatsAppWebhookControllerTest {
         anyString(), eq(StatusNotification.FAILED), eq("token vencido"), eq((java.time.Instant) null), eq(1800L));
   }
 
+  /** Chave so para teste de carga (25/10/2026): com ela ligada, a trava nao impede o assistente. */
+  @Test
+  void chaveDeTesteIgnoraATravaEChamaOAssistente() {
+    WhatsAppWebhookController controller = controllerWithoutSecret();
+    br.com.phdigitalcode.azzo.agenda.pro.service.SaudeDoEnvioWhatsApp saude =
+        mock(br.com.phdigitalcode.azzo.agenda.pro.service.SaudeDoEnvioWhatsApp.class);
+    controller.setSaudeDoEnvio(saude);
+    controller.ignorarSaudeDoEnvio = true;
+    ChatService.InboundProcessingResult inbound = new ChatService.InboundProcessingResult();
+    inbound.conversation = conversation();
+    inbound.client = cliente();
+    when(chatService.processInboundWhatsAppMessage(any(), any(), any(), any(), any())).thenReturn(inbound);
+    when(assistantApiClient.processarMensagem(any(), any(), any(), any(AssistantMessageRequest.class)))
+        .thenReturn(new AssistantMessageResponse("ok"));
+
+    controller.receive(null, textMessagePayload("wamid-carga", "5511988887777", "ola"));
+
+    verify(saude, never()).verificar(any());
+    verify(assistantApiClient).processarMensagem(any(), any(), any(), any(AssistantMessageRequest.class));
+  }
+
   @Test
   void falhaDoSalaoNoEnvioDepoisDaIaMarcaESemTentarOFallback() {
     WhatsAppWebhookController controller = controllerWithoutSecret();

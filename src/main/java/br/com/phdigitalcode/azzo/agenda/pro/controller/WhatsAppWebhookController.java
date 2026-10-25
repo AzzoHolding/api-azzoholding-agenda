@@ -101,6 +101,15 @@ public class WhatsAppWebhookController {
   private final String metaAppSecret;
   /** Opcional (setter): os testes que montam o controller na mao seguem sem a checagem. */
   private br.com.phdigitalcode.azzo.agenda.pro.service.SaudeDoEnvioWhatsApp saudeDoEnvio;
+
+  /**
+   * SO PARA TESTE DE CARGA: com true, o assistente e chamado mesmo com o envio do WhatsApp marcado
+   * como indisponivel. Sem isto, depois da primeira falha da Meta o assistente ficava 10 minutos sem
+   * ser chamado e a carga pelo webhook nao media nada (25/10/2026). Nasce desligada; ligar so durante
+   * o teste (WHATSAPP_IGNORAR_SAUDE_DO_ENVIO no .env) e desligar no fim.
+   */
+  @org.springframework.beans.factory.annotation.Value("${app.whatsapp.ignorar-saude-do-envio:false}")
+  boolean ignorarSaudeDoEnvio;
   private final boolean debugEnabled;
   private final String activeProfile;
 
@@ -459,7 +468,7 @@ public class WhatsAppWebhookController {
       // 17/10/2026: antes de gastar tokens de IA, o WhatsApp deste salao consegue responder? Se o
       // envio esta indisponivel (token vencido, numero desconectado...), a resposta nunca chegaria.
       // A mensagem do cliente ja ficou registrada no chat acima; o salao recebe o alerta.
-      if (saudeDoEnvio != null) {
+      if (saudeDoEnvio != null && !ignorarSaudeDoEnvio) {
         var situacao = saudeDoEnvio.verificar(config);
         if (!situacao.podeEnviar()) {
           LOG.warn(
