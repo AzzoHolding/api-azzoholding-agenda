@@ -46,9 +46,13 @@ public class TenantReactivationConfigEntity {
   @Column(name = "attempt_3_delay_days", nullable = false)
   private int attempt3DelayDays = 7;
 
+  // Grava o LocalTime direto pelo driver, sem o hibernate.jdbc.time_zone=UTC: o horario ia com +3h
+  // (09:00 virava 12:00; 'fecha 23:00' virava 02:00 e atravessava a meia-noite). V151 corrige os dados.
+  @org.hibernate.annotations.JdbcType(org.hibernate.type.descriptor.jdbc.LocalTimeJdbcType.class)
   @Column(name = "send_window_start", nullable = false)
   private LocalTime sendWindowStart = LocalTime.of(8, 0);
 
+  @org.hibernate.annotations.JdbcType(org.hibernate.type.descriptor.jdbc.LocalTimeJdbcType.class)
   @Column(name = "send_window_end", nullable = false)
   private LocalTime sendWindowEnd = LocalTime.of(20, 0);
 
