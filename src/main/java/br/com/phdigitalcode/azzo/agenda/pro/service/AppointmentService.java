@@ -82,8 +82,23 @@ public class AppointmentService {
       LocalDate date,
       int serviceDurationMinutes,
       int bufferMinutes) {
+    return findAvailableSlots(tenantId, professionalId, date, serviceDurationMinutes, bufferMinutes, null);
+  }
+
+  /**
+   * {@code ignorarAgendamentoId}: na edicao, o proprio agendamento nao ocupa o horario — sem isso a
+   * lista nao mostrava o horario atual nem os vizinhos (achado do teste de telas, 25/10/2026).
+   */
+  public List<TimeSlotResponse> findAvailableSlots(
+      UUID tenantId,
+      UUID professionalId,
+      LocalDate date,
+      int serviceDurationMinutes,
+      int bufferMinutes,
+      UUID ignorarAgendamentoId) {
     SchedulingContext context =
-        buildSchedulingContext(tenantId, professionalId, date, serviceDurationMinutes, bufferMinutes);
+        buildSchedulingContext(
+            tenantId, professionalId, date, serviceDurationMinutes, bufferMinutes, ignorarAgendamentoId);
 
     List<TimeSlotResponse> slots = new ArrayList<>();
     for (TimeRange freeRange : context.freeRanges()) {
@@ -123,12 +138,27 @@ public class AppointmentService {
       int serviceDurationMinutes,
       int bufferMinutes,
       boolean includeConflictSlots) {
+    return findManualSlots(
+        tenantId, professionalId, date, serviceDurationMinutes, bufferMinutes, includeConflictSlots, null);
+  }
+
+  @Transactional(propagation = Propagation.SUPPORTS, readOnly = true)
+  public List<ManualTimeSlotResponse> findManualSlots(
+      UUID tenantId,
+      UUID professionalId,
+      LocalDate date,
+      int serviceDurationMinutes,
+      int bufferMinutes,
+      boolean includeConflictSlots,
+      UUID ignorarAgendamentoId) {
     SchedulingContext context =
-        buildSchedulingContext(tenantId, professionalId, date, serviceDurationMinutes, bufferMinutes);
+        buildSchedulingContext(
+            tenantId, professionalId, date, serviceDurationMinutes, bufferMinutes, ignorarAgendamentoId);
     Map<String, ManualTimeSlotResponse> slots = new LinkedHashMap<>();
 
     for (TimeSlotResponse availableSlot :
-        findAvailableSlots(tenantId, professionalId, date, serviceDurationMinutes, bufferMinutes)) {
+        findAvailableSlots(
+            tenantId, professionalId, date, serviceDurationMinutes, bufferMinutes, ignorarAgendamentoId)) {
       ManualTimeSlotResponse manualSlot = new ManualTimeSlotResponse();
       manualSlot.startTime = availableSlot.startTime;
       manualSlot.endTime = availableSlot.endTime;
@@ -183,7 +213,8 @@ public class AppointmentService {
       UUID professionalId,
       LocalDate date,
       int serviceDurationMinutes,
-      int bufferMinutes) {
+      int bufferMinutes,
+      UUID ignorarAgendamentoId) {
     validarEntrada(tenantId, professionalId, date, serviceDurationMinutes, bufferMinutes);
     if (specialClosureService.isClosedAt(tenantId, professionalId, date, null, null)) {
       return emptyContext(tenantId, serviceDurationMinutes, bufferMinutes);
@@ -207,6 +238,10 @@ public class AppointmentService {
     }
 
     List<Agendamento> appointments = loadActiveAppointments(tenantId, professionalId, date);
+    if (ignorarAgendamentoId != null) {
+      appointments =
+          appointments.stream().filter(a -> !ignorarAgendamentoId.equals(a.getId())).toList();
+    }
     List<TimeRange> ocupados = new ArrayList<>(converterParaFaixasOcupadas(appointments));
     // Fechamento de parte do dia (Configuracoes > Horarios > Dias de inatividade) tambem ocupa.
     for (java.time.LocalTime[] trecho : specialClosureService.trechosFechados(tenantId, professionalId, date)) {
