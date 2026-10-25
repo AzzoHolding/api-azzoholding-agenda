@@ -56,9 +56,13 @@ public class TenantSpecialClosureDate {
   @Column(name = "all_day", nullable = false)
   private boolean allDay = true;
 
+  // Grava o LocalTime direto pelo driver, sem o hibernate.jdbc.time_zone=UTC: o horario ia com +3h
+  // (09:00 virava 12:00; 'fecha 23:00' virava 02:00 e atravessava a meia-noite). V151 corrige os dados.
+  @org.hibernate.annotations.JdbcType(org.hibernate.type.descriptor.jdbc.LocalTimeJdbcType.class)
   @Column(name = "start_time")
   private LocalTime startTime;
 
+  @org.hibernate.annotations.JdbcType(org.hibernate.type.descriptor.jdbc.LocalTimeJdbcType.class)
   @Column(name = "end_time")
   private LocalTime endTime;
 
