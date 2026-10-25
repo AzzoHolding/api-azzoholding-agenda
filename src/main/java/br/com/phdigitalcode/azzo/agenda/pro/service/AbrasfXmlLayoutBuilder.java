@@ -156,7 +156,7 @@ public class AbrasfXmlLayoutBuilder extends AbstractNfseXmlLayoutBuilder {
     String cnpj = digitsOnly(tax != null ? tax.getIssuerCnpj() : null);
     String im = digitsOnly(tax != null ? tax.getIssuerIm() : null);
     if (cnpj.length() != 14) {
-      throw new IllegalArgumentException("NFSE_XML_PRESTADOR_CNPJ_INVÁLIDO");
+      throw new IllegalArgumentException("NFSE_XML_PRESTADOR_CNPJ_INVALIDO");
     }
     if (im.isBlank()) {
       throw new IllegalArgumentException("NFSE_XML_PRESTADOR_IM_AUSENTE");

@@ -157,7 +157,7 @@ class AbrasfDirectProviderAdapterUnitTest {
 
     assertThatThrownBy(() -> adapter.queryStatus(invoice))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("NFSE_XML_PRESTADOR_CNPJ_INVÁLIDO");
+        .hasMessage("NFSE_XML_PRESTADOR_CNPJ_INVALIDO");
   }
 
   @Test

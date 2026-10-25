@@ -128,7 +128,7 @@ public class NfseConfigService {
       throw new IllegalArgumentException("NFSE_CONFIG_MISSING_ALIQUOTA_ISS");
     }
     if (isBlank(request.itemListaServicoPadrao)) {
-      throw new IllegalArgumentException("NFSE_CONFIG_MISSING_ITEM_LISTA_SERVIÇO");
+      throw new IllegalArgumentException("NFSE_CONFIG_MISSING_ITEM_LISTA_SERVICO");
     }
     String provedorEfetivo =
         isBlank(request.provedor)

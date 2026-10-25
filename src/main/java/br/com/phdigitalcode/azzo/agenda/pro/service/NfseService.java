@@ -664,8 +664,8 @@ public class NfseService {
     if (isBlank(municipioCodigoIbge)) throw new IllegalArgumentException("NFSE_CONFIG_MISSING_MUNICIPIO");
     if (isBlank(provedor)) throw new IllegalArgumentException("NFSE_CONFIG_MISSING_PROVEDOR");
     if (isBlank(request.serieRps)) throw new IllegalArgumentException("NFSE_CONFIG_MISSING_SERIE_RPS");
-    if (isBlank(request.naturezaOperacao)) throw new IllegalArgumentException("NFSE_CONFIG_MISSING_NATUREZA_OPERAÇÃO");
-    if (isBlank(request.itemListaServico)) throw new IllegalArgumentException("NFSE_CONFIG_MISSING_ITEM_LISTA_SERVIÇO");
+    if (isBlank(request.naturezaOperacao)) throw new IllegalArgumentException("NFSE_CONFIG_MISSING_NATUREZA_OPERACAO");
+    if (isBlank(request.itemListaServico)) throw new IllegalArgumentException("NFSE_CONFIG_MISSING_ITEM_LISTA_SERVICO");
     if (request.aliquotaIss == null) throw new IllegalArgumentException("NFSE_CONFIG_MISSING_ALIQUOTA_ISS");
     if (request.items == null || request.items.isEmpty()) throw new IllegalArgumentException("Ao menos um item é obrigatório.");
     if ("SEFIN_NACIONAL".equalsIgnoreCase(provedor) && isBlank(request.nationalTaxCode)) {

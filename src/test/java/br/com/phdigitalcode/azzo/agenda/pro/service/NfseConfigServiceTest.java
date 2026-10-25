@@ -200,7 +200,7 @@ class NfseConfigServiceTest {
     semItemLista.itemListaServicoPadrao = null;
     assertThatThrownBy(() -> service.salvarConfig(semItemLista))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("NFSE_CONFIG_MISSING_ITEM_LISTA_SERVIÇO");
+        .hasMessage("NFSE_CONFIG_MISSING_ITEM_LISTA_SERVICO");
   }
 
   /**
