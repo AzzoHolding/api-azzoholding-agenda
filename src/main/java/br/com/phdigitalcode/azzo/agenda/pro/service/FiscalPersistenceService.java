@@ -42,6 +42,17 @@ import br.com.phdigitalcode.azzo.agenda.pro.util.DataUtil;
 @Service
 public class FiscalPersistenceService {
 
+  private static final java.util.Map<String, String> CODIGO_IBGE_DA_UF = java.util.Map.ofEntries(
+      java.util.Map.entry("RO", "11"), java.util.Map.entry("AC", "12"), java.util.Map.entry("AM", "13"),
+      java.util.Map.entry("RR", "14"), java.util.Map.entry("PA", "15"), java.util.Map.entry("AP", "16"),
+      java.util.Map.entry("TO", "17"), java.util.Map.entry("MA", "21"), java.util.Map.entry("PI", "22"),
+      java.util.Map.entry("CE", "23"), java.util.Map.entry("RN", "24"), java.util.Map.entry("PB", "25"),
+      java.util.Map.entry("PE", "26"), java.util.Map.entry("AL", "27"), java.util.Map.entry("SE", "28"),
+      java.util.Map.entry("BA", "29"), java.util.Map.entry("MG", "31"), java.util.Map.entry("ES", "32"),
+      java.util.Map.entry("RJ", "33"), java.util.Map.entry("SP", "35"), java.util.Map.entry("PR", "41"),
+      java.util.Map.entry("SC", "42"), java.util.Map.entry("RS", "43"), java.util.Map.entry("MS", "50"),
+      java.util.Map.entry("MT", "51"), java.util.Map.entry("GO", "52"), java.util.Map.entry("DF", "53"));
+
   private final FiscalTaxConfigRepository fiscalTaxConfigRepository;
   private final FiscalInvoiceRepository fiscalInvoiceRepository;
   private final FiscalApuracaoMensalRepository fiscalApuracaoMensalRepository;
@@ -62,6 +73,39 @@ public class FiscalPersistenceService {
     this.fiscalSequenceService = fiscalSequenceService;
     this.encryptionService = encryptionService;
     this.objectMapper = objectMapper;
+  }
+
+  /** A config gravada do salao, ou {@code null} quando ainda nao ha. */
+  @Transactional(readOnly = true)
+  public FiscalDtos.TaxConfig lerTaxConfig(UUID tenantId) {
+    if (tenantId == null) return null;
+    FiscalTaxConfigEntity entity = fiscalTaxConfigRepository.findByTenantId(tenantId).orElse(null);
+    if (entity == null) return null;
+    FiscalDtos.TaxConfig dto = new FiscalDtos.TaxConfig();
+    dto.regime = entity.getRegime();
+    dto.icmsRate = entity.getIcmsRate();
+    dto.pisRate = entity.getPisRate();
+    dto.cofinsRate = entity.getCofinsRate();
+    dto.issuerRazaoSocial = entity.getIssuerRazaoSocial();
+    dto.issuerNomeFantasia = entity.getIssuerNomeFantasia();
+    dto.issuerCnpj = entity.getIssuerCnpj();
+    dto.issuerIe = entity.getIssuerIe();
+    dto.issuerIm = entity.getIssuerIm();
+    dto.issuerPhone = entity.getIssuerPhone();
+    dto.issuerEmail = entity.getIssuerEmail();
+    dto.issuerStreet = entity.getIssuerStreet();
+    dto.issuerNumber = entity.getIssuerNumber();
+    dto.issuerComplement = entity.getIssuerComplement();
+    dto.issuerNeighborhood = entity.getIssuerNeighborhood();
+    dto.issuerCity = entity.getIssuerCity();
+    dto.issuerState = entity.getIssuerState();
+    dto.issuerZipCode = entity.getIssuerZipCode();
+    dto.issuerUfCode = entity.getIssuerUfCode();
+    dto.nfceCscHomologation = entity.getNfceCscHomologation();
+    dto.nfceCscIdTokenHomologation = entity.getNfceCscIdTokenHomologation();
+    dto.nfceCscProduction = entity.getNfceCscProduction();
+    dto.nfceCscIdTokenProduction = entity.getNfceCscIdTokenProduction();
+    return dto;
   }
 
   @Transactional
@@ -90,9 +134,17 @@ public class FiscalPersistenceService {
     entity.setIssuerComplement(dto.issuerComplement);
     entity.setIssuerNeighborhood(dto.issuerNeighborhood);
     entity.setIssuerCity(dto.issuerCity);
-    entity.setIssuerState(dto.issuerState);
+    String uf = dto.issuerState == null || dto.issuerState.isBlank()
+        ? null
+        : dto.issuerState.trim().toUpperCase(java.util.Locale.ROOT);
+    if (uf != null && !CODIGO_IBGE_DA_UF.containsKey(uf)) {
+      throw new IllegalArgumentException("UF do emitente inválida.");
+    }
+    entity.setIssuerState(uf);
     entity.setIssuerZipCode(dto.issuerZipCode);
-    entity.setIssuerUfCode(dto.issuerUfCode);
+    // O codigo sai da UF: a config padrao nasce com "35" (SP) e a tela devolvia esse valor, entao
+    // um salao do RJ ficava com o codigo de SP na chave de acesso (teste de telas, 25/10/2026).
+    entity.setIssuerUfCode(uf != null ? CODIGO_IBGE_DA_UF.get(uf) : dto.issuerUfCode);
     entity.setNfceCscHomologation(dto.nfceCscHomologation);
     entity.setNfceCscIdTokenHomologation(dto.nfceCscIdTokenHomologation);
     entity.setNfceCscProduction(dto.nfceCscProduction);

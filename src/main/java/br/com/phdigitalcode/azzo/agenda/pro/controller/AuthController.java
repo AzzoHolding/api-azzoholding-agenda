@@ -14,10 +14,13 @@ import org.springframework.web.bind.annotation.CookieValue;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import br.com.phdigitalcode.azzo.agenda.pro.dto.request.AtualizarMeuPerfilRequest;
+import br.com.phdigitalcode.azzo.agenda.pro.dto.request.TrocarMinhaSenhaRequest;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.request.ForgotPasswordRequest;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.request.LoginRequest;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.request.RefreshTokenRequest;
@@ -167,13 +170,34 @@ public class AuthController {
 
   @GetMapping("/me")
   public UsuarioResponse me() {
+    return usuarioRepository.findById(usuarioLogado())
+        .map(usuarioMapper::toResponse)
+        .orElseThrow(() -> new ApiClientErrorException("Usuário não encontrado", 401));
+  }
+
+  /** Tela Perfil ({@code /perfil-usuario}): o menu da conta linkava a tela e ela nao existia (25/10/2026). */
+  @PutMapping("/me")
+  public UsuarioResponse atualizarMe(@Valid @RequestBody AtualizarMeuPerfilRequest request) {
+    return authService.atualizarMeuPerfil(usuarioLogado(), request);
+  }
+
+  @PostMapping("/change-password")
+  public ResponseEntity<GenericMessageResponse> trocarSenha(@Valid @RequestBody TrocarMinhaSenhaRequest request) {
+    GenericMessageResponse resposta = authService.trocarMinhaSenha(usuarioLogado(), request);
+    // As sessoes foram derrubadas no banco; os cookies desta aba vao junto, e a tela manda ao login.
+    return ResponseEntity.ok()
+        .header(HttpHeaders.SET_COOKIE, authCookieService.clearAccessTokenCookie().toString())
+        .header(HttpHeaders.SET_COOKIE, authCookieService.clearRefreshTokenCookie().toString())
+        .header(HttpHeaders.SET_COOKIE, authCookieService.clearSessionHintCookie().toString())
+        .body(resposta);
+  }
+
+  private java.util.UUID usuarioLogado() {
     Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
     if (!(authentication != null && authentication.getPrincipal() instanceof JwtPrincipal jwtPrincipal)) {
       throw new ApiClientErrorException("Não autenticado", 401);
     }
-    return usuarioRepository.findById(jwtPrincipal.userId())
-        .map(usuarioMapper::toResponse)
-        .orElseThrow(() -> new ApiClientErrorException("Usuário não encontrado", 401));
+    return jwtPrincipal.userId();
   }
 
   private String firstIp(String forwardedFor) {

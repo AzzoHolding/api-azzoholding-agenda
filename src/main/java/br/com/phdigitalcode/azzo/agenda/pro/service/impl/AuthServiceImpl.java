@@ -21,11 +21,14 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import at.favre.lib.crypto.bcrypt.BCrypt;
+import br.com.phdigitalcode.azzo.agenda.pro.dto.request.AtualizarMeuPerfilRequest;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.request.LoginRequest;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.request.RegisterRequest;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.request.ResetPasswordRequest;
+import br.com.phdigitalcode.azzo.agenda.pro.dto.request.TrocarMinhaSenhaRequest;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.response.AuthResponse;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.response.GenericMessageResponse;
+import br.com.phdigitalcode.azzo.agenda.pro.dto.response.UsuarioResponse;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.CheckoutIntent;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.CheckoutOrder;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.LicenseEvent;
@@ -480,6 +483,53 @@ public class AuthServiceImpl implements AuthService {
         "Reset de senha concluido", "tenantId", usuario.getTenantId(), "userId", usuario.getId(), "email", usuario.getEmail()));
 
     return new GenericMessageResponse("Senha redefinida com sucesso.");
+  }
+
+  @Override
+  @Transactional
+  public UsuarioResponse atualizarMeuPerfil(UUID userId, AtualizarMeuPerfilRequest request) {
+    Usuario usuario = usuarioRepository.findById(userId)
+        .orElseThrow(() -> new ApiClientErrorException("Usuário não encontrado", 401));
+    String nomeAntes = usuario.getName();
+    String telefoneAntes = usuario.getPhone();
+    usuario.setName(request.name.trim());
+    usuario.setPhone(
+        br.com.phdigitalcode.azzo.agenda.pro.util.TelefoneBr.normalizarSeMudou(request.phone, usuario.getPhone()));
+    usuarioRepository.save(usuario);
+    registrarAuditoriaAuth(
+        usuario.getTenantId(),
+        usuario.getId(),
+        AuditConstants.Status.SUCCESS,
+        "AUTH_PROFILE_UPDATED",
+        Map.of(
+            "nomeMudou", !java.util.Objects.equals(nomeAntes, usuario.getName()),
+            "telefoneMudou", !java.util.Objects.equals(telefoneAntes, usuario.getPhone())));
+    return usuarioMapper.toResponse(usuario);
+  }
+
+  @Override
+  @Transactional
+  public GenericMessageResponse trocarMinhaSenha(UUID userId, TrocarMinhaSenhaRequest request) {
+    Usuario usuario = usuarioRepository.findById(userId)
+        .orElseThrow(() -> new ApiClientErrorException("Usuário não encontrado", 401));
+    boolean atualConfere = usuario.getPasswordHash() != null
+        && BCrypt.verifyer().verify(request.senhaAtual.toCharArray(), usuario.getPasswordHash()).verified;
+    if (!atualConfere) {
+      registrarAuditoriaAuth(
+          usuario.getTenantId(), usuario.getId(), AuditConstants.Status.DENIED, "AUTH_PASSWORD_CHANGE", Map.of());
+      throw new ApiClientErrorException("Senha atual não confere.", 400);
+    }
+    passwordPolicyValidator.validateOrThrow(request.novaSenha);
+    if (request.novaSenha.equals(request.senhaAtual)) {
+      throw new ApiClientErrorException("A nova senha precisa ser diferente da atual.", 400);
+    }
+    usuario.setPasswordHash(BCrypt.withDefaults().hashToString(12, request.novaSenha.toCharArray()));
+    usuarioRepository.save(usuario);
+    passwordResetTokenRepository.markAllActiveAsUsedByUser(usuario.getId(), Instant.now());
+    refreshTokenService.revokeAllForUser(usuario.getId());
+    registrarAuditoriaAuth(
+        usuario.getTenantId(), usuario.getId(), AuditConstants.Status.SUCCESS, "AUTH_PASSWORD_CHANGE", Map.of());
+    return new GenericMessageResponse("Senha trocada. Entre de novo com a nova senha.");
   }
 
   /**
