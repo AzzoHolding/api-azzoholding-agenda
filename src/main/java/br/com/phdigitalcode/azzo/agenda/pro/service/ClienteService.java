@@ -289,7 +289,11 @@ public class ClienteService {
     c.setName(normalizeText(req.name));
     c.setEmail(normalizeEmail(req.email));
     c.setPhone(br.com.phdigitalcode.azzo.agenda.pro.util.TelefoneBr.normalizarSeMudou(req.phone, c.getPhone()));
-    c.setBirthDate(DataUtil.parseDataISO(req.birthDate));
+    java.time.LocalDate nascimento = DataUtil.parseDataISO(req.birthDate);
+    if (nascimento != null && nascimento.isAfter(java.time.LocalDate.now(java.time.ZoneId.of("America/Sao_Paulo")))) {
+      throw new IllegalArgumentException("Data de nascimento no futuro.");
+    }
+    c.setBirthDate(nascimento);
     c.setNotes(normalizeText(req.notes));
     c.setCpfCnpj(normalizeDigits(req.cpfCnpj));
     c.setClientType((req.clientType != null && req.clientType.equals("PJ")) ? "PJ" : "PF");

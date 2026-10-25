@@ -151,6 +151,28 @@ class AppointmentServiceTest {
     assertThat(service.findAvailableSlots(tenantId, professionalId, DATA, 30, 0)).isNotEmpty();
   }
 
+  /** Teste de telas de 25/10/2026: editando o das 09:00, a lista nao mostrava 09:00 nem 09:15. */
+  @Test
+  @DisplayName("na edicao, o proprio agendamento nao ocupa o horario")
+  void edicaoIgnoraOProprioAgendamento() {
+    janelaSalao("09:00", "19:00");
+    profissionalExiste();
+    jornada("09:00", "19:00");
+    Agendamento editado = agendamento("09:00", "09:30", StatusAgendamento.CONFIRMED);
+    agendamentos(editado);
+
+    assertThat(service.findAvailableSlots(tenantId, professionalId, DATA, 30, 0))
+        .extracting(slot -> slot.startTime)
+        .doesNotContain(LocalTime.of(9, 0), LocalTime.of(9, 15));
+    assertThat(service.findAvailableSlots(tenantId, professionalId, DATA, 30, 0, editado.getId()))
+        .extracting(slot -> slot.startTime)
+        .contains(LocalTime.of(9, 0), LocalTime.of(9, 15));
+    assertThat(
+            service.findManualSlots(tenantId, professionalId, DATA, 30, 0, false, editado.getId()))
+        .extracting(slot -> slot.startTime)
+        .contains(LocalTime.of(9, 0));
+  }
+
   /** Teste de dialogos de 24/10/2026: 14:30 era oferecido num fechamento de 14h as 16h. */
   @Test
   @DisplayName("fechamento de parte do dia tira os horarios desse trecho")
