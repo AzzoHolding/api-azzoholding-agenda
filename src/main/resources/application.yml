@@ -235,6 +235,8 @@ app:
     # POST /billing/subscriptions (Asaas). NUNCA ligar em producao.
     stub-enabled: ${CHECKOUT_STUB_ENABLED:false}
   whatsapp:
+    # So para teste de carga pelo webhook: chama o assistente mesmo com o envio marcado como fora.
+    ignorar-saude-do-envio: ${WHATSAPP_IGNORAR_SAUDE_DO_ENVIO:false}
     embedded-signup:
       enabled: ${WHATSAPP_EMBEDDED_SIGNUP_ENABLED:false}
     # O teste manda TEMPLATE, e nao texto livre: texto livre so e entregue dentro de 24h da
