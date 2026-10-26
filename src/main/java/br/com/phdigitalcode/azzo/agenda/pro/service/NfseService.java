@@ -163,6 +163,7 @@ public class NfseService {
     String municipioCodigoIbge = resolveMunicipioCodigoIbge(config, request.municipioCodigoIbge);
     String provedor = nfseConfigService.resolveProvedor(config.getProvedor(), municipioCodigoIbge);
     validarInvoiceRequest(request, municipioCodigoIbge, provedor);
+    completarValores(request);
 
     NfseInvoiceEntity entity = new NfseInvoiceEntity();
     entity.setTenantId(tenantId);
@@ -225,6 +226,7 @@ public class NfseService {
     String municipioCodigoIbge = resolveMunicipioCodigoIbge(config, request.municipioCodigoIbge);
     String provedor = nfseConfigService.resolveProvedor(config.getProvedor(), municipioCodigoIbge);
     validarInvoiceRequest(request, municipioCodigoIbge, provedor);
+    completarValores(request);
 
     entity.setCustomerType(parseCustomerType(request.customer != null ? request.customer.type : null));
     entity.setCustomerDocument(normalizeOrNull(request.customer != null ? request.customer.document : null));
@@ -646,6 +648,43 @@ public class NfseService {
     String configuredMunicipio = config != null ? normalize(config.getMunicipioCodigoIbge()) : null;
     if (configuredMunicipio != null && !configuredMunicipio.isBlank()) return configuredMunicipio;
     return normalize(requestedMunicipioCodigoIbge);
+  }
+
+  /**
+   * O que a tela nao mandou, o backend calcula: numero da linha, total de cada servico (quantidade x
+   * valor), aliquota do servico (a da nota), ISS de cada servico e da nota, e o valor da nota (soma).
+   * Antes tudo virava 0 por {@code nvl}: rascunho manual com ISS R$ 0,00 e aliquota 5% (teste de
+   * telas, 25/10/2026). O que veio preenchido fica como veio.
+   */
+  void completarValores(NfseDtos.Invoice request) {
+    BigDecimal cem = BigDecimal.valueOf(100);
+    BigDecimal somaDosServicos = BigDecimal.ZERO;
+    BigDecimal somaDoIss = BigDecimal.ZERO;
+    if (request.items != null) {
+      int linha = 0;
+      for (NfseDtos.Item item : request.items) {
+        linha++;
+        if (item.lineNumber == null) item.lineNumber = linha;
+        if (item.valorTotal == null && item.quantidade != null && item.valorUnitario != null) {
+          item.valorTotal = item.quantidade.multiply(item.valorUnitario).setScale(2, java.math.RoundingMode.HALF_UP);
+        }
+        if (item.aliquotaIss == null) item.aliquotaIss = request.aliquotaIss;
+        if (item.valorIss == null && item.valorTotal != null && item.aliquotaIss != null) {
+          item.valorIss = item.valorTotal.multiply(item.aliquotaIss).divide(cem, 2, java.math.RoundingMode.HALF_UP);
+        }
+        somaDosServicos = somaDosServicos.add(nvl(item.valorTotal));
+        somaDoIss = somaDoIss.add(nvl(item.valorIss));
+      }
+    }
+    if (request.valorServicos == null) request.valorServicos = somaDosServicos;
+    if (request.valorIss == null && request.aliquotaIss != null) {
+      boolean issDosItens = request.items != null && !request.items.isEmpty() && somaDoIss.signum() > 0;
+      request.valorIss = issDosItens
+          ? somaDoIss
+          : request.valorServicos.subtract(nvl(request.valorDeducoes))
+              .multiply(request.aliquotaIss)
+              .divide(cem, 2, java.math.RoundingMode.HALF_UP);
+    }
   }
 
   private void validarInvoiceRequest(NfseDtos.Invoice request, String municipioCodigoIbge, String provedor) {
