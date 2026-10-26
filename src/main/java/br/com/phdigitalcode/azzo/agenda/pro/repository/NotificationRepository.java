@@ -49,6 +49,9 @@ public interface NotificationRepository
   Optional<Notification> findFirstByTenantIdAndAppointmentIdAndChannelAndDestination(
       UUID tenantId, UUID appointmentId, String channel, String destination);
 
+  /** O indice unico uq_notifications_appointment_channel_destination, sem janela de tempo. */
+  boolean existsByAppointmentIdAndChannelAndDestination(UUID appointmentId, String channel, String destination);
+
   @Query(
       "select (count(n) > 0) from Notification n where n.tenantId = :tenantId "
           + "and n.appointmentId = :appointmentId and n.channel in :channels "

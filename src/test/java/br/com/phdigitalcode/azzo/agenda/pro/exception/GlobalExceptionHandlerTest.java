@@ -123,6 +123,17 @@ class GlobalExceptionHandlerTest {
   }
 
   @Test
+  void palavraSenhaSemValorNaoEscondeAMensagem() {
+    ApiClientErrorException semValor =
+        new ApiClientErrorException("Senha inválida. Requisitos: mínimo de 8 caracteres.", 400);
+    assertThat(handler.handleApiClientError(semValor).getBody().message)
+        .isEqualTo("Senha inválida. Requisitos: mínimo de 8 caracteres.");
+
+    ApiClientErrorException comValor = new ApiClientErrorException("falhou com token=abc123", 400);
+    assertThat(handler.handleApiClientError(comValor).getBody().message).isEqualTo("Erro na requisicao");
+  }
+
+  @Test
   void apiClientErrorExceptionPreserva429ComMensagemPadrao() {
     ApiClientErrorException ex = new ApiClientErrorException("rate limited", 429);
     ResponseEntity<ErrorResponse> response = handler.handleApiClientError(ex);
