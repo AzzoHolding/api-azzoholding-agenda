@@ -132,6 +132,21 @@ class NotificationPersistenceWorkerTest {
     verify(notificationRepository, org.mockito.Mockito.times(2)).save(any());
   }
 
+  /** Teste de telas de 25/10/2026: a mesma do indice unico saia ERROR a cada subida da API. */
+  @Test
+  void persistNaoTentaGravarDeNovoAQueOIndiceUnicoJaTem() {
+    UUID agendamento = UUID.randomUUID();
+    when(notificationRepository.existsByAppointmentIdAndChannelAndDestination(agendamento, "canal", "destino"))
+        .thenReturn(true);
+
+    worker.persist(
+        new NotificationRequestedEvent(
+            UUID.randomUUID(), agendamento, null, "canal", "destino", "m", StatusNotification.SENT, null,
+            Instant.now(), null));
+
+    verify(notificationRepository, never()).save(any());
+  }
+
   private NotificationRequestedEvent evento(
       UUID tenantId,
       String channel,

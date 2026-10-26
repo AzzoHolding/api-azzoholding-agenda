@@ -284,15 +284,22 @@ public class GlobalExceptionHandler {
         || lower.contains("<?xml")
         || lower.contains("certificate")
         || lower.contains("certificado")
-        || lower.contains("senha")
-        || lower.contains("password")
         || lower.contains("authorization")
         || lower.contains("bearer ")
-        || lower.contains("token")) {
+        || VALOR_SENSIVEL.matcher(lower).find()) {
       return "Erro na requisicao";
     }
     return input;
   }
+
+  /**
+   * "senha"/"password"/"token" so escondem a mensagem quando trazem um VALOR ("token=abc",
+   * "senha: 123"). A palavra sozinha escondia ate a politica de senha ("Senha invalida. Requisitos:
+   * ...") e "a atual nao confere": a pessoa via "Erro na requisicao" sem saber o que errou (teste de
+   * telas, 25/10/2026).
+   */
+  private static final java.util.regex.Pattern VALOR_SENSIVEL =
+      java.util.regex.Pattern.compile("(senha|password|token|secret)\\s*[:=]");
 
   private boolean looksLikeFunctionalCode(String value) {
     if (value == null || value.isBlank()) return false;
