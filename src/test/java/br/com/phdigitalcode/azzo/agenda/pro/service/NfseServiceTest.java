@@ -114,6 +114,30 @@ class NfseServiceTest {
 
   // ---------------------------------------------------------------- criarRascunho
 
+  /** Teste de telas de 25/10/2026: rascunho manual com aliquota 5% gravava ISS R$ 0,00. */
+  @Test
+  void completaLinhaTotaisEIssQueATelaNaoMandou() {
+    NfseDtos.Invoice nota = new NfseDtos.Invoice();
+    nota.aliquotaIss = new BigDecimal("5");
+    NfseDtos.Item corte = new NfseDtos.Item();
+    corte.quantidade = BigDecimal.ONE;
+    corte.valorUnitario = new BigDecimal("50.50");
+    NfseDtos.Item barba = new NfseDtos.Item();
+    barba.quantidade = new BigDecimal("2");
+    barba.valorUnitario = new BigDecimal("10");
+    nota.items = List.of(corte, barba);
+
+    service.completarValores(nota);
+
+    assertThat(corte.lineNumber).isEqualTo(1);
+    assertThat(barba.lineNumber).isEqualTo(2);
+    assertThat(corte.valorTotal).isEqualByComparingTo("50.50");
+    assertThat(corte.valorIss).isEqualByComparingTo("2.53");
+    assertThat(barba.valorIss).isEqualByComparingTo("1.00");
+    assertThat(nota.valorServicos).isEqualByComparingTo("70.50");
+    assertThat(nota.valorIss).isEqualByComparingTo("3.53");
+  }
+
   @Test
   void criarRascunho_persisteInvoiceEItensComRpsAutomatico() {
     NfseConfigEntity config = config("3550308", "ABRASF");
