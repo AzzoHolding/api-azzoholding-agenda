@@ -6,7 +6,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import java.lang.reflect.Field;
-import java.util.stream.Stream;
+import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -34,35 +34,35 @@ class AuditRetentionConfigRepositoryTest {
 
   @Test
   void retornaValorQuandoLinhaExiste() {
-    when(query.getResultStream()).thenReturn(Stream.of(Integer.valueOf(180)));
+    when(query.getResultList()).thenReturn(List.of(Integer.valueOf(180)));
 
     assertThat(repository.findRetentionPeriodDays()).contains(180);
   }
 
   @Test
   void aceitaNumeroDeOutroTipoNumerico() {
-    when(query.getResultStream()).thenReturn(Stream.of(Long.valueOf(365L)));
+    when(query.getResultList()).thenReturn(List.of(Long.valueOf(365L)));
 
     assertThat(repository.findRetentionPeriodDays()).contains(365);
   }
 
   @Test
   void retornaVazioQuandoNaoHaLinha() {
-    when(query.getResultStream()).thenReturn(Stream.empty());
+    when(query.getResultList()).thenReturn(List.of());
 
     assertThat(repository.findRetentionPeriodDays()).isEmpty();
   }
 
   @Test
   void retornaVazioQuandoValorNaoEhNumericoParseavel() {
-    when(query.getResultStream()).thenReturn(Stream.of("abc"));
+    when(query.getResultList()).thenReturn(List.of("abc"));
 
     assertThat(repository.findRetentionPeriodDays()).isEmpty();
   }
 
   @Test
   void parseiaStringNumericaValida() {
-    when(query.getResultStream()).thenReturn(Stream.of("90"));
+    when(query.getResultList()).thenReturn(List.of("90"));
 
     assertThat(repository.findRetentionPeriodDays()).contains(90);
   }
