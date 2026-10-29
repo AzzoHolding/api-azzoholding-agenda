@@ -323,6 +323,7 @@ public class ServicoFinanceiro {
     Map<String, Object> before = buildAuditPayloadFromTransacao(t);
 
     exigirLancamentoManual(tenantId, t, "FINANCE_TRANSACTION_UPDATE", buildAuditPayload(req));
+    exigirNaoConciliado(tenantId, t, "FINANCE_TRANSACTION_UPDATE", buildAuditPayload(req));
     // O dia de ORIGEM e o de DESTINO: tirar dinheiro de um dia fechado e tao grave quanto por.
     travaFinanceira.exigirDiaAberto(
         tenantId, t.getDate(), "FINANCE_TRANSACTION_UPDATE", "TRANSACTION", id.toString(),
@@ -401,6 +402,7 @@ public class ServicoFinanceiro {
     Map<String, Object> before = buildAuditPayloadFromTransacao(t);
 
     exigirLancamentoManual(tenantId, t, "FINANCE_TRANSACTION_DELETE", null);
+    exigirNaoConciliado(tenantId, t, "FINANCE_TRANSACTION_DELETE", null);
     travaFinanceira.exigirDiaAberto(
         tenantId, t.getDate(), "FINANCE_TRANSACTION_DELETE", "TRANSACTION", id.toString(), null);
 
@@ -438,7 +440,47 @@ public class ServicoFinanceiro {
     return toResponse(t);
   }
 
-  // ─── EXPORTACAO CSV (F1.2) ───────────────────────────────────────────────
+  /**
+   * Leva o lancamento ao estado pedido (28/10/2026). Repetir o mesmo pedido nao muda nada nem gera
+   * outro evento: e o que protege do duplo clique e da nova tentativa depois de falha de rede.
+   *
+   * <p>Reabrir exige justificativa — quem fecha o mes precisa saber por que uma conferencia foi
+   * desfeita. Nada aqui mexe em valor, data, tipo ou forma: o saldo nao muda.
+   */
+  @Transactional
+  public TransacaoResponse definirConciliacao(UUID id, Boolean reconciled, String reason) {
+    if (reconciled == null) {
+      throw new ApiClientErrorException("Informe se o lançamento fica conciliado ou não.", 400);
+    }
+    UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    Transacao t =
+        transacaoRepository
+            .findAtivaByIdAndTenant(id, tenantId)
+            .orElseThrow(() -> new ApiClientErrorException("Transação não encontrada", 404));
+
+    if (t.isReconciled() == reconciled) {
+      return toResponse(t);
+    }
+    String justificativa = normalizeNullable(reason);
+    if (!reconciled && justificativa == null) {
+      throw new ApiClientErrorException("Informe por que a conciliação está sendo reaberta.", 400);
+    }
+
+    t.setReconciled(reconciled);
+    t.setReconciledAt(reconciled ? Instant.now() : null);
+    Map<String, Object> depois = new LinkedHashMap<>();
+    depois.put("reconciled", reconciled);
+    if (justificativa != null) depois.put("reason", justificativa);
+    registrarAuditoriaFinanceiro(
+        tenantId,
+        "FINANCE_TRANSACTION_RECONCILE",
+        Map.of("reconciled", !reconciled),
+        depois,
+        id.toString());
+    return toResponse(t);
+  }
+
+  // ─── EXPORTACAO CSV (F1.2)───────────────────────────────────────────────
 
   @Transactional(readOnly = true)
   public StreamingResponseBody exportarCsv(
@@ -723,6 +765,21 @@ public class ServicoFinanceiro {
         tenantId, acao, "TRANSACTION", t.getId() != null ? t.getId().toString() : null,
         tentativa, motivo);
     throw new IllegalArgumentException(motivo);
+  }
+
+  /**
+   * Conciliado quer dizer "conferido contra o extrato". Editar ou excluir depois deixava a marca
+   * dizendo que um valor que ja nao existe foi conferido (28/10/2026). Quem precisa corrigir reabre
+   * a conciliacao, com justificativa, e edita.
+   */
+  private void exigirNaoConciliado(UUID tenantId, Transacao t, String acao, Object tentativa) {
+    if (!t.isReconciled()) return;
+    String motivo =
+        "Este lançamento já foi conciliado. Reabra a conciliação antes de alterar ou excluir.";
+    travaFinanceira.registrarTentativaBloqueada(
+        tenantId, acao, "TRANSACTION", t.getId() != null ? t.getId().toString() : null,
+        tentativa, motivo);
+    throw new ApiClientErrorException(motivo, 409);
   }
 
   private void registrarAuditoriaFinanceiro(
