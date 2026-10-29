@@ -118,11 +118,13 @@ public class ServicoFinanceiro {
       MetodoPagamento paymentMethod,
       UUID professionalId,
       Boolean reconciled,
+      String q,
       int page,
       int limit) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     TransacaoFilter filter =
-        new TransacaoFilter(tenantId, from, to, type, categoryId, paymentMethod, professionalId, reconciled);
+        new TransacaoFilter(
+            tenantId, from, to, type, categoryId, paymentMethod, professionalId, reconciled, q);
 
     long totalCount = transacaoQueryRepository.countFiltered(filter);
     List<TransacaoResponse> items =
@@ -146,17 +148,23 @@ public class ServicoFinanceiro {
       UUID categoryId,
       MetodoPagamento paymentMethod,
       UUID professionalId,
-      Boolean reconciled) {
+      Boolean reconciled,
+      String q) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    TransacaoFilter filtro =
+        new TransacaoFilter(
+            tenantId, from, to, type, categoryId, paymentMethod, professionalId, reconciled, q);
     TransacaoQueryRepository.SummaryTotals summaryTotals =
-        transacaoQueryRepository.summarizeFiltered(
-            new TransacaoFilter(
-                tenantId, from, to, type, categoryId, paymentMethod, professionalId, reconciled));
+        transacaoQueryRepository.summarizeFiltered(filtro);
+    TransacaoQueryRepository.ReconciliationCounts contagens =
+        transacaoQueryRepository.countByReconciled(filtro);
 
     ResumoFinanceiroResponse r = new ResumoFinanceiroResponse();
     r.totalIncome = summaryTotals.totalIncome();
     r.totalExpenses = summaryTotals.totalExpenses();
     r.balance = NumericUtil.subtract(r.totalIncome, r.totalExpenses);
+    r.pendingCount = contagens.pending();
+    r.reconciledCount = contagens.reconciled();
     return r;
   }
 
@@ -490,12 +498,13 @@ public class ServicoFinanceiro {
       UUID categoryId,
       MetodoPagamento paymentMethod,
       UUID professionalId,
-      Boolean reconciled) {
+      Boolean reconciled,
+      String q) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     List<Transacao> transacoes =
         transacaoQueryRepository.listFiltered(
             new TransacaoFilter(
-                tenantId, from, to, type, categoryId, paymentMethod, professionalId, reconciled),
+                tenantId, from, to, type, categoryId, paymentMethod, professionalId, reconciled, q),
             0,
             0);
 
