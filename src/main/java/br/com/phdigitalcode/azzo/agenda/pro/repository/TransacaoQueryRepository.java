@@ -5,6 +5,7 @@ import java.time.Instant;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 
@@ -32,6 +33,9 @@ import jakarta.persistence.TypedQuery;
 public class TransacaoQueryRepository {
 
   public record SummaryTotals(BigDecimal totalIncome, BigDecimal totalExpenses) {}
+
+  /** Quantos lancamentos estao pendentes e quantos conciliados, sob o mesmo filtro. */
+  public record ReconciliationCounts(long pending, long reconciled) {}
 
   @PersistenceContext
   private EntityManager entityManager;
@@ -80,6 +84,29 @@ public class TransacaoQueryRepository {
 
     Object[] row = query.getSingleResult();
     return new SummaryTotals(toDecimal(row[0]), toDecimal(row[1]));
+  }
+
+  /**
+   * Contagem por situacao da conciliacao (29/10/2026). Ignora o filtro {@code reconciled} de
+   * proposito: e o numero de cada aba da tela, e aplicar o filtro da aba zeraria as outras.
+   */
+  public ReconciliationCounts countByReconciled(TransacaoFilter filter) {
+    FilterQueryParts parts = buildFilterQueryParts(filter.semConciliacao());
+    TypedQuery<Object[]> query =
+        entityManager.createQuery(
+            "select t.reconciled, count(t) from Transacao t where "
+                + parts.whereClause()
+                + " group by t.reconciled",
+            Object[].class);
+    parts.params().forEach(query::setParameter);
+    long pendentes = 0;
+    long conciliadas = 0;
+    for (Object[] row : query.getResultList()) {
+      long total = row[1] instanceof Number number ? number.longValue() : 0L;
+      if (Boolean.TRUE.equals(row[0])) conciliadas = total;
+      else pendentes = total;
+    }
+    return new ReconciliationCounts(pendentes, conciliadas);
   }
 
   /**
@@ -169,8 +196,19 @@ public class TransacaoQueryRepository {
       sb.append(" and t.reconciled = :reconciled");
       params.put("reconciled", filter.reconciled());
     }
+    String busca = filter.q() != null ? filter.q().trim() : "";
+    if (!busca.isEmpty()) {
+      // % e _ digitados sao texto, e nao curinga: "50%" procura "50%".
+      sb.append(" and lower(t.description) like :q escape '\\'");
+      params.put("q", "%" + escaparLike(busca.toLowerCase(Locale.ROOT)) + "%");
+    }
 
     return new FilterQueryParts(sb.toString(), params);
+  }
+
+  /** Escapa os curingas do {@code like} com a barra invertida declarada no {@code escape}. */
+  static String escaparLike(String texto) {
+    return texto.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
   }
 
   /** Conjunto de filtros do endpoint {@code GET /api/v1/finance/transactions}. */
@@ -182,7 +220,28 @@ public class TransacaoQueryRepository {
       UUID categoryId,
       MetodoPagamento paymentMethod,
       UUID professionalId,
-      Boolean reconciled) {}
+      Boolean reconciled,
+      /** Trecho da descricao, sem diferenciar maiusculas (29/10/2026). */
+      String q) {
+
+    /** Sem busca por descricao — o que relatorios e o caixa usam. */
+    public TransacaoFilter(
+        UUID tenantId,
+        Instant from,
+        Instant to,
+        TipoTransacao type,
+        UUID categoryId,
+        MetodoPagamento paymentMethod,
+        UUID professionalId,
+        Boolean reconciled) {
+      this(tenantId, from, to, type, categoryId, paymentMethod, professionalId, reconciled, null);
+    }
+
+    TransacaoFilter semConciliacao() {
+      return new TransacaoFilter(
+          tenantId, from, to, type, categoryId, paymentMethod, professionalId, null, q);
+    }
+  }
 
   private record FilterQueryParts(String whereClause, Map<String, Object> params) {}
 }

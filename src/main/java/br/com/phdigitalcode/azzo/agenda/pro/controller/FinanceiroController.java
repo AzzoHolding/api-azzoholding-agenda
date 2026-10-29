@@ -72,6 +72,7 @@ public class FinanceiroController {
       @RequestParam(required = false) String paymentMethod,
       @RequestParam(required = false) String professionalId,
       @RequestParam(required = false) String reconciled,
+      @RequestParam(required = false) String q,
       @RequestParam(defaultValue = "0") int page,
       @RequestParam(defaultValue = "50") int limit) {
     int safeLimit = Math.min(Math.max(1, limit), 200);
@@ -83,6 +84,7 @@ public class FinanceiroController {
         parseEnumNullable(paymentMethod, MetodoPagamento.class),
         parseUuidNullable(professionalId),
         parseBooleanNullable(reconciled),
+        q,
         Math.max(0, page),
         safeLimit);
   }
@@ -96,7 +98,8 @@ public class FinanceiroController {
       @RequestParam(required = false) String categoryId,
       @RequestParam(required = false) String paymentMethod,
       @RequestParam(required = false) String professionalId,
-      @RequestParam(required = false) String reconciled) {
+      @RequestParam(required = false) String reconciled,
+      @RequestParam(required = false) String q) {
     return servicoFinanceiro.resumo(
         parseFilterStartInstantNullable(from),
         parseFilterEndInstantNullable(to),
@@ -104,7 +107,8 @@ public class FinanceiroController {
         parseUuidNullable(categoryId),
         parseEnumNullable(paymentMethod, MetodoPagamento.class),
         parseUuidNullable(professionalId),
-        parseBooleanNullable(reconciled));
+        parseBooleanNullable(reconciled),
+        q);
   }
 
   @PostMapping
@@ -147,7 +151,8 @@ public class FinanceiroController {
       @RequestParam(required = false) String categoryId,
       @RequestParam(required = false) String paymentMethod,
       @RequestParam(required = false) String professionalId,
-      @RequestParam(required = false) String reconciled) {
+      @RequestParam(required = false) String reconciled,
+      @RequestParam(required = false) String q) {
     StreamingResponseBody stream =
         servicoFinanceiro.exportarCsv(
             parseFilterStartInstantNullable(from),
@@ -156,7 +161,8 @@ public class FinanceiroController {
             parseUuidNullable(categoryId),
             parseEnumNullable(paymentMethod, MetodoPagamento.class),
             parseUuidNullable(professionalId),
-            parseBooleanNullable(reconciled));
+            parseBooleanNullable(reconciled),
+            q);
 
     return ResponseEntity.ok()
         .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + buildCsvFilename(from, to) + "\"")

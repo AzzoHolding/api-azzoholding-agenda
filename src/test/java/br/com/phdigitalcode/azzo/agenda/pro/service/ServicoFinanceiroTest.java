@@ -92,13 +92,40 @@ class ServicoFinanceiroTest {
     when(contextoTenant.obterTenantIdOuFalhar()).thenReturn(TENANT_ID);
     when(transacaoQueryRepository.summarizeFiltered(any()))
         .thenReturn(new SummaryTotals(new BigDecimal("1500.00"), new BigDecimal("430.50")));
+    when(transacaoQueryRepository.countByReconciled(any()))
+        .thenReturn(new TransacaoQueryRepository.ReconciliationCounts(7, 3));
 
     ResumoFinanceiroResponse resumo =
-        servicoFinanceiro.resumo(null, null, null, null, null, null, null);
+        servicoFinanceiro.resumo(null, null, null, null, null, null, null, null);
 
     assertThat(resumo.totalIncome).isEqualByComparingTo("1500.00");
     assertThat(resumo.totalExpenses).isEqualByComparingTo("430.50");
     assertThat(resumo.balance).isEqualByComparingTo("1069.50");
+    assertThat(resumo.pendingCount).isEqualTo(7);
+    assertThat(resumo.reconciledCount).isEqualTo(3);
+  }
+
+  @Test
+  @DisplayName("Resumo e lista usam o mesmo filtro, com a busca por descricao e a aba de conciliacao")
+  void resumoELListaUsamOMesmoFiltro() {
+    when(contextoTenant.obterTenantIdOuFalhar()).thenReturn(TENANT_ID);
+    when(transacaoQueryRepository.summarizeFiltered(any()))
+        .thenReturn(new SummaryTotals(BigDecimal.ZERO, BigDecimal.ZERO));
+    when(transacaoQueryRepository.countByReconciled(any()))
+        .thenReturn(new TransacaoQueryRepository.ReconciliationCounts(0, 0));
+
+    servicoFinanceiro.resumo(null, null, null, null, null, null, false, "corte");
+    servicoFinanceiro.listar(null, null, null, null, null, null, false, "corte", 0, 50);
+
+    ArgumentCaptor<TransacaoQueryRepository.TransacaoFilter> doResumo =
+        ArgumentCaptor.forClass(TransacaoQueryRepository.TransacaoFilter.class);
+    ArgumentCaptor<TransacaoQueryRepository.TransacaoFilter> daLista =
+        ArgumentCaptor.forClass(TransacaoQueryRepository.TransacaoFilter.class);
+    verify(transacaoQueryRepository).summarizeFiltered(doResumo.capture());
+    verify(transacaoQueryRepository).countFiltered(daLista.capture());
+    assertThat(doResumo.getValue()).isEqualTo(daLista.getValue());
+    assertThat(doResumo.getValue().q()).isEqualTo("corte");
+    assertThat(doResumo.getValue().reconciled()).isFalse();
   }
 
   @Test
