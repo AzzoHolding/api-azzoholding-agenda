@@ -261,6 +261,107 @@ class ServicoFinanceiroTest {
   }
 
   @Test
+  @DisplayName("Conciliar com estado explicito: repetir o pedido nao desconcilia nem gera outro evento")
+  void definirConciliacaoEIdempotente() {
+    UUID transacaoId = UUID.randomUUID();
+    Transacao transacao = transacaoExistente(transacaoId);
+    when(contextoTenant.obterTenantIdOuFalhar()).thenReturn(TENANT_ID);
+    when(transacaoRepository.findAtivaByIdAndTenant(transacaoId, TENANT_ID))
+        .thenReturn(Optional.of(transacao));
+
+    servicoFinanceiro.definirConciliacao(transacaoId, true, null);
+    Instant primeira = transacao.getReconciledAt();
+    TransacaoResponse segunda = servicoFinanceiro.definirConciliacao(transacaoId, true, null);
+
+    assertThat(segunda.reconciled).isTrue();
+    assertThat(transacao.getReconciledAt()).isEqualTo(primeira);
+    verify(auditService, org.mockito.Mockito.times(1)).recordSuccess(any());
+  }
+
+  @Test
+  @DisplayName("Conciliar nao mexe em valor, data, tipo nem forma: o saldo nao muda")
+  void conciliarNaoMexeNoDinheiro() {
+    UUID transacaoId = UUID.randomUUID();
+    Transacao transacao = transacaoExistente(transacaoId);
+    BigDecimal valor = transacao.getAmount();
+    Instant data = transacao.getDate();
+    when(contextoTenant.obterTenantIdOuFalhar()).thenReturn(TENANT_ID);
+    when(transacaoRepository.findAtivaByIdAndTenant(transacaoId, TENANT_ID))
+        .thenReturn(Optional.of(transacao));
+
+    servicoFinanceiro.definirConciliacao(transacaoId, true, null);
+    servicoFinanceiro.definirConciliacao(transacaoId, false, "Valor no extrato diferente");
+
+    assertThat(transacao.getAmount()).isEqualByComparingTo(valor);
+    assertThat(transacao.getDate()).isEqualTo(data);
+    assertThat(transacao.getType()).isEqualTo(TipoTransacao.INCOME);
+    assertThat(transacao.getPaymentMethod()).isEqualTo(MetodoPagamento.CASH);
+    assertThat(transacao.isReconciled()).isFalse();
+    assertThat(transacao.getReconciledAt()).isNull();
+    verify(transacaoRepository, never()).save(any());
+  }
+
+  @Test
+  @DisplayName("Reabrir a conciliacao sem justificativa e recusado com 400")
+  void reabrirExigeJustificativa() {
+    UUID transacaoId = UUID.randomUUID();
+    Transacao transacao = transacaoExistente(transacaoId);
+    transacao.setReconciled(true);
+    transacao.setReconciledAt(Instant.now());
+    when(contextoTenant.obterTenantIdOuFalhar()).thenReturn(TENANT_ID);
+    when(transacaoRepository.findAtivaByIdAndTenant(transacaoId, TENANT_ID))
+        .thenReturn(Optional.of(transacao));
+
+    assertThatThrownBy(() -> servicoFinanceiro.definirConciliacao(transacaoId, false, "   "))
+        .isInstanceOf(ApiClientErrorException.class)
+        .extracting(e -> ((ApiClientErrorException) e).getStatus())
+        .isEqualTo(400);
+    assertThat(transacao.isReconciled()).isTrue();
+  }
+
+  @Test
+  @DisplayName("Lancamento conciliado nao se exclui: 409 e nada muda")
+  void excluirConciliadoDevolve409() {
+    UUID transacaoId = UUID.randomUUID();
+    Transacao transacao = transacaoExistente(transacaoId);
+    transacao.setReconciled(true);
+    when(contextoTenant.obterTenantIdOuFalhar()).thenReturn(TENANT_ID);
+    when(transacaoRepository.findAtivaByIdAndTenant(transacaoId, TENANT_ID))
+        .thenReturn(Optional.of(transacao));
+
+    assertThatThrownBy(() -> servicoFinanceiro.deletar(transacaoId))
+        .isInstanceOf(ApiClientErrorException.class)
+        .extracting(e -> ((ApiClientErrorException) e).getStatus())
+        .isEqualTo(409);
+    assertThat(transacao.getDeletedAt()).isNull();
+  }
+
+  @Test
+  @DisplayName("Lancamento conciliado nao se edita: 409 e o valor fica")
+  void editarConciliadoDevolve409() {
+    UUID transacaoId = UUID.randomUUID();
+    Transacao transacao = transacaoExistente(transacaoId);
+    transacao.setReconciled(true);
+    when(contextoTenant.obterTenantIdOuFalhar()).thenReturn(TENANT_ID);
+    when(transacaoRepository.findAtivaByIdAndTenant(transacaoId, TENANT_ID))
+        .thenReturn(Optional.of(transacao));
+
+    TransacaoRequest req = new TransacaoRequest();
+    req.type = "income";
+    req.category = "Vendas";
+    req.description = "Outra";
+    req.amount = new BigDecimal("999.00");
+    req.paymentMethod = "pix";
+    req.date = "2026-03-20";
+
+    assertThatThrownBy(() -> servicoFinanceiro.atualizar(transacaoId, req))
+        .isInstanceOf(ApiClientErrorException.class)
+        .extracting(e -> ((ApiClientErrorException) e).getStatus())
+        .isEqualTo(409);
+    assertThat(transacao.getAmount()).isEqualByComparingTo("100.00");
+  }
+
+  @Test
   @DisplayName("Renomear categoria para um nome ja usado por outra categoria e bloqueado")
   void renomearCategoriaDuplicada() {
     UUID id = UUID.randomUUID();

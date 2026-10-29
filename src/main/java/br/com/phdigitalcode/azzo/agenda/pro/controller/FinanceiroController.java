@@ -25,6 +25,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 import br.com.phdigitalcode.azzo.agenda.pro.dto.request.AtualizarCategoriaRequest;
+import br.com.phdigitalcode.azzo.agenda.pro.dto.request.ConciliacaoRequest;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.request.CriarCategoriaRequest;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.request.RecurringTransactionRequest;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.request.TransacaoRequest;
@@ -120,8 +121,13 @@ public class FinanceiroController {
 
   @PatchMapping("/{id}/reconcile")
   @RequiresPermission("finance:manage")
-  public TransacaoResponse conciliar(@PathVariable UUID id) {
-    return servicoFinanceiro.conciliar(id);
+  public TransacaoResponse conciliar(
+      @PathVariable UUID id, @Valid @RequestBody(required = false) ConciliacaoRequest request) {
+    // Sem corpo, inverte como antes: e o que a tela publicada manda ate a nova entrar no ar.
+    if (request == null) {
+      return servicoFinanceiro.conciliar(id);
+    }
+    return servicoFinanceiro.definirConciliacao(id, request.reconciled, request.reason);
   }
 
   @DeleteMapping("/{id}")
