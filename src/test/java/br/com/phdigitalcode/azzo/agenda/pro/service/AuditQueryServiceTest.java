@@ -154,6 +154,19 @@ class AuditQueryServiceTest {
   }
 
   @Test
+  void detailDevolveOsDadosDoEventoQueOJackson3SerializaComoSao() {
+    AuditEvent event = buildEvent(AuditConstants.Module.FINANCE, UUID.randomUUID(), Instant.now());
+    event.setAfterJson("{\"reason\":\"Valor diferente\"}");
+    when(auditEventRepository.findById(event.getId())).thenReturn(java.util.Optional.of(event));
+
+    AuditDtos.AuditEventDetail detail = service.detail(tenantId, event.getId().toString());
+
+    // A resposta sai em Jackson 3: um JsonNode do Jackson 2 viraria "textual":false, sem os dados.
+    assertThat(new tools.jackson.databind.json.JsonMapper().writeValueAsString(detail.after))
+        .isEqualTo("{\"reason\":\"Valor diferente\"}");
+  }
+
+  @Test
   void detailRetornaChainValidTrueQuandoNaoHaPrevHash() {
     AuditEvent event = buildEvent(AuditConstants.Module.FINANCE, UUID.randomUUID(), Instant.now());
     when(auditEventRepository.findById(event.getId())).thenReturn(java.util.Optional.of(event));
