@@ -36,6 +36,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.dto.response.RecurringTransactionRes
 import br.com.phdigitalcode.azzo.agenda.pro.dto.response.ResumoFinanceiroResponse;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.response.TransacaoResponse;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.MetodoPagamento;
+import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.StatusConciliacao;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.TipoTransacao;
 import br.com.phdigitalcode.azzo.agenda.pro.security.RequiresPermission;
 import br.com.phdigitalcode.azzo.agenda.pro.service.ServicoFinanceiro;
@@ -73,6 +74,7 @@ public class FinanceiroController {
       @RequestParam(required = false) String professionalId,
       @RequestParam(required = false) String reconciled,
       @RequestParam(required = false) String q,
+      @RequestParam(required = false) String reconciliationStatus,
       @RequestParam(defaultValue = "0") int page,
       @RequestParam(defaultValue = "50") int limit) {
     int safeLimit = Math.min(Math.max(1, limit), 200);
@@ -85,6 +87,7 @@ public class FinanceiroController {
         parseUuidNullable(professionalId),
         parseBooleanNullable(reconciled),
         q,
+        parseEnumNullable(reconciliationStatus, StatusConciliacao.class),
         Math.max(0, page),
         safeLimit);
   }
@@ -99,7 +102,8 @@ public class FinanceiroController {
       @RequestParam(required = false) String paymentMethod,
       @RequestParam(required = false) String professionalId,
       @RequestParam(required = false) String reconciled,
-      @RequestParam(required = false) String q) {
+      @RequestParam(required = false) String q,
+      @RequestParam(required = false) String reconciliationStatus) {
     return servicoFinanceiro.resumo(
         parseFilterStartInstantNullable(from),
         parseFilterEndInstantNullable(to),
@@ -108,7 +112,8 @@ public class FinanceiroController {
         parseEnumNullable(paymentMethod, MetodoPagamento.class),
         parseUuidNullable(professionalId),
         parseBooleanNullable(reconciled),
-        q);
+        q,
+        parseEnumNullable(reconciliationStatus, StatusConciliacao.class));
   }
 
   @PostMapping
@@ -126,12 +131,15 @@ public class FinanceiroController {
   @PatchMapping("/{id}/reconcile")
   @RequiresPermission("finance:manage")
   public TransacaoResponse conciliar(
-      @PathVariable UUID id, @Valid @RequestBody(required = false) ConciliacaoRequest request) {
-    // Sem corpo, inverte como antes: e o que a tela publicada manda ate a nova entrar no ar.
-    if (request == null) {
-      return servicoFinanceiro.conciliar(id);
-    }
-    return servicoFinanceiro.definirConciliacao(id, request.reconciled, request.reason);
+      @PathVariable UUID id, @Valid @RequestBody ConciliacaoRequest request) {
+    return servicoFinanceiro.definirConciliacao(id, request);
+  }
+
+  /** Lancamentos que podem repetir este: so aviso, nada e alterado nem excluido. */
+  @GetMapping("/{id}/possible-duplicates")
+  @RequiresPermission("finance:view")
+  public List<TransacaoResponse> possiveisDuplicidades(@PathVariable UUID id) {
+    return servicoFinanceiro.possiveisDuplicidades(id);
   }
 
   @DeleteMapping("/{id}")
@@ -152,7 +160,8 @@ public class FinanceiroController {
       @RequestParam(required = false) String paymentMethod,
       @RequestParam(required = false) String professionalId,
       @RequestParam(required = false) String reconciled,
-      @RequestParam(required = false) String q) {
+      @RequestParam(required = false) String q,
+      @RequestParam(required = false) String reconciliationStatus) {
     StreamingResponseBody stream =
         servicoFinanceiro.exportarCsv(
             parseFilterStartInstantNullable(from),
@@ -162,7 +171,8 @@ public class FinanceiroController {
             parseEnumNullable(paymentMethod, MetodoPagamento.class),
             parseUuidNullable(professionalId),
             parseBooleanNullable(reconciled),
-            q);
+            q,
+            parseEnumNullable(reconciliationStatus, StatusConciliacao.class));
 
     return ResponseEntity.ok()
         .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + buildCsvFilename(from, to) + "\"")

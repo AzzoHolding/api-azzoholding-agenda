@@ -14,4 +14,5 @@ public class ResumoFinanceiroResponse {
    */
   public long pendingCount;
   public long reconciledCount;
+  public long divergentCount;
 }

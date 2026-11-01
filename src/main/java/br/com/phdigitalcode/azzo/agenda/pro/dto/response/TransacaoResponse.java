@@ -26,6 +26,10 @@ public class TransacaoResponse {
   public String createdAt;
   public boolean reconciled;
   public String reconciledAt;
+  public String reconciliationStatus;
+  public String reconciledBy;
+  public String reconciliationNote;
+  public BigDecimal statementAmount;
   public String source;
   public String recurringId;
 }

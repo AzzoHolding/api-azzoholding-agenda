@@ -28,6 +28,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import br.com.phdigitalcode.azzo.agenda.pro.dto.request.ConciliacaoRequest;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.request.RecurringTransactionRequest;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.request.TransacaoRequest;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.response.ResumoFinanceiroResponse;
@@ -36,6 +37,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.entity.RecurringTransaction;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.Transacao;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.TransactionCategory;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.MetodoPagamento;
+import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.StatusConciliacao;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.TipoTransacao;
 import br.com.phdigitalcode.azzo.agenda.pro.exception.ApiClientErrorException;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditService;
@@ -92,17 +94,18 @@ class ServicoFinanceiroTest {
     when(contextoTenant.obterTenantIdOuFalhar()).thenReturn(TENANT_ID);
     when(transacaoQueryRepository.summarizeFiltered(any()))
         .thenReturn(new SummaryTotals(new BigDecimal("1500.00"), new BigDecimal("430.50")));
-    when(transacaoQueryRepository.countByReconciled(any()))
-        .thenReturn(new TransacaoQueryRepository.ReconciliationCounts(7, 3));
+    when(transacaoQueryRepository.countByReconciliationStatus(any()))
+        .thenReturn(new TransacaoQueryRepository.ReconciliationCounts(7, 3, 2));
 
     ResumoFinanceiroResponse resumo =
-        servicoFinanceiro.resumo(null, null, null, null, null, null, null, null);
+        servicoFinanceiro.resumo(null, null, null, null, null, null, null, null, null);
 
     assertThat(resumo.totalIncome).isEqualByComparingTo("1500.00");
     assertThat(resumo.totalExpenses).isEqualByComparingTo("430.50");
     assertThat(resumo.balance).isEqualByComparingTo("1069.50");
     assertThat(resumo.pendingCount).isEqualTo(7);
     assertThat(resumo.reconciledCount).isEqualTo(3);
+    assertThat(resumo.divergentCount).isEqualTo(2);
   }
 
   @Test
@@ -111,11 +114,11 @@ class ServicoFinanceiroTest {
     when(contextoTenant.obterTenantIdOuFalhar()).thenReturn(TENANT_ID);
     when(transacaoQueryRepository.summarizeFiltered(any()))
         .thenReturn(new SummaryTotals(BigDecimal.ZERO, BigDecimal.ZERO));
-    when(transacaoQueryRepository.countByReconciled(any()))
-        .thenReturn(new TransacaoQueryRepository.ReconciliationCounts(0, 0));
+    when(transacaoQueryRepository.countByReconciliationStatus(any()))
+        .thenReturn(new TransacaoQueryRepository.ReconciliationCounts(0, 0, 0));
 
-    servicoFinanceiro.resumo(null, null, null, null, null, null, false, "corte");
-    servicoFinanceiro.listar(null, null, null, null, null, null, false, "corte", 0, 50);
+    servicoFinanceiro.resumo(null, null, null, null, null, null, false, "corte", null);
+    servicoFinanceiro.listar(null, null, null, null, null, null, false, "corte", null, 0, 50);
 
     ArgumentCaptor<TransacaoQueryRepository.TransacaoFilter> doResumo =
         ArgumentCaptor.forClass(TransacaoQueryRepository.TransacaoFilter.class);
@@ -270,24 +273,6 @@ class ServicoFinanceiroTest {
   }
 
   @Test
-  @DisplayName("Conciliar alterna o flag e limpa reconciledAt ao desconciliar")
-  void conciliarAlterna() {
-    UUID transacaoId = UUID.randomUUID();
-    Transacao transacao = transacaoExistente(transacaoId);
-    when(contextoTenant.obterTenantIdOuFalhar()).thenReturn(TENANT_ID);
-    when(transacaoRepository.findAtivaByIdAndTenant(transacaoId, TENANT_ID))
-        .thenReturn(Optional.of(transacao));
-
-    servicoFinanceiro.conciliar(transacaoId);
-    assertThat(transacao.isReconciled()).isTrue();
-    assertThat(transacao.getReconciledAt()).isNotNull();
-
-    servicoFinanceiro.conciliar(transacaoId);
-    assertThat(transacao.isReconciled()).isFalse();
-    assertThat(transacao.getReconciledAt()).isNull();
-  }
-
-  @Test
   @DisplayName("Conciliar com estado explicito: repetir o pedido nao desconcilia nem gera outro evento")
   void definirConciliacaoEIdempotente() {
     UUID transacaoId = UUID.randomUUID();
@@ -296,9 +281,9 @@ class ServicoFinanceiroTest {
     when(transacaoRepository.findAtivaByIdAndTenant(transacaoId, TENANT_ID))
         .thenReturn(Optional.of(transacao));
 
-    servicoFinanceiro.definirConciliacao(transacaoId, true, null);
+    servicoFinanceiro.definirConciliacao(transacaoId, pedido("RECONCILED", null));
     Instant primeira = transacao.getReconciledAt();
-    TransacaoResponse segunda = servicoFinanceiro.definirConciliacao(transacaoId, true, null);
+    TransacaoResponse segunda = servicoFinanceiro.definirConciliacao(transacaoId, pedido("RECONCILED", null));
 
     assertThat(segunda.reconciled).isTrue();
     assertThat(transacao.getReconciledAt()).isEqualTo(primeira);
@@ -316,8 +301,8 @@ class ServicoFinanceiroTest {
     when(transacaoRepository.findAtivaByIdAndTenant(transacaoId, TENANT_ID))
         .thenReturn(Optional.of(transacao));
 
-    servicoFinanceiro.definirConciliacao(transacaoId, true, null);
-    servicoFinanceiro.definirConciliacao(transacaoId, false, "Valor no extrato diferente");
+    servicoFinanceiro.definirConciliacao(transacaoId, pedido("RECONCILED", null));
+    servicoFinanceiro.definirConciliacao(transacaoId, pedido("PENDING", "Valor no extrato diferente"));
 
     assertThat(transacao.getAmount()).isEqualByComparingTo(valor);
     assertThat(transacao.getDate()).isEqualTo(data);
@@ -335,11 +320,12 @@ class ServicoFinanceiroTest {
     Transacao transacao = transacaoExistente(transacaoId);
     transacao.setReconciled(true);
     transacao.setReconciledAt(Instant.now());
+    transacao.setReconciliationStatus(StatusConciliacao.RECONCILED);
     when(contextoTenant.obterTenantIdOuFalhar()).thenReturn(TENANT_ID);
     when(transacaoRepository.findAtivaByIdAndTenant(transacaoId, TENANT_ID))
         .thenReturn(Optional.of(transacao));
 
-    assertThatThrownBy(() -> servicoFinanceiro.definirConciliacao(transacaoId, false, "   "))
+    assertThatThrownBy(() -> servicoFinanceiro.definirConciliacao(transacaoId, pedido("PENDING", "   ")))
         .isInstanceOf(ApiClientErrorException.class)
         .extracting(e -> ((ApiClientErrorException) e).getStatus())
         .isEqualTo(400);
@@ -386,6 +372,137 @@ class ServicoFinanceiroTest {
         .extracting(e -> ((ApiClientErrorException) e).getStatus())
         .isEqualTo(409);
     assertThat(transacao.getAmount()).isEqualByComparingTo("100.00");
+  }
+
+  @Test
+  @DisplayName("Divergencia guarda o texto e o valor do extrato, sem mexer no valor do lancamento")
+  void marcarDivergencia() {
+    UUID transacaoId = UUID.randomUUID();
+    Transacao transacao = transacaoExistente(transacaoId);
+    when(contextoTenant.obterTenantIdOuFalhar()).thenReturn(TENANT_ID);
+    when(transacaoRepository.findAtivaByIdAndTenant(transacaoId, TENANT_ID))
+        .thenReturn(Optional.of(transacao));
+
+    ConciliacaoRequest divergencia = pedido("DIVERGENT", "Extrato mostra R$ 95,00");
+    divergencia.statementAmount = new BigDecimal("95.00");
+    TransacaoResponse resposta = servicoFinanceiro.definirConciliacao(transacaoId, divergencia);
+
+    assertThat(resposta.reconciliationStatus).isEqualTo("DIVERGENT");
+    assertThat(resposta.reconciled).isFalse();
+    assertThat(resposta.reconciliationNote).isEqualTo("Extrato mostra R$ 95,00");
+    assertThat(resposta.statementAmount).isEqualByComparingTo("95.00");
+    assertThat(transacao.getAmount()).isEqualByComparingTo("100.00");
+    assertThat(transacao.getReconciledAt()).isNull();
+  }
+
+  @Test
+  @DisplayName("Divergencia sem descricao e recusada com 400")
+  void divergenciaExigeDescricao() {
+    UUID transacaoId = UUID.randomUUID();
+    Transacao transacao = transacaoExistente(transacaoId);
+    when(contextoTenant.obterTenantIdOuFalhar()).thenReturn(TENANT_ID);
+    when(transacaoRepository.findAtivaByIdAndTenant(transacaoId, TENANT_ID))
+        .thenReturn(Optional.of(transacao));
+
+    assertThatThrownBy(
+            () -> servicoFinanceiro.definirConciliacao(transacaoId, pedido("DIVERGENT", null)))
+        .isInstanceOf(ApiClientErrorException.class)
+        .extracting(e -> ((ApiClientErrorException) e).getStatus())
+        .isEqualTo(400);
+    assertThat(transacao.getReconciliationStatus()).isEqualTo(StatusConciliacao.PENDING);
+  }
+
+  @Test
+  @DisplayName("Conciliar um divergente limpa o valor do extrato e reabrir limpa a anotacao")
+  void resolverDivergencia() {
+    UUID transacaoId = UUID.randomUUID();
+    Transacao transacao = transacaoExistente(transacaoId);
+    transacao.setReconciliationStatus(StatusConciliacao.DIVERGENT);
+    transacao.setReconciliationNote("Faltou no extrato");
+    transacao.setStatementAmount(new BigDecimal("95.00"));
+    when(contextoTenant.obterTenantIdOuFalhar()).thenReturn(TENANT_ID);
+    when(transacaoRepository.findAtivaByIdAndTenant(transacaoId, TENANT_ID))
+        .thenReturn(Optional.of(transacao));
+
+    servicoFinanceiro.definirConciliacao(transacaoId, pedido("RECONCILED", "Banco corrigiu"));
+    assertThat(transacao.isReconciled()).isTrue();
+    assertThat(transacao.getStatementAmount()).isNull();
+    assertThat(transacao.getReconciliationNote()).isEqualTo("Banco corrigiu");
+
+    servicoFinanceiro.definirConciliacao(transacaoId, pedido("PENDING", "Conferir de novo"));
+    assertThat(transacao.getReconciliationStatus()).isEqualTo(StatusConciliacao.PENDING);
+    assertThat(transacao.getReconciliationNote()).isNull();
+    assertThat(transacao.getReconciledBy()).isNull();
+  }
+
+  @Test
+  @DisplayName("Pedido sem situacao ou com situacao invalida e recusado com 400")
+  void situacaoInvalida() {
+    UUID transacaoId = UUID.randomUUID();
+
+    assertThatThrownBy(() -> servicoFinanceiro.definirConciliacao(transacaoId, pedido("TALVEZ", null)))
+        .isInstanceOf(ApiClientErrorException.class)
+        .extracting(e -> ((ApiClientErrorException) e).getStatus())
+        .isEqualTo(400);
+    assertThatThrownBy(() -> servicoFinanceiro.definirConciliacao(transacaoId, new ConciliacaoRequest()))
+        .isInstanceOf(ApiClientErrorException.class)
+        .extracting(e -> ((ApiClientErrorException) e).getStatus())
+        .isEqualTo(400);
+  }
+
+  @Test
+  @DisplayName("A forma anterior {reconciled: true} continua valendo enquanto a tela nova nao sobe")
+  void formaAnteriorDoPedido() {
+    UUID transacaoId = UUID.randomUUID();
+    Transacao transacao = transacaoExistente(transacaoId);
+    when(contextoTenant.obterTenantIdOuFalhar()).thenReturn(TENANT_ID);
+    when(transacaoRepository.findAtivaByIdAndTenant(transacaoId, TENANT_ID))
+        .thenReturn(Optional.of(transacao));
+
+    ConciliacaoRequest antigo = new ConciliacaoRequest();
+    antigo.reconciled = true;
+    servicoFinanceiro.definirConciliacao(transacaoId, antigo);
+
+    assertThat(transacao.getReconciliationStatus()).isEqualTo(StatusConciliacao.RECONCILED);
+    assertThat(transacao.isReconciled()).isTrue();
+  }
+
+  @Test
+  @DisplayName("Lancamento divergente continua editavel: e assim que se corrige")
+  void divergenteNaoTravaEdicao() {
+    UUID transacaoId = UUID.randomUUID();
+    Transacao transacao = transacaoExistente(transacaoId);
+    transacao.setReconciliationStatus(StatusConciliacao.DIVERGENT);
+    when(contextoTenant.obterTenantIdOuFalhar()).thenReturn(TENANT_ID);
+    when(transacaoRepository.findAtivaByIdAndTenant(transacaoId, TENANT_ID))
+        .thenReturn(Optional.of(transacao));
+
+    servicoFinanceiro.deletar(transacaoId);
+
+    assertThat(transacao.getDeletedAt()).isNotNull();
+  }
+
+  @Test
+  @DisplayName("Duplicidade: lancamento automatico so compara com os manuais; manual compara com todos")
+  void duplicidadeSoComparaManualQuandoAutomatico() {
+    UUID comandaId = UUID.randomUUID();
+    UUID manualId = UUID.randomUUID();
+    Transacao automatico = transacaoExistente(comandaId);
+    automatico.setComandaId(UUID.randomUUID());
+    Transacao manual = transacaoExistente(manualId);
+    when(contextoTenant.obterTenantIdOuFalhar()).thenReturn(TENANT_ID);
+    when(transacaoRepository.findAtivaByIdAndTenant(comandaId, TENANT_ID))
+        .thenReturn(Optional.of(automatico));
+    when(transacaoRepository.findAtivaByIdAndTenant(manualId, TENANT_ID))
+        .thenReturn(Optional.of(manual));
+    when(transacaoQueryRepository.listPossibleDuplicates(any(), any(), any(), org.mockito.ArgumentMatchers.anyBoolean(), org.mockito.ArgumentMatchers.anyInt()))
+        .thenReturn(List.of());
+
+    servicoFinanceiro.possiveisDuplicidades(comandaId);
+    servicoFinanceiro.possiveisDuplicidades(manualId);
+
+    verify(transacaoQueryRepository).listPossibleDuplicates(eq(automatico), any(), any(), eq(true), eq(10));
+    verify(transacaoQueryRepository).listPossibleDuplicates(eq(manual), any(), any(), eq(false), eq(10));
   }
 
   @Test
@@ -497,6 +614,13 @@ class ServicoFinanceiroTest {
     c.setTenantId(TENANT_ID);
     c.setName(nome);
     return c;
+  }
+
+  private ConciliacaoRequest pedido(String status, String justificativa) {
+    ConciliacaoRequest pedido = new ConciliacaoRequest();
+    pedido.status = status;
+    pedido.reason = justificativa;
+    return pedido;
   }
 
   private Transacao transacaoExistente(UUID id) {

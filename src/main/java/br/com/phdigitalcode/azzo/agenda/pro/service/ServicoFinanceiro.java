@@ -12,6 +12,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
@@ -20,6 +21,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
+import br.com.phdigitalcode.azzo.agenda.pro.dto.request.ConciliacaoRequest;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.request.RecurringTransactionRequest;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.request.TransacaoRequest;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.response.CategoriaResponse;
@@ -34,6 +36,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.entity.RecurringTransaction;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.Transacao;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.TransactionCategory;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.MetodoPagamento;
+import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.StatusConciliacao;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.TipoTransacao;
 import br.com.phdigitalcode.azzo.agenda.pro.exception.ApiClientErrorException;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditConstants;
@@ -67,6 +70,7 @@ import jakarta.persistence.PersistenceContext;
 public class ServicoFinanceiro {
 
   private static final ZoneId ZONA_BR = ZoneId.of("America/Sao_Paulo");
+  private static final int LIMITE_DE_DUPLICIDADES = 10;
 
   @PersistenceContext private EntityManager entityManager;
 
@@ -119,12 +123,22 @@ public class ServicoFinanceiro {
       UUID professionalId,
       Boolean reconciled,
       String q,
+      StatusConciliacao reconciliationStatus,
       int page,
       int limit) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     TransacaoFilter filter =
         new TransacaoFilter(
-            tenantId, from, to, type, categoryId, paymentMethod, professionalId, reconciled, q);
+            tenantId,
+            from,
+            to,
+            type,
+            categoryId,
+            paymentMethod,
+            professionalId,
+            reconciled,
+            q,
+            reconciliationStatus);
 
     long totalCount = transacaoQueryRepository.countFiltered(filter);
     List<TransacaoResponse> items =
@@ -149,15 +163,25 @@ public class ServicoFinanceiro {
       MetodoPagamento paymentMethod,
       UUID professionalId,
       Boolean reconciled,
-      String q) {
+      String q,
+      StatusConciliacao reconciliationStatus) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     TransacaoFilter filtro =
         new TransacaoFilter(
-            tenantId, from, to, type, categoryId, paymentMethod, professionalId, reconciled, q);
+            tenantId,
+            from,
+            to,
+            type,
+            categoryId,
+            paymentMethod,
+            professionalId,
+            reconciled,
+            q,
+            reconciliationStatus);
     TransacaoQueryRepository.SummaryTotals summaryTotals =
         transacaoQueryRepository.summarizeFiltered(filtro);
     TransacaoQueryRepository.ReconciliationCounts contagens =
-        transacaoQueryRepository.countByReconciled(filtro);
+        transacaoQueryRepository.countByReconciliationStatus(filtro);
 
     ResumoFinanceiroResponse r = new ResumoFinanceiroResponse();
     r.totalIncome = summaryTotals.totalIncome();
@@ -165,6 +189,7 @@ public class ServicoFinanceiro {
     r.balance = NumericUtil.subtract(r.totalIncome, r.totalExpenses);
     r.pendingCount = contagens.pending();
     r.reconciledCount = contagens.reconciled();
+    r.divergentCount = contagens.divergent();
     return r;
   }
 
@@ -428,64 +453,92 @@ public class ServicoFinanceiro {
 
   // ─── CONCILIACAO (F2.1) ──────────────────────────────────────────────────
 
+  /**
+   * Leva o lancamento a situacao pedida. Repetir o mesmo pedido nao muda nada nem gera outro evento:
+   * e o que protege do duplo clique e da nova tentativa depois de falha de rede.
+   *
+   * <p>Reabrir e marcar divergencia exigem texto: quem fecha o mes precisa saber por que. Nada aqui
+   * mexe em valor, data, tipo ou forma, e o valor do extrato e so anotacao: o saldo nao muda.
+   */
   @Transactional
-  public TransacaoResponse conciliar(UUID id) {
+  public TransacaoResponse definirConciliacao(UUID id, ConciliacaoRequest pedido) {
+    StatusConciliacao destino = resolverStatusPedido(pedido);
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Transacao t =
         transacaoRepository
             .findAtivaByIdAndTenant(id, tenantId)
             .orElseThrow(() -> new ApiClientErrorException("Transação não encontrada", 404));
 
-    boolean antes = t.isReconciled();
-    t.setReconciled(!antes);
-    t.setReconciledAt(t.isReconciled() ? Instant.now() : null);
+    StatusConciliacao origem = t.getReconciliationStatus();
+    if (origem == destino) {
+      return toResponse(t);
+    }
+    String justificativa = normalizeNullable(pedido.reason);
+    if (destino == StatusConciliacao.PENDING && justificativa == null) {
+      throw new ApiClientErrorException("Informe por que a conciliação está sendo reaberta.", 400);
+    }
+    if (destino == StatusConciliacao.DIVERGENT && justificativa == null) {
+      throw new ApiClientErrorException("Descreva a divergência encontrada no extrato.", 400);
+    }
+
+    boolean conciliado = destino == StatusConciliacao.RECONCILED;
+    boolean pendente = destino == StatusConciliacao.PENDING;
+    t.setReconciliationStatus(destino);
+    t.setReconciled(conciliado);
+    t.setReconciledAt(conciliado ? Instant.now() : null);
+    t.setReconciledBy(pendente ? null : authenticatedUser.idOuNulo());
+    t.setReconciliationNote(pendente ? null : justificativa);
+    t.setStatementAmount(destino == StatusConciliacao.DIVERGENT ? pedido.statementAmount : null);
+
+    Map<String, Object> depois = new LinkedHashMap<>();
+    depois.put("reconciliationStatus", destino.name());
+    if (justificativa != null) depois.put("reason", justificativa);
+    if (t.getStatementAmount() != null) depois.put("statementAmount", t.getStatementAmount());
     registrarAuditoriaFinanceiro(
         tenantId,
         "FINANCE_TRANSACTION_RECONCILE",
-        Map.of("reconciled", antes),
-        Map.of("reconciled", t.isReconciled()),
+        Map.of("reconciliationStatus", origem.name()),
+        depois,
         id.toString());
     return toResponse(t);
   }
 
-  /**
-   * Leva o lancamento ao estado pedido (28/10/2026). Repetir o mesmo pedido nao muda nada nem gera
-   * outro evento: e o que protege do duplo clique e da nova tentativa depois de falha de rede.
-   *
-   * <p>Reabrir exige justificativa — quem fecha o mes precisa saber por que uma conferencia foi
-   * desfeita. Nada aqui mexe em valor, data, tipo ou forma: o saldo nao muda.
-   */
-  @Transactional
-  public TransacaoResponse definirConciliacao(UUID id, Boolean reconciled, String reason) {
-    if (reconciled == null) {
-      throw new ApiClientErrorException("Informe se o lançamento fica conciliado ou não.", 400);
+  private StatusConciliacao resolverStatusPedido(ConciliacaoRequest pedido) {
+    if (pedido.status != null && !pedido.status.isBlank()) {
+      try {
+        return StatusConciliacao.valueOf(pedido.status.trim().toUpperCase(Locale.ROOT));
+      } catch (IllegalArgumentException e) {
+        throw new ApiClientErrorException("Situação de conciliação inválida.", 400);
+      }
     }
+    if (pedido.reconciled != null) {
+      return pedido.reconciled ? StatusConciliacao.RECONCILED : StatusConciliacao.PENDING;
+    }
+    throw new ApiClientErrorException("Informe a situação da conciliação.", 400);
+  }
+
+  /**
+   * Quem pode repetir este lancamento: mesmo tipo, valor e forma, do dia anterior ao seguinte. So
+   * aviso. Para um lancamento automatico, so os manuais contam: duas vendas iguais no dia sao rotina.
+   */
+  @Transactional(readOnly = true)
+  public List<TransacaoResponse> possiveisDuplicidades(UUID id) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Transacao t =
         transacaoRepository
             .findAtivaByIdAndTenant(id, tenantId)
             .orElseThrow(() -> new ApiClientErrorException("Transação não encontrada", 404));
 
-    if (t.isReconciled() == reconciled) {
-      return toResponse(t);
-    }
-    String justificativa = normalizeNullable(reason);
-    if (!reconciled && justificativa == null) {
-      throw new ApiClientErrorException("Informe por que a conciliação está sendo reaberta.", 400);
-    }
-
-    t.setReconciled(reconciled);
-    t.setReconciledAt(reconciled ? Instant.now() : null);
-    Map<String, Object> depois = new LinkedHashMap<>();
-    depois.put("reconciled", reconciled);
-    if (justificativa != null) depois.put("reason", justificativa);
-    registrarAuditoriaFinanceiro(
-        tenantId,
-        "FINANCE_TRANSACTION_RECONCILE",
-        Map.of("reconciled", !reconciled),
-        depois,
-        id.toString());
-    return toResponse(t);
+    LocalDate dia = t.getDate().atZone(ZONA_BR).toLocalDate();
+    Instant de = dia.minusDays(1).atStartOfDay(ZONA_BR).toInstant();
+    Instant ate = dia.plusDays(2).atStartOfDay(ZONA_BR).minusNanos(1).toInstant();
+    boolean automatico =
+        t.getComandaId() != null || t.getAppointmentId() != null || t.getRecurringId() != null;
+    return transacaoQueryRepository
+        .listPossibleDuplicates(t, de, ate, automatico, LIMITE_DE_DUPLICIDADES)
+        .stream()
+        .map(this::toResponse)
+        .toList();
   }
 
   // ─── EXPORTACAO CSV (F1.2)───────────────────────────────────────────────
@@ -499,12 +552,22 @@ public class ServicoFinanceiro {
       MetodoPagamento paymentMethod,
       UUID professionalId,
       Boolean reconciled,
-      String q) {
+      String q,
+      StatusConciliacao reconciliationStatus) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     List<Transacao> transacoes =
         transacaoQueryRepository.listFiltered(
             new TransacaoFilter(
-                tenantId, from, to, type, categoryId, paymentMethod, professionalId, reconciled, q),
+                tenantId,
+                from,
+                to,
+                type,
+                categoryId,
+                paymentMethod,
+                professionalId,
+                reconciled,
+                q,
+                reconciliationStatus),
             0,
             0);
 
@@ -525,7 +588,10 @@ public class ServicoFinanceiro {
               .replace('#', ',');
       String pagamento = t.getPaymentMethod() != null ? translatePaymentMethod(t.getPaymentMethod()) : "";
       String profissional = resolveProfessionalCsvCell(tenantId, t.getProfessionalId());
-      String conciliado = t.isReconciled() ? "Sim" : "Nao";
+      String conciliado =
+          t.getReconciliationStatus() == StatusConciliacao.DIVERGENT
+              ? "Divergente"
+              : t.isReconciled() ? "Sim" : "Nao";
       linhas.add(
           String.join(
               ";", data, tipo, categoria, descricao, valor, pagamento, profissional, conciliado));
@@ -837,6 +903,10 @@ public class ServicoFinanceiro {
     r.createdAt = t.getCreatedAt() != null ? t.getCreatedAt().toString() : null;
     r.reconciled = t.isReconciled();
     r.reconciledAt = t.getReconciledAt() != null ? t.getReconciledAt().toString() : null;
+    r.reconciliationStatus = t.getReconciliationStatus().name();
+    r.reconciledBy = t.getReconciledBy() != null ? t.getReconciledBy().toString() : null;
+    r.reconciliationNote = t.getReconciliationNote();
+    r.statementAmount = t.getStatementAmount();
     r.source = t.getSource();
     r.recurringId = t.getRecurringId() != null ? t.getRecurringId().toString() : null;
     return r;
