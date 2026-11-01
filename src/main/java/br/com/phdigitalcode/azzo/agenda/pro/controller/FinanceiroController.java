@@ -38,6 +38,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.dto.response.TransacaoResponse;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.MetodoPagamento;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.StatusConciliacao;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.TipoTransacao;
+import br.com.phdigitalcode.azzo.agenda.pro.security.PermissionService;
 import br.com.phdigitalcode.azzo.agenda.pro.security.RequiresPermission;
 import br.com.phdigitalcode.azzo.agenda.pro.service.ServicoFinanceiro;
 import br.com.phdigitalcode.azzo.agenda.pro.util.DataUtil;
@@ -56,9 +57,12 @@ public class FinanceiroController {
   private static final ZoneId ZONA_BR = ZoneId.of("America/Sao_Paulo");
 
   private final ServicoFinanceiro servicoFinanceiro;
+  private final PermissionService permissionService;
 
-  public FinanceiroController(ServicoFinanceiro servicoFinanceiro) {
+  public FinanceiroController(
+      ServicoFinanceiro servicoFinanceiro, PermissionService permissionService) {
     this.servicoFinanceiro = servicoFinanceiro;
+    this.permissionService = permissionService;
   }
 
   // ─── TRANSACOES ──────────────────────────────────────────────────────────
@@ -104,7 +108,7 @@ public class FinanceiroController {
       @RequestParam(required = false) String reconciled,
       @RequestParam(required = false) String q,
       @RequestParam(required = false) String reconciliationStatus) {
-    return servicoFinanceiro.resumo(
+    ResumoFinanceiroResponse resumo = servicoFinanceiro.resumo(
         parseFilterStartInstantNullable(from),
         parseFilterEndInstantNullable(to),
         parseEnumNullable(type, TipoTransacao.class),
@@ -114,6 +118,8 @@ public class FinanceiroController {
         parseBooleanNullable(reconciled),
         q,
         parseEnumNullable(reconciliationStatus, StatusConciliacao.class));
+    resumo.canManage = permissionService.possuiPermissao("finance:manage");
+    return resumo;
   }
 
   @PostMapping
