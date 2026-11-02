@@ -67,6 +67,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.repository.TenantOperationalSettings
 import br.com.phdigitalcode.azzo.agenda.pro.repository.TransacaoRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.TransactionCategoryRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.security.AuthenticatedUser;
+import br.com.phdigitalcode.azzo.agenda.pro.security.PermissionService;
 import br.com.phdigitalcode.azzo.agenda.pro.security.ContextoTenant;
 import br.com.phdigitalcode.azzo.agenda.pro.util.NumericUtil;
 
@@ -121,6 +122,8 @@ public class ServicoComanda {
 
   private final AuditService auditService;
 
+  private final PermissionService permissionService;
+
   public ServicoComanda(
       ContextoTenant contextoTenant,
       AuthenticatedUser authenticatedUser,
@@ -149,7 +152,9 @@ public class ServicoComanda {
       AuditService auditService,
       TravaFinanceira travaFinanceira,
       ClientMembershipRepository clientMembershipRepository,
-      ClientMembershipBalanceRepository clientMembershipBalanceRepository) {
+      ClientMembershipBalanceRepository clientMembershipBalanceRepository,
+      PermissionService permissionService) {
+    this.permissionService = permissionService;
     this.contextoTenant = contextoTenant;
     this.authenticatedUser = authenticatedUser;
     this.comandaRepository = comandaRepository;
@@ -344,6 +349,8 @@ public class ServicoComanda {
         && profissionalRepository.findByIdAndTenantId(professionalId, tenantId).isEmpty()) {
       throw new IllegalArgumentException("Profissional não encontrado.");
     }
+    // O item que vem do agendamento nao e lancamento de quem conclui: a atendente conclui pelo colega.
+    if (!precoDoAgendamento) exigirQuePossaLancarPara(tenantId, professionalId);
 
     exigirConfirmacaoDeDuplicado(comanda, request, referenciaId);
 
@@ -874,6 +881,10 @@ public class ServicoComanda {
     exigirComandaDoProfissional(tenantId, comanda);
     exigirAberta(comanda);
 
+    if (profissionalDoUsuarioLogado(tenantId) != null
+        && !permissionService.possuiPermissao(LANCAR_PARA_OUTROS)) {
+      throw new IllegalArgumentException("Seu perfil de acesso não permite dar desconto.");
+    }
     if (request.percentual.compareTo(new BigDecimal("100")) > 0) {
       throw new IllegalArgumentException("Desconto não pode ser maior que 100%.");
     }
@@ -1831,8 +1842,26 @@ public class ServicoComanda {
    * cadastro de profissional: nesse caso nao existe "comanda dele" para delimitar, e o papel
    * sozinho ja foi conferido no controller.
    */
+  /** Opcoes do perfil de acesso, configuradas pelo dono (decisao de 02/11/2026). */
+  private static final String COMANDAS_DE_TODOS = "pos:others";
+
+  private static final String LANCAR_PARA_OUTROS = "pos:others-items";
+
+  /** Profissional lanca para si, a nao ser que o perfil de acesso lhe de a opcao. */
+  private void exigirQuePossaLancarPara(UUID tenantId, UUID professionalId) {
+    UUID euMesmo = profissionalDoUsuarioLogado(tenantId);
+    if (euMesmo == null || professionalId == null || euMesmo.equals(professionalId)) return;
+    if (permissionService.possuiPermissao(LANCAR_PARA_OUTROS)) return;
+    throw new IllegalArgumentException("Seu perfil de acesso só permite lançar serviços para você.");
+  }
+
+  /**
+   * O profissional a que o usuario logado fica restrito; {@code null} se nao ha restricao. Quem tem
+   * a opcao de operar todas as comandas (a atendente) trabalha como a recepcao.
+   */
   private UUID profissionalDoUsuarioLogado(UUID tenantId) {
     if (!authenticatedUser.temRole("PROFESSIONAL")) return null;
+    if (permissionService.possuiPermissao(COMANDAS_DE_TODOS)) return null;
     if (authenticatedUser.temRole("OWNER")
         || authenticatedUser.temRole("STAFF")
         || authenticatedUser.temRole("ADMIN")) {
