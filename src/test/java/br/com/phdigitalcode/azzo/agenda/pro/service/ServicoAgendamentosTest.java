@@ -373,10 +373,36 @@ class ServicoAgendamentosTest {
     }
 
     @Test
+    @DisplayName("so com a opcao de editar, nao marca na agenda do colega")
+    void soEditarNaoMarcaNaAgendaDoColega() {
+      logadoComoOutroProfissional();
+      lenient().when(permissionService.possuiPermissao("appointment:others-edit")).thenReturn(true);
+      lenient()
+          .when(tenantOperationalSettingsService.getDiscountPolicy(eq(tenantId)))
+          .thenReturn(semTetoDeDesconto());
+      lenient()
+          .when(tenantOperationalSettingsService.isClosedOnSpecialDate(eq(tenantId), any()))
+          .thenReturn(false);
+      lenient()
+          .when(profissionalRepository.findByIdAndTenantIdAndIsActiveTrue(professionalId, tenantId))
+          .thenReturn(Optional.of(profissional()));
+      lenient()
+          .when(servicoRepository.findByIdAndTenantId(serviceId, tenantId))
+          .thenReturn(Optional.of(servico(30, "100.00")));
+      lenient()
+          .when(tenantOperationalSettingsService.isBusinessOpenAt(eq(tenantId), any(), any(), any()))
+          .thenReturn(true);
+
+      assertThatThrownBy(() -> service.criar(requestValido()))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("Acesso negado");
+    }
+
+    @Test
     @DisplayName("com a opcao do perfil, a atendente marca na agenda do colega")
     void comAOpcaoDoPerfilMarcaNaAgendaDoColega() {
       logadoComoOutroProfissional();
-      when(permissionService.possuiPermissao("appointment:others")).thenReturn(true);
+      lenient().when(permissionService.possuiPermissao("appointment:others")).thenReturn(true);
       stubCriacaoSemConflito();
 
       service.criar(requestValido());
@@ -1710,6 +1736,47 @@ class ServicoAgendamentosTest {
           .hasMessage(NEGADO);
 
       assertThat(doColega.getNotes()).isNotEqualTo("mudei a nota do colega");
+    }
+
+    @Test
+    @DisplayName("so com a opcao de agendar, nao edita nem cancela o agendamento do colega")
+    void soAgendarNaoEditaNemCancela() {
+      lenient().when(permissionService.possuiPermissao("appointment:others")).thenReturn(true);
+      AppointmentUpdateRequest req = new AppointmentUpdateRequest();
+      req.notes = "mudei a nota do colega";
+
+      assertThatThrownBy(() -> service.atualizar(doColega.getId(), req))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessage(NEGADO);
+      assertThatThrownBy(() -> service.atualizarStatus(doColega.getId(), "CANCELLED"))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessage(NEGADO);
+
+      assertThat(doColega.getStatus()).isEqualTo(StatusAgendamento.CONFIRMED);
+    }
+
+    @Test
+    @DisplayName("com a opcao de editar, altera o agendamento do colega")
+    void comAOpcaoDeEditarAlteraODoColega() {
+      lenient().when(permissionService.possuiPermissao("appointment:others-edit")).thenReturn(true);
+      AppointmentUpdateRequest req = new AppointmentUpdateRequest();
+      req.notes = "ajuste da recepcao";
+
+      service.atualizar(doColega.getId(), req);
+
+      assertThat(doColega.getNotes()).isEqualTo("ajuste da recepcao");
+    }
+
+    @Test
+    @DisplayName("nem com a opcao de editar exclui o agendamento do colega: esse se cancela")
+    void opcaoDeEditarNaoLiberaExcluir() {
+      lenient().when(permissionService.possuiPermissao(any())).thenReturn(true);
+
+      assertThatThrownBy(() -> service.deletar(doColega.getId()))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessage(NEGADO);
+
+      verify(agendamentoRepository, never()).excluirPorIdETenant(any(), any());
     }
 
     @Test

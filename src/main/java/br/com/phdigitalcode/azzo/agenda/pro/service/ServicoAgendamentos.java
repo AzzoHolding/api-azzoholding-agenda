@@ -337,7 +337,7 @@ public class ServicoAgendamentos {
     List<ResolvedAppointmentItem> resolvedItems = aplicar(req, a, tenantId);
     // A tela do profissional so oferece a propria agenda, mas o backend nao conferia: uma chamada
     // direta marcava na agenda do colega (teste com perfil de profissional, 02/11/2026).
-    exigirQueOProfissionalSoAcessaOProprio(tenantId, a);
+    exigirQuePossaCriarPara(tenantId, a);
     // Fix 3: serializa criacoes concorrentes para o mesmo profissional/data antes de checar
     // conflitos, fechando a janela de corrida entre o SELECT de conflitos e o INSERT do
     // agendamento (ver AgendamentoQueryRepository#lockProfessionalDateForWrite). Precisa estar
@@ -402,7 +402,7 @@ public class ServicoAgendamentos {
         agendamentoRepository
             .findByIdAndTenantId(id, tenantId)
             .orElseThrow(() -> new IllegalArgumentException("Agendamento não encontrado"));
-    exigirQueOProfissionalSoAcessaOProprio(tenantId, a);
+    exigirQuePossaAlterar(tenantId, a);
     Map<String, Object> before = snapshotAgendamento(a);
 
     StatusAgendamento statusAnterior = a.getStatus();
@@ -593,7 +593,7 @@ public class ServicoAgendamentos {
         agendamentoRepository
             .findByIdAndTenantId(id, tenantId)
             .orElseThrow(() -> new IllegalArgumentException("Agendamento não encontrado"));
-    exigirQueOProfissionalSoAcessaOProprio(tenantId, a);
+    exigirQuePossaAlterar(tenantId, a);
     if (a.getStatus() == StatusAgendamento.COMPLETED
         || a.getStatus() == StatusAgendamento.CANCELLED) {
       throw new IllegalArgumentException(
@@ -751,7 +751,7 @@ public class ServicoAgendamentos {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Agendamento before = agendamentoRepository.findByIdAndTenantId(id, tenantId).orElse(null);
     if (before == null) throw new IllegalArgumentException("Agendamento não encontrado");
-    exigirQueOProfissionalSoAcessaOProprio(tenantId, before);
+    exigirQuePossaExcluir(tenantId, before);
 
     // Excluir e apagar de vez — o banco levava junto o SINAL pago e o registro do atendimento. So
     // sai o agendamento que ainda nao aconteceu e nunca envolveu dinheiro; o resto se CANCELA,
@@ -835,7 +835,7 @@ public class ServicoAgendamentos {
             .findByIdAndTenantId(id, tenantId)
             .orElseThrow(() -> new IllegalArgumentException("Agendamento não encontrado"));
 
-    exigirQueOProfissionalSoAcessaOProprio(tenantId, a);
+    exigirQuePossaAlterar(tenantId, a);
 
     Map<String, Object> before = snapshotAgendamento(a);
 
@@ -922,7 +922,7 @@ public class ServicoAgendamentos {
         agendamentoRepository
             .findByIdAndTenantId(appointmentId, tenantId)
             .orElseThrow(() -> new IllegalArgumentException("Agendamento não encontrado"));
-    exigirQueOProfissionalSoAcessaOProprio(tenantId, appointment);
+    exigirQuePossaAlterar(tenantId, appointment);
     AppointmentCustomerNote note =
         appointmentCustomerNoteRepository
             .findByIdAndTenantIdAndAppointmentId(noteId, tenantId, appointmentId)
@@ -941,7 +941,7 @@ public class ServicoAgendamentos {
         agendamentoRepository
             .findByIdAndTenantId(appointmentId, tenantId)
             .orElseThrow(() -> new IllegalArgumentException("Agendamento não encontrado"));
-    exigirQueOProfissionalSoAcessaOProprio(tenantId, appointment);
+    exigirQuePossaAlterar(tenantId, appointment);
     validarConteudoNota(request);
 
     AppointmentCustomerNote note = new AppointmentCustomerNote();
@@ -972,7 +972,7 @@ public class ServicoAgendamentos {
         agendamentoRepository
             .findByIdAndTenantId(appointmentId, tenantId)
             .orElseThrow(() -> new IllegalArgumentException("Agendamento não encontrado"));
-    exigirQueOProfissionalSoAcessaOProprio(tenantId, appointment);
+    exigirQuePossaAlterar(tenantId, appointment);
     AppointmentCustomerNote note =
         appointmentCustomerNoteRepository
             .findByIdAndTenantIdAndAppointmentId(noteId, tenantId, appointmentId)
@@ -2741,13 +2741,20 @@ public class ServicoAgendamentos {
     return "\"" + value.replace("\"", "\"\"") + "\"";
   }
 
+  /** Opcao do perfil de acesso: ver a agenda de todos e criar para qualquer profissional. */
+  private static final String AGENDAR_PARA_OUTROS = "appointment:others";
+
+  /** Opcao do perfil de acesso: ver a agenda de todos e alterar ou cancelar o que e dos outros. */
+  private static final String EDITAR_DE_OUTROS = "appointment:others-edit";
+
   /**
-   * Fica restrito a propria agenda? Profissional, sim, a nao ser que um perfil de acesso lhe de a
-   * opcao "Agendar para outros profissionais": a atendente marca para todos (02/11/2026).
+   * Ve so a propria agenda? Profissional, sim, a nao ser que um perfil de acesso lhe de uma das
+   * opcoes acima, configuradas pelo dono: a atendente trabalha com todos (02/11/2026).
    */
   private boolean isProfessional() {
     return authenticatedUser.isProfessional()
-        && !permissionService.possuiPermissao("appointment:others");
+        && !permissionService.possuiPermissao(AGENDAR_PARA_OUTROS)
+        && !permissionService.possuiPermissao(EDITAR_DE_OUTROS);
   }
 
   /**
@@ -2760,6 +2767,34 @@ public class ServicoAgendamentos {
    */
   private void exigirQueOProfissionalSoAcessaOProprio(UUID tenantId, Agendamento agendamento) {
     if (!isProfessional()) return;
+    exigirQueSejaDoProprioProfissional(tenantId, agendamento);
+  }
+
+  /** Marcar para o colega depende da opcao de agendar, e nao da de editar. */
+  private void exigirQuePossaCriarPara(UUID tenantId, Agendamento agendamento) {
+    if (!authenticatedUser.isProfessional()
+        || permissionService.possuiPermissao(AGENDAR_PARA_OUTROS)) {
+      return;
+    }
+    exigirQueSejaDoProprioProfissional(tenantId, agendamento);
+  }
+
+  /** Editar, cancelar, concluir, presenca e notas: quem so agenda para os outros nao mexe depois. */
+  private void exigirQuePossaAlterar(UUID tenantId, Agendamento agendamento) {
+    if (!authenticatedUser.isProfessional()
+        || permissionService.possuiPermissao(EDITAR_DE_OUTROS)) {
+      return;
+    }
+    exigirQueSejaDoProprioProfissional(tenantId, agendamento);
+  }
+
+  /** Excluir apaga de vez, e nenhuma opcao do perfil libera: o do colega se cancela. */
+  private void exigirQuePossaExcluir(UUID tenantId, Agendamento agendamento) {
+    if (!authenticatedUser.isProfessional()) return;
+    exigirQueSejaDoProprioProfissional(tenantId, agendamento);
+  }
+
+  private void exigirQueSejaDoProprioProfissional(UUID tenantId, Agendamento agendamento) {
     UUID userId = obterUserIdOuFalhar();
     Profissional prof =
         profissionalRepository.findByTenantIdAndUserId(tenantId, userId).orElse(null);
