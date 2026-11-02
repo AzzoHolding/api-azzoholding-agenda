@@ -11,6 +11,7 @@ public class UsuarioResponse {
   public String avatar;
   public String avatarUrl;
   public String salonName;
+  public String salonLogoUrl;
   public boolean mfaEnabled;
   public String createdAt;
 }
