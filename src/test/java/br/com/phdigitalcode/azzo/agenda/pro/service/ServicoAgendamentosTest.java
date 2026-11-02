@@ -2139,7 +2139,7 @@ class ServicoAgendamentosTest {
 
     service.deletar(a.getId());
 
-    verify(agendamentoRepository).delete(a);
+    verify(agendamentoRepository).excluirPorIdETenant(a.getId(), tenantId);
     ArgumentCaptor<AuditEventCommand> captor = ArgumentCaptor.forClass(AuditEventCommand.class);
     verify(auditService).recordSuccess(captor.capture());
     assertThat(captor.getValue().action).isEqualTo("APPOINTMENT_DELETE");
@@ -2170,7 +2170,7 @@ class ServicoAgendamentosTest {
 
     service.deletar(a.getId());
 
-    verify(agendamentoRepository).delete(a);
+    verify(agendamentoRepository).excluirPorIdETenant(a.getId(), tenantId);
   }
 
   // ─── Exclusao nao apaga dinheiro nem historico (2026-09-16, A2) ────────────

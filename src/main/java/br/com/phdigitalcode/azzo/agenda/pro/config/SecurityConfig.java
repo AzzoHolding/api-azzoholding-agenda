@@ -19,6 +19,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.security.JwtAuthenticationFilter;
 import br.com.phdigitalcode.azzo.agenda.pro.security.LicenseFilter;
 import br.com.phdigitalcode.azzo.agenda.pro.security.RequestAuditContextFilter;
 import br.com.phdigitalcode.azzo.agenda.pro.security.SecurityHeadersFilter;
+import jakarta.servlet.DispatcherType;
 
 /**
  * Equivalente Spring de {@code quarkus.http.auth.permission.*} + {@code quarkus.http.cors.*}.
@@ -67,6 +68,11 @@ public class SecurityConfig {
         .cors(cors -> cors.configurationSource(corsConfigurationSource()))
         .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
         .authorizeHttpRequests(auth -> auth
+            // O fim de um StreamingResponseBody volta como despacho ASYNC, em que o filtro de JWT
+            // nao roda: sem isto o acesso era negado com a resposta ja enviada e a conexao nunca
+            // fechava, com o CSV "baixando" para sempre (02/11/2026). O pedido original ja passou
+            // pela autorizacao inteira.
+            .dispatcherTypeMatchers(DispatcherType.ASYNC).permitAll()
             .requestMatchers(
                 "/api/v1/auth/login",
                 "/api/v1/auth/register",

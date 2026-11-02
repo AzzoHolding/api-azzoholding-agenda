@@ -1387,7 +1387,12 @@ public class ServicoEstoque {
     return response;
   }
 
-  /** So promove {@code RASCUNHO} → {@code ENVIADA}; qualquer outro status e devolvido intacto. */
+  /**
+   * So promove {@code RASCUNHO} → {@code ENVIADA}; qualquer outro status e devolvido intacto.
+   *
+   * <p>Da baixa real no saldo (decisao do dono, 02/11/2026). O saldo e conferido aqui, e nao so pela
+   * configuracao {@code bloquearSaidaSemSaldo}: transferir o que nao existe nunca faz sentido.
+   */
   @Transactional
   public TransferenciaEstoqueResponse enviarTransferencia(UUID transferenciaId) {
     EstoqueTransferencia transferencia = obterTransferenciaOuFalhar(transferenciaId);
@@ -1396,6 +1401,15 @@ public class ServicoEstoque {
     if (transferencia.getStatus() != StatusTransferenciaEstoque.RASCUNHO) {
       return before;
     }
+    if (nvl(item.getSaldoAtual()).compareTo(transferencia.getQuantidade()) < 0) {
+      throw conflito("Saldo insuficiente para transferir: há " + item.getSaldoAtual() + " em estoque.");
+    }
+    estoqueMovimentacaoService.registrarTransferencia(
+        item.getId(),
+        TipoMovimentacaoEstoque.SAIDA,
+        transferencia.getQuantidade(),
+        "Transferencia para " + transferencia.getDestino());
+    transferencia.setBaixaRealizada(true);
     transferencia.setStatus(StatusTransferenciaEstoque.ENVIADA);
     EstoqueTransferencia salva = estoqueTransferenciaRepository.save(transferencia);
     TransferenciaEstoqueResponse response = toTransferenciaResponse(salva, item);
@@ -1415,8 +1429,8 @@ public class ServicoEstoque {
    * rascunho pulava o envio e receber duas vezes auditava duas vezes. Agora ja recebida devolve
    * como esta (idempotente) e qualquer outro status e 409.
    *
-   * <p>O saldo nao muda, e isso e correto: o item tem um saldo so por salao, sem saldo por local.
-   * Transferir entre locais registra onde a mercadoria esta, sem mudar quanto existe.
+   * <p>O item tem um saldo so por salao: o que saiu no envio volta aqui. Enviada antes da V154 nao
+   * deu baixa, e receber nao pode dar entrada do que nunca saiu.
    */
   @Transactional
   public TransferenciaEstoqueResponse receberTransferencia(UUID transferenciaId) {
@@ -1428,6 +1442,13 @@ public class ServicoEstoque {
     }
     if (transferencia.getStatus() != StatusTransferenciaEstoque.ENVIADA) {
       throw conflito("So transferencia enviada pode ser recebida.");
+    }
+    if (transferencia.isBaixaRealizada()) {
+      estoqueMovimentacaoService.registrarTransferencia(
+          item.getId(),
+          TipoMovimentacaoEstoque.ENTRADA,
+          transferencia.getQuantidade(),
+          "Transferencia recebida em " + transferencia.getDestino());
     }
     transferencia.setStatus(StatusTransferenciaEstoque.RECEBIDA);
     EstoqueTransferencia salva = estoqueTransferenciaRepository.save(transferencia);

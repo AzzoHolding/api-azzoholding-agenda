@@ -12,5 +12,6 @@ public enum OrigemMovimentacaoEstoque {
   COMPRA,
   SERVICO,
   INVENTARIO,
-  VENDA
+  VENDA,
+  TRANSFERENCIA
 }

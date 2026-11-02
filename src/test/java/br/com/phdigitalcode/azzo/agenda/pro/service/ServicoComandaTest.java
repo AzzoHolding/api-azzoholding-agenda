@@ -1033,6 +1033,7 @@ class ServicoComandaTest {
 
     ComandaDtos.CancelarComandaRequest req = new ComandaDtos.CancelarComandaRequest();
     req.motivo = "  cliente desistiu  ";
+    // So sinal e Pix pendente: nao ha dinheiro recebido, logo nao ha pergunta a responder.
 
     service.cancelar(comandaId, req);
 
@@ -1041,6 +1042,76 @@ class ServicoComandaTest {
     assertThat(comanda.getStatus()).isEqualTo(Comanda.STATUS_CANCELADA);
     assertThat(comanda.getCancelMotivo()).isEqualTo("cliente desistiu");
     assertThat(comanda.getClosedAt()).isNotNull();
+  }
+
+  @Test
+  void cancelarComPagamentoExigeDizerSeOValorVolta() {
+    Comanda comanda = comanda(Comanda.STATUS_ABERTA);
+    pagamentosDaComanda(
+        pagamento(ComandaPagamento.MEIO_DINHEIRO, "30.00", ComandaPagamento.STATUS_CONFIRMADO));
+    ComandaDtos.CancelarComandaRequest req = new ComandaDtos.CancelarComandaRequest();
+    req.motivo = "desistiu";
+
+    assertThatThrownBy(() -> service.cancelar(comandaId, req))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("devolvido ao cliente");
+    assertThat(comanda.getStatus()).isEqualTo(Comanda.STATUS_ABERTA);
+  }
+
+  @Test
+  void cancelarEstornandoMarcaOPagamentoENaoLancaReceita() {
+    Comanda comanda = comanda(Comanda.STATUS_ABERTA);
+    ComandaPagamento dinheiro =
+        pagamento(ComandaPagamento.MEIO_DINHEIRO, "30.00", ComandaPagamento.STATUS_CONFIRMADO);
+    pagamentosDaComanda(dinheiro);
+    ComandaDtos.CancelarComandaRequest req = new ComandaDtos.CancelarComandaRequest();
+    req.motivo = "desistiu";
+    req.estornarPagamento = true;
+
+    service.cancelar(comandaId, req);
+
+    assertThat(dinheiro.getStatus()).isEqualTo(ComandaPagamento.STATUS_ESTORNADO);
+    assertThat(comanda.getStatus()).isEqualTo(Comanda.STATUS_CANCELADA);
+    verify(transacaoRepository, never()).save(any(Transacao.class));
+  }
+
+  @Test
+  void cancelarSemEstornarLancaOValorRetidoPorMeioDePagamento() {
+    Comanda comanda = comanda(Comanda.STATUS_ABERTA);
+    comanda.setTotal(new BigDecimal("100.00"));
+    ComandaPagamento cartao =
+        pagamento(
+            ComandaPagamento.MEIO_CARTAO_DEBITO_EXTERNO, "30.00", ComandaPagamento.STATUS_CONFIRMADO);
+    pagamentosDaComanda(cartao);
+    ComandaDtos.CancelarComandaRequest req = new ComandaDtos.CancelarComandaRequest();
+    req.motivo = "desistiu";
+    req.estornarPagamento = false;
+
+    service.cancelar(comandaId, req);
+
+    ArgumentCaptor<Transacao> lancada = ArgumentCaptor.forClass(Transacao.class);
+    verify(transacaoRepository).save(lancada.capture());
+    assertThat(lancada.getValue().getAmount()).isEqualByComparingTo("30.00");
+    assertThat(lancada.getValue().getPaymentMethod()).isEqualTo(MetodoPagamento.DEBIT_CARD);
+    assertThat(lancada.getValue().getType()).isEqualTo(TipoTransacao.INCOME);
+    assertThat(cartao.getStatus()).isEqualTo(ComandaPagamento.STATUS_CONFIRMADO);
+  }
+
+  @Test
+  void cancelarSemEstornarNaoContaOTrocoComoReceita() {
+    Comanda comanda = comanda(Comanda.STATUS_ABERTA);
+    comanda.setTotal(new BigDecimal("70.00"));
+    pagamentosDaComanda(
+        pagamento(ComandaPagamento.MEIO_DINHEIRO, "100.00", ComandaPagamento.STATUS_CONFIRMADO));
+    ComandaDtos.CancelarComandaRequest req = new ComandaDtos.CancelarComandaRequest();
+    req.motivo = "desistiu";
+    req.estornarPagamento = false;
+
+    service.cancelar(comandaId, req);
+
+    ArgumentCaptor<Transacao> lancada = ArgumentCaptor.forClass(Transacao.class);
+    verify(transacaoRepository).save(lancada.capture());
+    assertThat(lancada.getValue().getAmount()).isEqualByComparingTo("70.00");
   }
 
   // ---------------------------------------------------------------- estorno

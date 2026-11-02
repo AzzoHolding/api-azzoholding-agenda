@@ -762,7 +762,7 @@ public class ServicoAgendamentos {
     }
 
     Map<String, Object> snapshot = snapshotAgendamento(before);
-    agendamentoRepository.delete(before);
+    agendamentoRepository.excluirPorIdETenant(id, tenantId);
     auditarAgendamento(tenantId, "APPOINTMENT_DELETE", snapshot, null, id);
     LOG.info(
         CorrelatedLogging.context(

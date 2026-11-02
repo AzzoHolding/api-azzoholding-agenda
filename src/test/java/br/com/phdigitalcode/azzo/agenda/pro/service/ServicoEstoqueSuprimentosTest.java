@@ -55,6 +55,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.entity.Usuario;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.StatusInventarioEstoque;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.StatusPedidoCompraEstoque;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.StatusTransferenciaEstoque;
+import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.TipoMovimentacaoEstoque;
 import br.com.phdigitalcode.azzo.agenda.pro.exception.ApiClientErrorException;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditEventCommand;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditService;
@@ -784,6 +785,56 @@ class ServicoEstoqueSuprimentosTest {
 
     assertThat(service.enviarTransferencia(TRANSFERENCIA_ID).status).isEqualTo("ENVIADA");
     assertThat(capturarAuditoria().action).isEqualTo("STOCK_TRANSFER_SEND");
+  }
+
+  @Test
+  void enviarTransferenciaDaBaixaRealNoSaldo() {
+    EstoqueTransferencia transferencia = prepararTransferencia(StatusTransferenciaEstoque.RASCUNHO);
+    transferencia.setQuantidade(new BigDecimal("3"));
+
+    service.enviarTransferencia(TRANSFERENCIA_ID);
+
+    verify(estoqueMovimentacaoService)
+        .registrarTransferencia(
+            eq(ITEM_ID), eq(TipoMovimentacaoEstoque.SAIDA), eq(new BigDecimal("3")), any(String.class));
+    assertThat(transferencia.isBaixaRealizada()).isTrue();
+  }
+
+  /** O item do teste tem 7 em saldo. Antes passava: 9.999 unidades com 17 em saldo (02/11/2026). */
+  @Test
+  void enviarTransferenciaAcimaDoSaldoE409ENaoMexeNoEstoque() {
+    EstoqueTransferencia transferencia = prepararTransferencia(StatusTransferenciaEstoque.RASCUNHO);
+    transferencia.setQuantidade(new BigDecimal("8"));
+
+    assertThatThrownBy(() -> service.enviarTransferencia(TRANSFERENCIA_ID))
+        .isInstanceOf(ApiClientErrorException.class)
+        .satisfies(e -> assertThat(((ApiClientErrorException) e).getStatus()).isEqualTo(409));
+
+    verifyNoInteractions(estoqueMovimentacaoService);
+    assertThat(transferencia.getStatus()).isEqualTo(StatusTransferenciaEstoque.RASCUNHO);
+  }
+
+  @Test
+  void receberTransferenciaDevolveAoSaldoOQueSaiuNoEnvio() {
+    EstoqueTransferencia transferencia = prepararTransferencia(StatusTransferenciaEstoque.ENVIADA);
+    transferencia.setBaixaRealizada(true);
+    transferencia.setQuantidade(new BigDecimal("3"));
+
+    service.receberTransferencia(TRANSFERENCIA_ID);
+
+    verify(estoqueMovimentacaoService)
+        .registrarTransferencia(
+            eq(ITEM_ID), eq(TipoMovimentacaoEstoque.ENTRADA), eq(new BigDecimal("3")), any(String.class));
+  }
+
+  /** Enviada antes da V154 nao tirou nada do saldo: receber nao pode criar estoque do nada. */
+  @Test
+  void receberTransferenciaAntigaNaoDaEntradaDoQueNuncaSaiu() {
+    prepararTransferencia(StatusTransferenciaEstoque.ENVIADA);
+
+    assertThat(service.receberTransferencia(TRANSFERENCIA_ID).status).isEqualTo("RECEBIDA");
+
+    verifyNoInteractions(estoqueMovimentacaoService);
   }
 
   /** So o rascunho e promovido; qualquer outro status volta intacto e sem auditoria. */

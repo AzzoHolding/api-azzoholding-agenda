@@ -74,6 +74,12 @@ public final class ComandaDtos {
 
   public static class CancelarComandaRequest {
     @NotBlank public String motivo;
+
+    /**
+     * O que ja foi pago volta para o cliente? {@code true}: nada entra no caixa. {@code false}: o
+     * salao fica com o valor, que entra como receita. Obrigatorio quando ha pagamento confirmado.
+     */
+    public Boolean estornarPagamento;
   }
 
   public static class EstornarComandaRequest {

@@ -42,6 +42,18 @@ class GlobalExceptionHandlerTest {
   }
 
   @Test
+  void corpoAusenteOuMalformadoResponde400() {
+    ResponseEntity<ErrorResponse> response =
+        handler.handleHttpMessageNotReadable(
+            new org.springframework.http.converter.HttpMessageNotReadableException(
+                "Required request body is missing",
+                new org.springframework.mock.http.MockHttpInputMessage(new byte[0])));
+
+    assertThat(response.getStatusCode().value()).isEqualTo(400);
+    assertThat(response.getBody().code).isEqualTo("INVALID_REQUEST_BODY");
+  }
+
+  @Test
   void asaasExceptionUsaStatusCodeDaExcecaoEMensagemGenerica() {
     AsaasException ex = new AsaasException("Falha ao criar cliente Asaas: cartao invalido", 422);
     ResponseEntity<ErrorResponse> response = handler.handleAsaas(ex);

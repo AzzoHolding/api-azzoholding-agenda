@@ -9,6 +9,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -118,6 +119,14 @@ public class GlobalExceptionHandler {
         .map(fieldError -> fieldError.getField() + ": " + safeMessage(fieldError.getDefaultMessage(), "invalido"))
         .toList();
     ErrorResponse payload = new ErrorResponse("VALIDATION_ERROR", "Falha de validacao", details, resolvePath());
+    return buildErrorResponse(HttpStatus.BAD_REQUEST.value(), payload, ex);
+  }
+
+  /** Corpo ausente ou JSON malformado e erro de quem pediu: caia no generico e virava 500. */
+  @ExceptionHandler(HttpMessageNotReadableException.class)
+  public ResponseEntity<ErrorResponse> handleHttpMessageNotReadable(HttpMessageNotReadableException ex) {
+    ErrorResponse payload =
+        new ErrorResponse("INVALID_REQUEST_BODY", "Corpo da requisicao invalido", List.of(), resolvePath());
     return buildErrorResponse(HttpStatus.BAD_REQUEST.value(), payload, ex);
   }
 
