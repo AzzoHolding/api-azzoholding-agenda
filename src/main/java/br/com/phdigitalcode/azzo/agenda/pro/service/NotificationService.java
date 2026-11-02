@@ -136,6 +136,12 @@ public class NotificationService {
     UUID professionalScopeId = null;
     if (isProfessionalRole()) {
       professionalScopeId = resolverProfissionalDoUsuarioLogado(tenantId);
+      // Sem cadastro de profissional nao ha escopo: sem isto, ele veria tudo do salao.
+      if (professionalScopeId == null) {
+        NotificationListResponse vazia = new NotificationListResponse();
+        vazia.items = List.of();
+        return vazia;
+      }
     }
 
     Specification<Notification> spec =

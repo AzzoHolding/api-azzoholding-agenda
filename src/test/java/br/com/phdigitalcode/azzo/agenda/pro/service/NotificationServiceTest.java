@@ -275,6 +275,24 @@ class NotificationServiceTest {
     verify(profissionalRepository).findByTenantIdAndUserId(tenantId, userId);
   }
 
+  /** Sem escopo, a consulta iria sem filtro: o profissional veria os envios do salao inteiro. */
+  @Test
+  void listarDevolveVazioQuandoProfessionalNaoTemCadastroDeProfissional() {
+    when(authenticatedUser.temRole("PROFESSIONAL")).thenReturn(true);
+    when(authenticatedUser.temRole("OWNER")).thenReturn(false);
+    when(authenticatedUser.temRole("ADMIN")).thenReturn(false);
+    UUID userId = UUID.randomUUID();
+    when(authenticatedUser.idOuNulo()).thenReturn(userId);
+    when(profissionalRepository.findByTenantIdAndUserId(tenantId, userId))
+        .thenReturn(java.util.Optional.empty());
+
+    var resposta = service.listar(null, null, false, false, 10, null, null);
+
+    assertThat(resposta.items).isEmpty();
+    assertThat(resposta.hasMore).isFalse();
+    verify(notificationRepository, never()).findAll(any(Specification.class), any(Pageable.class));
+  }
+
   @Test
   void listarNaoResolveProfissionalQuandoUsuarioEhOwner() {
     when(authenticatedUser.temRole("PROFESSIONAL")).thenReturn(false);

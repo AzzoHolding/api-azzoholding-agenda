@@ -34,10 +34,9 @@ public final class NotificationSpecifications {
       predicates.add(cb.equal(root.get("tenantId"), tenantId));
 
       if (professionalScopeId != null) {
-        predicates.add(
-            cb.or(
-                cb.equal(root.get("professionalId"), professionalScopeId),
-                cb.isNull(root.get("professionalId"))));
+        // Sem o `professionalId` vazio: os lembretes vem assim, com telefone e nome de clientes de
+        // qualquer profissional do salao (02/11/2026).
+        predicates.add(cb.equal(root.get("professionalId"), professionalScopeId));
       }
 
       if (channel != null && !channel.isBlank()) {

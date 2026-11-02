@@ -260,7 +260,7 @@ public class ServicoCatalogoRelatorios {
           LEFT JOIN visitas_clientes v ON v.client_id = c.id
           WHERE c.tenant_id = :tenantId
           GROUP BY c.id, c.name, c.phone
-          HAVING MAX(v.dia) IS NULL OR MAX(v.dia) <= (:dataFim - (:inactiveDays || ' days')::interval)::date
+          HAVING MAX(v.dia) IS NULL OR MAX(v.dia) <= CAST(:dataFim AS date) - CAST(:inactiveDays AS int)
           ORDER BY MAX(v.dia) NULLS FIRST, c.name
           LIMIT :limit OFFSET :offset
           """);
