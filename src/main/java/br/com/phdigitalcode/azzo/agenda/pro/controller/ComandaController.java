@@ -138,7 +138,7 @@ public class ComandaController {
   }
 
   @PostMapping("/{id}/cancelar")
-  @PreAuthorize("hasRole('OWNER')")
+  @PreAuthorize("hasAnyRole('OWNER', 'PROFESSIONAL')")
   @RequiresPermission("pos:manage")
   public ComandaDtos.ComandaResponse cancelar(
       @PathVariable UUID id, @Valid @RequestBody ComandaDtos.CancelarComandaRequest request) {
