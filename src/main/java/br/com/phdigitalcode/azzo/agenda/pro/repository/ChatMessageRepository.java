@@ -85,12 +85,19 @@ public interface ChatMessageRepository extends JpaRepository<ChatMessageEntity, 
   @Transactional
   void deleteByTenantIdAndConversationId(UUID tenantId, UUID conversationId);
 
+  /**
+   * Apaga so o texto do que ja foi lido e e mais antigo que {@code threshold} (decisao do dono,
+   * 02/11/2026). Antes valia o {@code expires_at}, de 2 a 5 dias, lido ou nao: em producao nenhuma
+   * mensagem guardava mais o texto. Mensagem enviada pelo salao conta como lida: foi o salao que
+   * escreveu. A que chegou do cliente so conta depois de aberta ({@code read_at}).
+   */
   @Modifying
   @Transactional
   @Query(
       value =
           "UPDATE chat_messages SET content = NULL, updated_at = NOW() "
-              + "WHERE expires_at < :threshold AND content IS NOT NULL",
+              + "WHERE created_at < :threshold AND content IS NOT NULL "
+              + "AND (direction = 'OUTBOUND' OR read_at IS NOT NULL)",
       nativeQuery = true)
   int clearExpiredContentsRaw(@Param("threshold") Instant threshold);
 
