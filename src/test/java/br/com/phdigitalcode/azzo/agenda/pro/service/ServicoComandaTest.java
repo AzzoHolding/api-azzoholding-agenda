@@ -66,6 +66,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.repository.TenantOperationalSettings
 import br.com.phdigitalcode.azzo.agenda.pro.repository.TransacaoRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.TransactionCategoryRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.security.AuthenticatedUser;
+import br.com.phdigitalcode.azzo.agenda.pro.security.PermissionService;
 import br.com.phdigitalcode.azzo.agenda.pro.security.ContextoTenant;
 
 /**
@@ -88,6 +89,7 @@ class ServicoComandaTest {
   private EstoqueMovimentacaoService estoqueMovimentacaoService;
   private CommissionService commissionService;
   private TransacaoRepository transacaoRepository;
+  private PermissionService permissionService;
   private TransactionCategoryRepository transactionCategoryRepository;
   private ServicePackageRepository servicePackageRepository;
   private ServicePackageItemRepository servicePackageItemRepository;
@@ -128,6 +130,7 @@ class ServicoComandaTest {
     estoqueMovimentacaoService = mock(EstoqueMovimentacaoService.class);
     commissionService = mock(CommissionService.class);
     transacaoRepository = mock(TransacaoRepository.class);
+    permissionService = mock(PermissionService.class);
     transactionCategoryRepository = mock(TransactionCategoryRepository.class);
     servicePackageRepository = mock(ServicePackageRepository.class);
     servicePackageItemRepository = mock(ServicePackageItemRepository.class);
@@ -231,7 +234,8 @@ class ServicoComandaTest {
             auditService,
             travaFinanceira,
             clientMembershipRepository,
-            clientMembershipBalanceRepository);
+            clientMembershipBalanceRepository,
+            permissionService);
   }
 
   // ---------------------------------------------------------------- helpers
@@ -1112,6 +1116,57 @@ class ServicoComandaTest {
     ArgumentCaptor<Transacao> lancada = ArgumentCaptor.forClass(Transacao.class);
     verify(transacaoRepository).save(lancada.capture());
     assertThat(lancada.getValue().getAmount()).isEqualByComparingTo("70.00");
+  }
+
+  private void logadoComoProfissionalDaComanda(Comanda comanda) {
+    Profissional eu = new Profissional();
+    eu.setId(UUID.randomUUID());
+    when(authenticatedUser.temRole("PROFESSIONAL")).thenReturn(true);
+    when(profissionalRepository.findByTenantIdAndUserId(tenantId, usuarioId))
+        .thenReturn(Optional.of(eu));
+    comanda.setAbertaPor(usuarioId);
+  }
+
+  private ComandaDtos.AplicarDescontoRequest desconto() {
+    ComandaDtos.AplicarDescontoRequest req = new ComandaDtos.AplicarDescontoRequest();
+    req.percentual = new BigDecimal("10");
+    req.motivo = "teste";
+    return req;
+  }
+
+  @Test
+  void profissionalSemAOpcaoNaoDaDesconto() {
+    logadoComoProfissionalDaComanda(comanda(Comanda.STATUS_ABERTA));
+
+    assertThatThrownBy(() -> service.aplicarDesconto(comandaId, desconto()))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("não permite dar desconto");
+  }
+
+  @Test
+  void profissionalSemAOpcaoNaoLancaParaOColega() {
+    logadoComoProfissionalDaComanda(comanda(Comanda.STATUS_ABERTA));
+    UUID colega = UUID.randomUUID();
+    when(profissionalRepository.findByIdAndTenantId(colega, tenantId))
+        .thenReturn(Optional.of(new Profissional()));
+    ComandaDtos.AdicionarItemRequest req = new ComandaDtos.AdicionarItemRequest();
+    req.tipo = ComandaItem.TIPO_SERVICO;
+    req.referenciaId = UUID.randomUUID().toString();
+    req.professionalId = colega.toString();
+
+    assertThatThrownBy(() -> service.adicionarItem(comandaId, req))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("só permite lançar serviços para você");
+  }
+
+  @Test
+  void quemTemAOpcaoDeOperarTodasNaoFicaRestrito() {
+    comanda(Comanda.STATUS_ABERTA);
+    when(authenticatedUser.temRole("PROFESSIONAL")).thenReturn(true);
+    when(permissionService.possuiPermissao("pos:others")).thenReturn(true);
+
+    assertThat(service.obter(comandaId).id).isEqualTo(comandaId.toString());
+    verify(profissionalRepository, never()).findByTenantIdAndUserId(any(), any());
   }
 
   // ---------------------------------------------------------------- estorno
