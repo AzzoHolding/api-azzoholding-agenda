@@ -145,6 +145,24 @@ public class EstoqueMovimentacaoService {
   }
 
   /**
+   * Saida no envio de uma transferencia, ou entrada no recebimento. Sem lancamento financeiro: o
+   * item continua sendo do salao.
+   */
+  @Transactional
+  public MovimentacaoEstoqueResponse registrarTransferencia(
+      UUID itemEstoqueId, TipoMovimentacaoEstoque tipo, BigDecimal quantidade, String motivo) {
+    return registrar(
+        itemEstoqueId,
+        tipo.name(),
+        quantidade,
+        motivo,
+        OrigemMovimentacaoEstoque.TRANSFERENCIA.name(),
+        null,
+        null,
+        null);
+  }
+
+  /**
    * Entrada vinda do recebimento de um pedido de compra. Sem lancamento financeiro: o pedido nao
    * tem forma de pagamento, e quem paga o fornecedor lanca a despesa pelo financeiro.
    */
