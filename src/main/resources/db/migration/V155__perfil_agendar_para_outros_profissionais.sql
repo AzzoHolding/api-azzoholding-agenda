@@ -12,7 +12,7 @@ ON CONFLICT (code) DO NOTHING;
 INSERT INTO item_menu (id, route, label, is_active, display_order, icon_key, sidebar_visible, created_at, updated_at)
 VALUES (
   gen_random_uuid(), '/agenda/outros-profissionais', 'Agendar para outros profissionais',
-  TRUE, 21, 'Calendar', FALSE, NOW(), NOW()
+  TRUE, 32, 'Calendar', FALSE, NOW(), NOW()
 )
 ON CONFLICT (route) DO NOTHING;
 
