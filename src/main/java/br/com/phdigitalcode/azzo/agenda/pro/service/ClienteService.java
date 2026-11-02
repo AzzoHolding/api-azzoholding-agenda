@@ -10,6 +10,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -32,8 +33,10 @@ import br.com.phdigitalcode.azzo.agenda.pro.integration.MinioStorageService;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.ClienteRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.ClienteStatsRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.ClienteStatsRepository.ClienteStats;
+import br.com.phdigitalcode.azzo.agenda.pro.security.AuthenticatedUser;
 import br.com.phdigitalcode.azzo.agenda.pro.security.ContextoTenant;
 import br.com.phdigitalcode.azzo.agenda.pro.security.JwtPrincipal;
+import br.com.phdigitalcode.azzo.agenda.pro.security.PermissionService;
 import br.com.phdigitalcode.azzo.agenda.pro.util.CorrelatedLogging;
 import br.com.phdigitalcode.azzo.agenda.pro.util.DataUtil;
 import br.com.phdigitalcode.azzo.agenda.pro.util.IndicadoresDoCliente;
@@ -67,12 +70,19 @@ public class ClienteService {
   @org.springframework.beans.factory.annotation.Autowired
   private RastrosDoTitular rastrosDoTitular;
 
+  private final AuthenticatedUser authenticatedUser;
+  private final PermissionService permissionService;
+
   public ClienteService(
       ClienteRepository clienteRepository,
       ClienteStatsRepository clienteStatsRepository,
       ContextoTenant contextoTenant,
       AuditService auditService,
-      MinioStorageService minioStorageService) {
+      MinioStorageService minioStorageService,
+      AuthenticatedUser authenticatedUser,
+      PermissionService permissionService) {
+    this.authenticatedUser = authenticatedUser;
+    this.permissionService = permissionService;
     this.clienteRepository = clienteRepository;
     this.clienteStatsRepository = clienteStatsRepository;
     this.contextoTenant = contextoTenant;
@@ -87,6 +97,7 @@ public class ClienteService {
     List<ClienteListResponse> response = clienteRepository.findByTenantIdOrderByName(tenantId).stream()
         .limit(MAX_LIST_SIZE)
         .map(cliente -> toListResponse(cliente, statsByClient.getOrDefault(cliente.getId(), ClienteStats.EMPTY), List.of()))
+        .map(this::conformeOAcesso)
         .toList();
     LOG.info("customers.list.completed {}", CorrelatedLogging.context("tenantId", tenantId, "count", response.size()));
     return response;
@@ -104,6 +115,7 @@ public class ClienteService {
     PagedResponse<ClienteListResponse> response = new PagedResponse<>();
     response.items = pageResult.getContent().stream()
         .map(cliente -> toListResponse(cliente, statsByClient.getOrDefault(cliente.getId(), ClienteStats.EMPTY), List.of()))
+        .map(this::conformeOAcesso)
         .toList();
     response.totalCount = pageResult.getTotalElements();
     response.currentPage = page;
@@ -124,12 +136,48 @@ public class ClienteService {
       return new IllegalArgumentException("Cliente não encontrado");
     });
     LOG.info("customers.getById.completed {}", CorrelatedLogging.context("tenantId", tenantId, "clientId", id));
-    return toDetailResponse(cliente, clienteStatsRepository.findStatsByTenantAndClient(tenantId, cliente.getId()), List.of());
+    return conformeOAcesso(
+        toDetailResponse(cliente, clienteStatsRepository.findStatsByTenantAndClient(tenantId, cliente.getId()), List.of()));
+  }
+
+  /**
+   * Profissional sem a tela Clientes ve so nome e telefone (decisao do dono, 02/11/2026): a agenda
+   * precisa buscar cliente, mas CPF, e-mail, endereco, notas e gastos nao sao para ele.
+   */
+  private boolean soNomeETelefone() {
+    return authenticatedUser.isProfessional() && !permissionService.possuiPermissao("client:full");
+  }
+
+  private void exigirFichaCompleta() {
+    if (soNomeETelefone()) throw new AccessDeniedException("Acesso negado");
+  }
+
+  private <T extends ClienteListResponse> T conformeOAcesso(T cliente) {
+    if (!soNomeETelefone()) return cliente;
+    cliente.email = null;
+    cliente.avatar = null;
+    cliente.avatarUrl = null;
+    cliente.birthDate = null;
+    cliente.notes = null;
+    cliente.address = null;
+    cliente.cpfCnpj = null;
+    cliente.clientType = null;
+    cliente.topServices = List.of();
+    cliente.totalVisits = 0;
+    cliente.totalSpent = null;
+    cliente.lastVisit = null;
+    if (cliente instanceof ClienteDetailResponse detalhe) {
+      detalhe.stats = null;
+      detalhe.recentAppointments = List.of();
+      detalhe.careTimeline = List.of();
+    }
+    return cliente;
   }
 
   /** Indicadores da ficha: frequencia, retorno previsto, comparecimento e gasto em 12 meses. */
   @Transactional(readOnly = true)
   public ClienteIndicadoresResponse indicadores(UUID id) {
+    exigirFichaCompleta();
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Cliente cliente = clienteRepository.findByIdAndTenantId(id, tenantId).orElseThrow(() -> {
       LOG.warn("customers.indicators.notFound {}", CorrelatedLogging.context("tenantId", tenantId, "clientId", id));
@@ -169,11 +217,12 @@ public class ClienteService {
         CorrelatedLogging.context(
             "tenantId", tenantId, "clientId", c.getId(), "email", c.getEmail(),
             "phone", c.getPhone(), "clientType", c.getClientType()));
-    return toListResponse(c, stats, List.of());
+    return conformeOAcesso(toListResponse(c, stats, List.of()));
   }
 
   @Transactional
   public ClienteListResponse atualizar(UUID id, ClienteRequest req) {
+    exigirFichaCompleta();
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Cliente c = clienteRepository.findByIdAndTenantId(id, tenantId).orElseThrow(() -> {
       LOG.warn("customers.update.notFound {}", CorrelatedLogging.context("tenantId", tenantId, "clientId", id));
@@ -233,6 +282,7 @@ public class ClienteService {
 
   @Transactional
   public ClienteDetailResponse atualizarAvatar(UUID id, byte[] arquivo, String nomeArquivo, String contentType) {
+    exigirFichaCompleta();
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Cliente cliente = clienteRepository.findByIdAndTenantId(id, tenantId).orElseThrow(() -> {
       LOG.warn("customers.avatar.update.notFound {}", CorrelatedLogging.context("tenantId", tenantId, "clientId", id));
@@ -257,6 +307,7 @@ public class ClienteService {
 
   @Transactional
   public ClienteDetailResponse removerAvatar(UUID id) {
+    exigirFichaCompleta();
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Cliente cliente = clienteRepository.findByIdAndTenantId(id, tenantId).orElseThrow(() -> {
       LOG.warn("customers.avatar.remove.notFound {}", CorrelatedLogging.context("tenantId", tenantId, "clientId", id));

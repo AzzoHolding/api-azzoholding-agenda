@@ -55,7 +55,9 @@ class ClienteServiceExclusaoTest {
             clienteStatsRepository,
             contextoTenant,
             auditService,
-            mock(MinioStorageService.class));
+            mock(MinioStorageService.class),
+            mock(br.com.phdigitalcode.azzo.agenda.pro.security.AuthenticatedUser.class),
+            mock(br.com.phdigitalcode.azzo.agenda.pro.security.PermissionService.class));
     ReflectionTestUtils.setField(service, "vinculosDeExclusao", vinculosDeExclusao);
     rastrosDoTitular = mock(RastrosDoTitular.class);
     ReflectionTestUtils.setField(service, "rastrosDoTitular", rastrosDoTitular);
