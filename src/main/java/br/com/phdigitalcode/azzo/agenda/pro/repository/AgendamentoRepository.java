@@ -9,6 +9,7 @@ import java.util.UUID;
 import org.springframework.data.domain.Limit;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -27,6 +28,15 @@ import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.StatusAgendamento;
  */
 @Repository
 public interface AgendamentoRepository extends JpaRepository<Agendamento, UUID> {
+
+  /**
+   * Exclui direto, sem passar pela colecao {@code items}: o {@code delete(entidade)} tentava deixar
+   * {@code appointment_id} nulo nos itens antes de apagar, e o banco recusava com 500 (02/11/2026).
+   * Os itens saem pelo {@code ON DELETE CASCADE} de {@code appointment_items}.
+   */
+  @Modifying(flushAutomatically = true, clearAutomatically = true)
+  @Query("delete from Agendamento a where a.id = :id and a.tenantId = :tenantId")
+  int excluirPorIdETenant(@Param("id") UUID id, @Param("tenantId") UUID tenantId);
 
   Optional<Agendamento> findByIdAndTenantId(UUID id, UUID tenantId);
 
