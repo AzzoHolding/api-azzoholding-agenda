@@ -117,11 +117,15 @@ public class ServicoCatalogoRelatorios {
         entityManager
             .createNativeQuery(definition.sql())
             .setParameter("tenantId", tenantId)
-            .setParameter("dataInicio", inicio)
             .setParameter("dataFim", fim)
             .setParameter("limit", pageSize)
             .setParameter("offset", pageIndex * pageSize);
 
+    // Clientes inativos so olha o fim do periodo; parametro que a consulta nao tem e erro do
+    // Hibernate, e o relatorio dava 500 na tela e na exportacao (02/11/2026).
+    if (definition.sql().contains(":dataInicio")) {
+      query.setParameter("dataInicio", inicio);
+    }
     if (definition.sql().contains(":inactiveDays")) {
       query.setParameter("inactiveDays", inactiveDays == null || inactiveDays < 1 ? 90 : inactiveDays);
     }
