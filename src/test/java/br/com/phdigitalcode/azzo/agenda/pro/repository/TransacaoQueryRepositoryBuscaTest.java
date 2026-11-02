@@ -7,6 +7,7 @@ import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.StatusConciliacao;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.TransacaoQueryRepository.TransacaoFilter;
 
 class TransacaoQueryRepositoryBuscaTest {
@@ -25,11 +26,22 @@ class TransacaoQueryRepositoryBuscaTest {
   void contagemIgnoraSoAConciliacao() {
     UUID tenant = UUID.randomUUID();
     TransacaoFilter filtro =
-        new TransacaoFilter(tenant, null, null, null, null, null, null, true, "corte");
+        new TransacaoFilter(
+            tenant,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            true,
+            "corte",
+            StatusConciliacao.DIVERGENT);
 
     TransacaoFilter semAba = filtro.semConciliacao();
 
     assertThat(semAba.reconciled()).isNull();
+    assertThat(semAba.reconciliationStatus()).isNull();
     assertThat(semAba.q()).isEqualTo("corte");
     assertThat(semAba.tenantId()).isEqualTo(tenant);
   }

@@ -14,4 +14,8 @@ public class ResumoFinanceiroResponse {
    */
   public long pendingCount;
   public long reconciledCount;
+  public long divergentCount;
+
+  /** Quem pede tem {@code finance:manage}? A tela usa para nao oferecer o que terminaria em 403. */
+  public boolean canManage;
 }
