@@ -95,6 +95,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.repository.TransacaoRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.TransactionCategoryRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.UsuarioRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.security.AuthenticatedUser;
+import br.com.phdigitalcode.azzo.agenda.pro.security.PermissionService;
 import br.com.phdigitalcode.azzo.agenda.pro.security.ContextoTenant;
 import br.com.phdigitalcode.azzo.agenda.pro.util.CorrelatedLogging;
 import br.com.phdigitalcode.azzo.agenda.pro.util.DataUtil;
@@ -174,6 +175,8 @@ public class ServicoAgendamentos {
   @org.springframework.beans.factory.annotation.Autowired
   private VinculosDeExclusao vinculosDeExclusao;
 
+  private final PermissionService permissionService;
+
   public ServicoAgendamentos(
       AgendamentoRepository agendamentoRepository,
       AgendamentoQueryRepository agendamentoQueryRepository,
@@ -203,7 +206,9 @@ public class ServicoAgendamentos {
       AuditService auditService,
       ObjectMapper objectMapper,
       ContextoTenant contextoTenant,
-      AuthenticatedUser authenticatedUser) {
+      AuthenticatedUser authenticatedUser,
+      PermissionService permissionService) {
+    this.permissionService = permissionService;
     this.agendamentoRepository = agendamentoRepository;
     this.agendamentoQueryRepository = agendamentoQueryRepository;
     this.agendamentoItemRepository = agendamentoItemRepository;
@@ -330,6 +335,9 @@ public class ServicoAgendamentos {
     Agendamento a = new Agendamento();
     a.setTenantId(tenantId);
     List<ResolvedAppointmentItem> resolvedItems = aplicar(req, a, tenantId);
+    // A tela do profissional so oferece a propria agenda, mas o backend nao conferia: uma chamada
+    // direta marcava na agenda do colega (teste com perfil de profissional, 02/11/2026).
+    exigirQueOProfissionalSoAcessaOProprio(tenantId, a);
     // Fix 3: serializa criacoes concorrentes para o mesmo profissional/data antes de checar
     // conflitos, fechando a janela de corrida entre o SELECT de conflitos e o INSERT do
     // agendamento (ver AgendamentoQueryRepository#lockProfessionalDateForWrite). Precisa estar
@@ -2733,8 +2741,13 @@ public class ServicoAgendamentos {
     return "\"" + value.replace("\"", "\"\"") + "\"";
   }
 
+  /**
+   * Fica restrito a propria agenda? Profissional, sim, a nao ser que um perfil de acesso lhe de a
+   * opcao "Agendar para outros profissionais": a atendente marca para todos (02/11/2026).
+   */
   private boolean isProfessional() {
-    return authenticatedUser.isProfessional();
+    return authenticatedUser.isProfessional()
+        && !permissionService.possuiPermissao("appointment:others");
   }
 
   /**
