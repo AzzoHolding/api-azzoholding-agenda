@@ -150,6 +150,20 @@ public class FinanceiroController {
     return servicoFinanceiro.conciliarPeriodo(request.period);
   }
 
+  /** O intervalo e a contagem que a conciliacao teria agora. Nada e alterado. */
+  @GetMapping("/reconcile-period/preview")
+  @RequiresPermission("finance:manage")
+  public ConciliacaoDoPeriodoResponse previaDoPeriodo(@RequestParam String period) {
+    return servicoFinanceiro.previaDoPeriodo(period);
+  }
+
+  /** As ultimas conciliacoes finalizadas, da mais nova a mais antiga. */
+  @GetMapping("/reconcile-period")
+  @RequiresPermission("finance:manage")
+  public List<ConciliacaoDoPeriodoResponse> conciliacoesDoPeriodo() {
+    return servicoFinanceiro.conciliacoesFinalizadas();
+  }
+
   /** Lancamentos que podem repetir este: so aviso, nada e alterado nem excluido. */
   @GetMapping("/{id}/possible-duplicates")
   @RequiresPermission("finance:view")

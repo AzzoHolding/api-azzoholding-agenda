@@ -35,6 +35,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.dto.request.TransacaoRequest;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.response.ConciliacaoDoPeriodoResponse;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.response.ResumoFinanceiroResponse;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.response.TransacaoResponse;
+import br.com.phdigitalcode.azzo.agenda.pro.entity.PeriodoDeConciliacao;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.RecurringTransaction;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.TenantOperationalSettings;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.Transacao;
@@ -45,6 +46,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.StatusConciliacao;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.TipoTransacao;
 import br.com.phdigitalcode.azzo.agenda.pro.exception.ApiClientErrorException;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditService;
+import br.com.phdigitalcode.azzo.agenda.pro.repository.PeriodoDeConciliacaoRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.ProductCategoryRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.ProfissionalRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.RecurringTransactionRepository;
@@ -74,6 +76,7 @@ class ServicoFinanceiroTest {
   @Mock private CommissionService commissionService;
   @Mock private TravaFinanceira travaFinanceira;
   @Mock private TenantOperationalSettingsRepository tenantOperationalSettingsRepository;
+  @Mock private PeriodoDeConciliacaoRepository periodoDeConciliacaoRepository;
 
   private ServicoFinanceiro servicoFinanceiro;
 
@@ -92,7 +95,8 @@ class ServicoFinanceiroTest {
             auditService,
             commissionService,
             travaFinanceira,
-            tenantOperationalSettingsRepository);
+            tenantOperationalSettingsRepository,
+            periodoDeConciliacaoRepository);
   }
 
   private void salaoConciliaPor(ModoDeConciliacao modo) {
@@ -113,14 +117,25 @@ class ServicoFinanceiroTest {
   }
 
   @Test
-  @DisplayName("Periodo em curso e recusado")
-  void periodoEmCursoRecusado() {
-    salaoConciliaPor(ModoDeConciliacao.MONTHLY);
-    String mesAtual = YearMonth.now(ZoneId.of("America/Sao_Paulo")).toString();
+  @DisplayName("Dia em curso e recusado")
+  void diaEmCursoRecusado() {
+    salaoConciliaPor(ModoDeConciliacao.DAILY);
+    String hoje = LocalDate.now(ZONA_BR).toString();
 
-    assertThatThrownBy(() -> servicoFinanceiro.conciliarPeriodo(mesAtual))
+    assertThatThrownBy(() -> servicoFinanceiro.conciliarPeriodo(hoje))
         .isInstanceOf(ApiClientErrorException.class)
         .hasMessageContaining("já encerrado");
+  }
+
+  @Test
+  @DisplayName("Mes futuro e recusado")
+  void mesFuturoRecusado() {
+    salaoConciliaPor(ModoDeConciliacao.MONTHLY);
+    String proximo = YearMonth.now(ZONA_BR).plusMonths(1).toString();
+
+    assertThatThrownBy(() -> servicoFinanceiro.conciliarPeriodo(proximo))
+        .isInstanceOf(ApiClientErrorException.class)
+        .hasMessageContaining("até hoje");
   }
 
   @Test
@@ -134,7 +149,18 @@ class ServicoFinanceiroTest {
   }
 
   @Test
-  @DisplayName("Mes encerrado concilia os pendentes e conta os divergentes, sem mexer neles")
+  @DisplayName("Sem pendente nao gera conciliacao")
+  void semPendenteNaoGeraConciliacao() {
+    salaoConciliaPor(ModoDeConciliacao.MONTHLY);
+
+    assertThatThrownBy(() -> servicoFinanceiro.conciliarPeriodo("2026-09"))
+        .isInstanceOf(ApiClientErrorException.class)
+        .hasMessageContaining("Não há lançamento pendente");
+    verify(periodoDeConciliacaoRepository, never()).save(any());
+  }
+
+  @Test
+  @DisplayName("Mes encerrado vai ate o fim do mes, concilia os pendentes e nao mexe nos divergentes")
   void mesEncerradoConciliaPendentes() {
     salaoConciliaPor(ModoDeConciliacao.MONTHLY);
     Transacao pendente = new Transacao();
@@ -152,10 +178,41 @@ class ServicoFinanceiroTest {
 
     assertThat(resposta.reconciled).isEqualTo(1);
     assertThat(resposta.divergent).isEqualTo(1);
+    assertThat(resposta.startsAt)
+        .isEqualTo(LocalDate.of(2026, 9, 1).atStartOfDay(ZONA_BR).toInstant());
+    assertThat(resposta.endsAt)
+        .isEqualTo(LocalDate.of(2026, 10, 1).atStartOfDay(ZONA_BR).toInstant());
     assertThat(pendente.getReconciliationStatus()).isEqualTo(StatusConciliacao.RECONCILED);
     assertThat(pendente.isReconciled()).isTrue();
-    assertThat(pendente.getReconciliationNote()).isEqualTo("Conciliação de 09/2026");
+    assertThat(pendente.getReconciliationNote())
+        .isEqualTo("Conciliação de 01/09/2026 a 30/09/2026");
     assertThat(divergente.getReconciliationStatus()).isEqualTo(StatusConciliacao.DIVERGENT);
+    verify(periodoDeConciliacaoRepository).save(any());
+  }
+
+  @Test
+  @DisplayName("Mes em curso vai ate agora e comeca onde a conciliacao anterior terminou")
+  void mesEmCursoContinuaDaAnterior() {
+    salaoConciliaPor(ModoDeConciliacao.MONTHLY);
+    YearMonth mes = YearMonth.now(ZONA_BR);
+    Instant inicioDoMes = mes.atDay(1).atStartOfDay(ZONA_BR).toInstant();
+    Instant fimDaAnterior = Instant.now().minusSeconds(60);
+    PeriodoDeConciliacao anterior = new PeriodoDeConciliacao();
+    anterior.setEndsAt(fimDaAnterior);
+    when(periodoDeConciliacaoRepository
+            .findFirstByTenantIdAndEndsAtGreaterThanAndEndsAtLessThanEqualOrderByEndsAtDesc(
+                eq(TENANT_ID), eq(inicioDoMes), any()))
+        .thenReturn(Optional.of(anterior));
+    Instant antes = Instant.now();
+
+    ConciliacaoDoPeriodoResponse previa = servicoFinanceiro.previaDoPeriodo(mes.toString());
+
+    assertThat(previa.startsAt).isEqualTo(fimDaAnterior);
+    assertThat(previa.endsAt).isAfterOrEqualTo(antes);
+    // Lancamento atrasado entra: os pendentes contam desde o inicio do mes.
+    verify(transacaoRepository)
+        .listarDoPeriodoPorConciliacao(
+            eq(TENANT_ID), eq(StatusConciliacao.PENDING), eq(inicioDoMes), any());
   }
 
   @Test
