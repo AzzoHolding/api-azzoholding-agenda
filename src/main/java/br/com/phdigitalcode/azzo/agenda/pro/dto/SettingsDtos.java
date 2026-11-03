@@ -141,6 +141,17 @@ public final class SettingsDtos {
     public int maxDiscountPercent;
   }
 
+  // --- Modo de conciliacao (V158) ---
+
+  public static class ReconciliationModeRequest {
+    /** {@code INDIVIDUAL}, {@code DAILY} ou {@code MONTHLY}. */
+    public String reconciliationMode;
+  }
+
+  public static class ReconciliationModeResponse {
+    public String reconciliationMode;
+  }
+
   // --- Regua de lembretes (F03 — V120) ---
 
   public static class ReminderSettingsRequest {
