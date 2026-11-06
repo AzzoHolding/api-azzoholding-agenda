@@ -19,7 +19,10 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
@@ -57,6 +60,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.repository.TransacaoQueryRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.TransacaoQueryRepository.TransacaoFilter;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.TenantOperationalSettingsRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.TransacaoRepository;
+import br.com.phdigitalcode.azzo.agenda.pro.repository.UsuarioRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.TransactionCategoryRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.security.AuthenticatedUser;
 import br.com.phdigitalcode.azzo.agenda.pro.security.ContextoTenant;
@@ -96,6 +100,7 @@ public class ServicoFinanceiro {
   private final TravaFinanceira travaFinanceira;
   private final TenantOperationalSettingsRepository tenantOperationalSettingsRepository;
   private final PeriodoDeConciliacaoRepository periodoDeConciliacaoRepository;
+  private final UsuarioRepository usuarioRepository;
 
   public ServicoFinanceiro(
       TransacaoRepository transacaoRepository,
@@ -110,7 +115,8 @@ public class ServicoFinanceiro {
       CommissionService commissionService,
       TravaFinanceira travaFinanceira,
       TenantOperationalSettingsRepository tenantOperationalSettingsRepository,
-      PeriodoDeConciliacaoRepository periodoDeConciliacaoRepository) {
+      PeriodoDeConciliacaoRepository periodoDeConciliacaoRepository,
+      UsuarioRepository usuarioRepository) {
     this.transacaoRepository = transacaoRepository;
     this.transacaoQueryRepository = transacaoQueryRepository;
     this.transactionCategoryRepository = transactionCategoryRepository;
@@ -124,6 +130,7 @@ public class ServicoFinanceiro {
     this.travaFinanceira = travaFinanceira;
     this.tenantOperationalSettingsRepository = tenantOperationalSettingsRepository;
     this.periodoDeConciliacaoRepository = periodoDeConciliacaoRepository;
+    this.usuarioRepository = usuarioRepository;
   }
 
   // ─── LISTAGEM COM PAGINACAO E FILTROS (F0.3) ─────────────────────────────
@@ -502,7 +509,7 @@ public class ServicoFinanceiro {
         && modoDeConciliacao(tenantId) != ModoDeConciliacao.INDIVIDUAL) {
       throw new ApiClientErrorException("Este salão concilia por período, e não por lançamento.", 400);
     }
-    aplicarConciliacao(tenantId, t, destino, justificativa, pedido.statementAmount);
+    aplicarConciliacao(tenantId, t, destino, justificativa, pedido.statementAmount, null);
     return toResponse(t);
   }
 
@@ -524,11 +531,14 @@ public class ServicoFinanceiro {
       throw new ApiClientErrorException("Não há lançamento pendente neste período.", 400);
     }
     String justificativa = "Conciliação de " + rotuloDaJanela(janela);
+    UUID idDaConciliacao = UUID.randomUUID();
     pendentes.forEach(
-        t -> aplicarConciliacao(tenantId, t, StatusConciliacao.RECONCILED, justificativa, null));
+        t ->
+            aplicarConciliacao(
+                tenantId, t, StatusConciliacao.RECONCILED, justificativa, null, idDaConciliacao));
 
     PeriodoDeConciliacao conciliacao = new PeriodoDeConciliacao();
-    conciliacao.setId(UUID.randomUUID());
+    conciliacao.setId(idDaConciliacao);
     conciliacao.setTenantId(tenantId);
     conciliacao.setMode(modo);
     conciliacao.setStartsAt(janela.inicio());
@@ -559,15 +569,52 @@ public class ServicoFinanceiro {
   }
 
   @Transactional(readOnly = true)
-  public List<ConciliacaoDoPeriodoResponse> conciliacoesFinalizadas() {
+  public PagedResponse<ConciliacaoDoPeriodoResponse> conciliacoesFinalizadas(int pagina, int limite) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
-    return periodoDeConciliacaoRepository.findTop12ByTenantIdOrderByEndsAtDesc(tenantId).stream()
+    Page<PeriodoDeConciliacao> encontradas =
+        periodoDeConciliacaoRepository.findByTenantIdOrderByEndsAtDesc(
+            tenantId, PageRequest.of(pagina, limite));
+    Map<UUID, String> nomes = new HashMap<>();
+    usuarioRepository
+        .findAllById(
+            encontradas.getContent().stream()
+                .map(PeriodoDeConciliacao::getCreatedBy)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet()))
+        .forEach(usuario -> nomes.put(usuario.getId(), usuario.getName()));
+
+    PagedResponse<ConciliacaoDoPeriodoResponse> resposta = new PagedResponse<>();
+    resposta.items =
+        encontradas.getContent().stream()
+            .map(
+                conciliacao -> {
+                  ConciliacaoDoPeriodoResponse item = toResponse(conciliacao);
+                  item.createdByName = nomes.get(conciliacao.getCreatedBy());
+                  return item;
+                })
+            .toList();
+    resposta.totalCount = encontradas.getTotalElements();
+    resposta.currentPage = pagina;
+    resposta.totalPages = encontradas.getTotalPages();
+    return resposta;
+  }
+
+  @Transactional(readOnly = true)
+  public List<TransacaoResponse> lancamentosDaConciliacao(UUID id) {
+    UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    periodoDeConciliacaoRepository
+        .findByIdAndTenantId(id, tenantId)
+        .orElseThrow(() -> new ApiClientErrorException("Conciliação não encontrada", 404));
+    return transacaoRepository.listarDaConciliacao(tenantId, id).stream()
         .map(this::toResponse)
         .toList();
   }
 
   private ConciliacaoDoPeriodoResponse toResponse(PeriodoDeConciliacao conciliacao) {
     ConciliacaoDoPeriodoResponse resposta = new ConciliacaoDoPeriodoResponse();
+    resposta.id = conciliacao.getId() != null ? conciliacao.getId().toString() : null;
+    resposta.mode = conciliacao.getMode() != null ? conciliacao.getMode().name() : null;
+    resposta.createdAt = conciliacao.getCreatedAt();
     resposta.startsAt = conciliacao.getStartsAt();
     resposta.endsAt = conciliacao.getEndsAt();
     resposta.reconciled = conciliacao.getReconciledCount();
@@ -644,10 +691,13 @@ public class ServicoFinanceiro {
       Transacao t,
       StatusConciliacao destino,
       String justificativa,
-      BigDecimal valorNoExtrato) {
+      BigDecimal valorNoExtrato,
+      UUID idDaConciliacao) {
     StatusConciliacao origem = t.getReconciliationStatus();
     boolean conciliado = destino == StatusConciliacao.RECONCILED;
     boolean pendente = destino == StatusConciliacao.PENDING;
+    // Reabrir ou divergir tira o lancamento do grupo; conciliar um a um nao o poe em nenhum.
+    t.setReconciliationPeriodId(conciliado ? idDaConciliacao : null);
     t.setReconciliationStatus(destino);
     t.setReconciled(conciliado);
     t.setReconciledAt(conciliado ? Instant.now() : null);
@@ -1070,6 +1120,8 @@ public class ServicoFinanceiro {
     r.reconciliationStatus = t.getReconciliationStatus().name();
     r.reconciledBy = t.getReconciledBy() != null ? t.getReconciledBy().toString() : null;
     r.reconciliationNote = t.getReconciliationNote();
+    r.reconciliationPeriodId =
+        t.getReconciliationPeriodId() != null ? t.getReconciliationPeriodId().toString() : null;
     r.statementAmount = t.getStatementAmount();
     r.source = t.getSource();
     r.recurringId = t.getRecurringId() != null ? t.getRecurringId().toString() : null;

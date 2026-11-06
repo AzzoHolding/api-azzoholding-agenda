@@ -4,6 +4,8 @@ import java.time.Instant;
 
 /** O intervalo de uma conciliacao, quantos lancamentos ela concilia e quantos seguem divergentes. */
 public class ConciliacaoDoPeriodoResponse {
+  public String id;
+  public String mode;
   public String period;
   public Instant startsAt;
 
@@ -15,4 +17,6 @@ public class ConciliacaoDoPeriodoResponse {
 
   public int reconciled;
   public int divergent;
+  public Instant createdAt;
+  public String createdByName;
 }

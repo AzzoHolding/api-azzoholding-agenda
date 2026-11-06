@@ -5,6 +5,8 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
@@ -18,5 +20,7 @@ public interface PeriodoDeConciliacaoRepository extends JpaRepository<PeriodoDeC
       findFirstByTenantIdAndEndsAtGreaterThanAndEndsAtLessThanEqualOrderByEndsAtDesc(
           UUID tenantId, Instant depoisDe, Instant ate);
 
-  List<PeriodoDeConciliacao> findTop12ByTenantIdOrderByEndsAtDesc(UUID tenantId);
+  Page<PeriodoDeConciliacao> findByTenantIdOrderByEndsAtDesc(UUID tenantId, Pageable pageable);
+
+  Optional<PeriodoDeConciliacao> findByIdAndTenantId(UUID id, UUID tenantId);
 }
