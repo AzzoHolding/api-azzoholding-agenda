@@ -34,11 +34,35 @@ public class NfseProviderCapabilitiesService {
   @Transactional(readOnly = true)
   public List<NfseDtos.ProviderCapabilities> listarProviderCapabilities(
       String municipioCodigoIbge, String provedor) {
-    return nfseProviderCapabilitiesRepository
-        .listByMunicipioAndProvedor(normalizeOrNull(municipioCodigoIbge), normalizeOrNull(provedor))
-        .stream()
-        .map(this::toProviderCapabilitiesDto)
-        .toList();
+    List<NfseDtos.ProviderCapabilities> cadastradas =
+        nfseProviderCapabilitiesRepository
+            .listByMunicipioAndProvedor(normalizeOrNull(municipioCodigoIbge), normalizeOrNull(provedor))
+            .stream()
+            .map(this::toProviderCapabilitiesDto)
+            .toList();
+    if (!cadastradas.isEmpty()) return cadastradas;
+    NfseDtos.ProviderCapabilities padrao = padraoDoEmissorNacional(municipioCodigoIbge, provedor);
+    return padrao == null ? cadastradas : List.of(padrao);
+  }
+
+  /**
+   * O Emissor Nacional (SEFIN_NACIONAL) cancela por evento na Receita, em qualquer municipio
+   * conveniado. Sem regra cadastrada para o municipio, vale esta: aceita cancelamento, sem prazo
+   * nosso. O prazo e o motivo sao conferidos pela propria Receita, e uma recusa fica gravada na nota
+   * com o motivo (CANCEL_REJECTED). Antes, sem cadastro, a tela nao oferecia o cancelamento.
+   * Uma regra cadastrada para o municipio sempre vale mais que esta.
+   */
+  static NfseDtos.ProviderCapabilities padraoDoEmissorNacional(String municipioCodigoIbge, String provedor) {
+    if (provedor == null || !SefinNacionalProviderAdapter.CODE.equalsIgnoreCase(provedor.trim())) return null;
+    if (municipioCodigoIbge == null || municipioCodigoIbge.isBlank()) return null;
+    NfseDtos.ProviderCapabilities padrao = new NfseDtos.ProviderCapabilities();
+    padrao.municipioCodigoIbge = municipioCodigoIbge.trim();
+    padrao.provedor = SefinNacionalProviderAdapter.CODE;
+    padrao.layoutVersion = LeiauteNfseNacional.VERSAO;
+    padrao.cancelSupported = true;
+    padrao.cancelWindowHours = null;
+    padrao.cancelMode = NfseCancelMode.SYNC.name();
+    return padrao;
   }
 
   @Transactional
