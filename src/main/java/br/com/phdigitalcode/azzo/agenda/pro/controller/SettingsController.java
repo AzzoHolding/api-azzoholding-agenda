@@ -173,6 +173,19 @@ public class SettingsController {
     return servicoSettings.atualizarDiscountPolicy(request);
   }
 
+  // ---- Modo de conciliacao — V158 ----
+
+  @GetMapping("/reconciliation-mode")
+  public SettingsDtos.ReconciliationModeResponse obterReconciliationMode() {
+    return servicoSettings.obterReconciliationMode();
+  }
+
+  @PutMapping("/reconciliation-mode")
+  public SettingsDtos.ReconciliationModeResponse atualizarReconciliationMode(
+      @RequestBody SettingsDtos.ReconciliationModeRequest request) {
+    return servicoSettings.atualizarReconciliationMode(request);
+  }
+
   // ---- Regua de lembretes de agendamento — F03 ----
 
   @GetMapping("/reminders")

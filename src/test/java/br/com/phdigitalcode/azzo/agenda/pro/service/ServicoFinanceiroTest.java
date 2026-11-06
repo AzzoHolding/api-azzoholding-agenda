@@ -15,6 +15,7 @@ import static org.mockito.Mockito.when;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.YearMonth;
 import java.time.ZoneId;
 import java.util.List;
 import java.util.Optional;
@@ -31,19 +32,25 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.request.ConciliacaoRequest;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.request.RecurringTransactionRequest;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.request.TransacaoRequest;
+import br.com.phdigitalcode.azzo.agenda.pro.dto.response.ConciliacaoDoPeriodoResponse;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.response.ResumoFinanceiroResponse;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.response.TransacaoResponse;
+import br.com.phdigitalcode.azzo.agenda.pro.entity.PeriodoDeConciliacao;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.RecurringTransaction;
+import br.com.phdigitalcode.azzo.agenda.pro.entity.TenantOperationalSettings;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.Transacao;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.TransactionCategory;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.MetodoPagamento;
+import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.ModoDeConciliacao;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.StatusConciliacao;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.TipoTransacao;
 import br.com.phdigitalcode.azzo.agenda.pro.exception.ApiClientErrorException;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditService;
+import br.com.phdigitalcode.azzo.agenda.pro.repository.PeriodoDeConciliacaoRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.ProductCategoryRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.ProfissionalRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.RecurringTransactionRepository;
+import br.com.phdigitalcode.azzo.agenda.pro.repository.TenantOperationalSettingsRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.TransacaoQueryRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.TransacaoQueryRepository.SummaryTotals;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.TransacaoRepository;
@@ -68,6 +75,8 @@ class ServicoFinanceiroTest {
   @Mock private AuditService auditService;
   @Mock private CommissionService commissionService;
   @Mock private TravaFinanceira travaFinanceira;
+  @Mock private TenantOperationalSettingsRepository tenantOperationalSettingsRepository;
+  @Mock private PeriodoDeConciliacaoRepository periodoDeConciliacaoRepository;
 
   private ServicoFinanceiro servicoFinanceiro;
 
@@ -85,7 +94,146 @@ class ServicoFinanceiroTest {
             authenticatedUser,
             auditService,
             commissionService,
-            travaFinanceira);
+            travaFinanceira,
+            tenantOperationalSettingsRepository,
+            periodoDeConciliacaoRepository);
+  }
+
+  private void salaoConciliaPor(ModoDeConciliacao modo) {
+    TenantOperationalSettings config = new TenantOperationalSettings();
+    config.setReconciliationMode(modo);
+    when(contextoTenant.obterTenantIdOuFalhar()).thenReturn(TENANT_ID);
+    when(tenantOperationalSettingsRepository.findById(TENANT_ID)).thenReturn(Optional.of(config));
+  }
+
+  @Test
+  @DisplayName("Modo individual nao concilia por periodo")
+  void modoIndividualRecusaPeriodo() {
+    when(contextoTenant.obterTenantIdOuFalhar()).thenReturn(TENANT_ID);
+
+    assertThatThrownBy(() -> servicoFinanceiro.conciliarPeriodo("2026-10"))
+        .isInstanceOf(ApiClientErrorException.class)
+        .hasMessageContaining("lançamento a lançamento");
+  }
+
+  @Test
+  @DisplayName("Dia em curso e recusado")
+  void diaEmCursoRecusado() {
+    salaoConciliaPor(ModoDeConciliacao.DAILY);
+    String hoje = LocalDate.now(ZONA_BR).toString();
+
+    assertThatThrownBy(() -> servicoFinanceiro.conciliarPeriodo(hoje))
+        .isInstanceOf(ApiClientErrorException.class)
+        .hasMessageContaining("já encerrado");
+  }
+
+  @Test
+  @DisplayName("Mes futuro e recusado")
+  void mesFuturoRecusado() {
+    salaoConciliaPor(ModoDeConciliacao.MONTHLY);
+    String proximo = YearMonth.now(ZONA_BR).plusMonths(1).toString();
+
+    assertThatThrownBy(() -> servicoFinanceiro.conciliarPeriodo(proximo))
+        .isInstanceOf(ApiClientErrorException.class)
+        .hasMessageContaining("até hoje");
+  }
+
+  @Test
+  @DisplayName("Formato de periodo errado para o modo e recusado")
+  void periodoDeOutroFormatoRecusado() {
+    salaoConciliaPor(ModoDeConciliacao.DAILY);
+
+    assertThatThrownBy(() -> servicoFinanceiro.conciliarPeriodo("2026-10"))
+        .isInstanceOf(ApiClientErrorException.class)
+        .hasMessageContaining("Informe o dia");
+  }
+
+  @Test
+  @DisplayName("Sem pendente nao gera conciliacao")
+  void semPendenteNaoGeraConciliacao() {
+    salaoConciliaPor(ModoDeConciliacao.MONTHLY);
+
+    assertThatThrownBy(() -> servicoFinanceiro.conciliarPeriodo("2026-09"))
+        .isInstanceOf(ApiClientErrorException.class)
+        .hasMessageContaining("Não há lançamento pendente");
+    verify(periodoDeConciliacaoRepository, never()).save(any());
+  }
+
+  @Test
+  @DisplayName("Mes encerrado vai ate o fim do mes, concilia os pendentes e nao mexe nos divergentes")
+  void mesEncerradoConciliaPendentes() {
+    salaoConciliaPor(ModoDeConciliacao.MONTHLY);
+    Transacao pendente = new Transacao();
+    pendente.setId(UUID.randomUUID());
+    Transacao divergente = new Transacao();
+    divergente.setReconciliationStatus(StatusConciliacao.DIVERGENT);
+    when(transacaoRepository.listarDoPeriodoPorConciliacao(
+            eq(TENANT_ID), eq(StatusConciliacao.PENDING), any(), any()))
+        .thenReturn(List.of(pendente));
+    when(transacaoRepository.listarDoPeriodoPorConciliacao(
+            eq(TENANT_ID), eq(StatusConciliacao.DIVERGENT), any(), any()))
+        .thenReturn(List.of(divergente));
+
+    ConciliacaoDoPeriodoResponse resposta = servicoFinanceiro.conciliarPeriodo("2026-09");
+
+    assertThat(resposta.reconciled).isEqualTo(1);
+    assertThat(resposta.divergent).isEqualTo(1);
+    assertThat(resposta.startsAt)
+        .isEqualTo(LocalDate.of(2026, 9, 1).atStartOfDay(ZONA_BR).toInstant());
+    assertThat(resposta.endsAt)
+        .isEqualTo(LocalDate.of(2026, 10, 1).atStartOfDay(ZONA_BR).toInstant());
+    assertThat(pendente.getReconciliationStatus()).isEqualTo(StatusConciliacao.RECONCILED);
+    assertThat(pendente.isReconciled()).isTrue();
+    assertThat(pendente.getReconciliationNote())
+        .isEqualTo("Conciliação de 01/09/2026 a 30/09/2026");
+    assertThat(divergente.getReconciliationStatus()).isEqualTo(StatusConciliacao.DIVERGENT);
+    verify(periodoDeConciliacaoRepository).save(any());
+  }
+
+  @Test
+  @DisplayName("Mes em curso vai ate agora e comeca onde a conciliacao anterior terminou")
+  void mesEmCursoContinuaDaAnterior() {
+    salaoConciliaPor(ModoDeConciliacao.MONTHLY);
+    YearMonth mes = YearMonth.now(ZONA_BR);
+    Instant inicioDoMes = mes.atDay(1).atStartOfDay(ZONA_BR).toInstant();
+    Instant fimDaAnterior = Instant.now().minusSeconds(60);
+    PeriodoDeConciliacao anterior = new PeriodoDeConciliacao();
+    anterior.setEndsAt(fimDaAnterior);
+    when(periodoDeConciliacaoRepository
+            .findFirstByTenantIdAndEndsAtGreaterThanAndEndsAtLessThanEqualOrderByEndsAtDesc(
+                eq(TENANT_ID), eq(inicioDoMes), any()))
+        .thenReturn(Optional.of(anterior));
+    Instant antes = Instant.now();
+
+    ConciliacaoDoPeriodoResponse previa = servicoFinanceiro.previaDoPeriodo(mes.toString());
+
+    assertThat(previa.startsAt).isEqualTo(fimDaAnterior);
+    assertThat(previa.endsAt).isAfterOrEqualTo(antes);
+    // Lancamento atrasado entra: os pendentes contam desde o inicio do mes.
+    verify(transacaoRepository)
+        .listarDoPeriodoPorConciliacao(
+            eq(TENANT_ID), eq(StatusConciliacao.PENDING), eq(inicioDoMes), any());
+  }
+
+  @Test
+  @DisplayName("No modo por periodo, pendente nao concilia sozinho, mas divergente sim")
+  void modoPorPeriodoSoResolveDivergenciaUmAUm() {
+    salaoConciliaPor(ModoDeConciliacao.DAILY);
+    UUID id = UUID.randomUUID();
+    Transacao t = new Transacao();
+    t.setId(id);
+    t.setTenantId(TENANT_ID);
+    when(transacaoRepository.findAtivaByIdAndTenant(id, TENANT_ID)).thenReturn(Optional.of(t));
+    ConciliacaoRequest pedido = new ConciliacaoRequest();
+    pedido.status = "RECONCILED";
+
+    assertThatThrownBy(() -> servicoFinanceiro.definirConciliacao(id, pedido))
+        .isInstanceOf(ApiClientErrorException.class)
+        .hasMessageContaining("por período");
+
+    t.setReconciliationStatus(StatusConciliacao.DIVERGENT);
+    servicoFinanceiro.definirConciliacao(id, pedido);
+    assertThat(t.getReconciliationStatus()).isEqualTo(StatusConciliacao.RECONCILED);
   }
 
   @Test

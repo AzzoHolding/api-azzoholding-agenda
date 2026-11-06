@@ -1118,6 +1118,32 @@ class ServicoComandaTest {
     assertThat(lancada.getValue().getAmount()).isEqualByComparingTo("70.00");
   }
 
+  @Test
+  void profissionalSemAOpcaoNaoCancelaComanda() {
+    Comanda comanda = comanda(Comanda.STATUS_ABERTA);
+    when(authenticatedUser.temRole("PROFESSIONAL")).thenReturn(true);
+    ComandaDtos.CancelarComandaRequest req = new ComandaDtos.CancelarComandaRequest();
+    req.motivo = "desistiu";
+
+    assertThatThrownBy(() -> service.cancelar(comandaId, req))
+        .isInstanceOf(ApiClientErrorException.class)
+        .hasMessageContaining("não permite cancelar comanda");
+    assertThat(comanda.getStatus()).isEqualTo(Comanda.STATUS_ABERTA);
+  }
+
+  @Test
+  void quemTemAOpcaoDeOperarTodasCancelaComanda() {
+    Comanda comanda = comanda(Comanda.STATUS_ABERTA);
+    when(authenticatedUser.temRole("PROFESSIONAL")).thenReturn(true);
+    when(permissionService.possuiPermissao("pos:others")).thenReturn(true);
+    ComandaDtos.CancelarComandaRequest req = new ComandaDtos.CancelarComandaRequest();
+    req.motivo = "desistiu";
+
+    service.cancelar(comandaId, req);
+
+    assertThat(comanda.getStatus()).isEqualTo(Comanda.STATUS_CANCELADA);
+  }
+
   private void logadoComoProfissionalDaComanda(Comanda comanda) {
     Profissional eu = new Profissional();
     eu.setId(UUID.randomUUID());

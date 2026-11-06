@@ -25,11 +25,13 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 import br.com.phdigitalcode.azzo.agenda.pro.dto.request.AtualizarCategoriaRequest;
+import br.com.phdigitalcode.azzo.agenda.pro.dto.request.ConciliacaoDoPeriodoRequest;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.request.ConciliacaoRequest;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.request.CriarCategoriaRequest;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.request.RecurringTransactionRequest;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.request.TransacaoRequest;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.response.CategoriaResponse;
+import br.com.phdigitalcode.azzo.agenda.pro.dto.response.ConciliacaoDoPeriodoResponse;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.response.FluxoCaixaDiarioResponse;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.response.PagedResponse;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.response.RecurringTransactionResponse;
@@ -139,6 +141,27 @@ public class FinanceiroController {
   public TransacaoResponse conciliar(
       @PathVariable UUID id, @Valid @RequestBody ConciliacaoRequest request) {
     return servicoFinanceiro.definirConciliacao(id, request);
+  }
+
+  @PostMapping("/reconcile-period")
+  @RequiresPermission("finance:manage")
+  public ConciliacaoDoPeriodoResponse conciliarPeriodo(
+      @Valid @RequestBody ConciliacaoDoPeriodoRequest request) {
+    return servicoFinanceiro.conciliarPeriodo(request.period);
+  }
+
+  /** O intervalo e a contagem que a conciliacao teria agora. Nada e alterado. */
+  @GetMapping("/reconcile-period/preview")
+  @RequiresPermission("finance:manage")
+  public ConciliacaoDoPeriodoResponse previaDoPeriodo(@RequestParam String period) {
+    return servicoFinanceiro.previaDoPeriodo(period);
+  }
+
+  /** As ultimas conciliacoes finalizadas, da mais nova a mais antiga. */
+  @GetMapping("/reconcile-period")
+  @RequiresPermission("finance:manage")
+  public List<ConciliacaoDoPeriodoResponse> conciliacoesDoPeriodo() {
+    return servicoFinanceiro.conciliacoesFinalizadas();
   }
 
   /** Lancamentos que podem repetir este: so aviso, nada e alterado nem excluido. */

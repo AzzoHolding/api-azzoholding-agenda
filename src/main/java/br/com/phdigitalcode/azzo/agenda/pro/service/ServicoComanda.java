@@ -1506,6 +1506,11 @@ public class ServicoComanda {
       UUID id, ComandaDtos.CancelarComandaRequest request) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Comanda comanda = buscarOuFalhar(id, tenantId);
+    // Cancelar e da opcao de operar todas as comandas (decisao de 02/11/2026); estornar segue do dono.
+    if (authenticatedUser.temRole("PROFESSIONAL")
+        && !permissionService.possuiPermissao(COMANDAS_DE_TODOS)) {
+      throw new ApiClientErrorException("Seu perfil de acesso não permite cancelar comanda.", 403);
+    }
     exigirComandaDoProfissional(tenantId, comanda);
     exigirAberta(comanda);
 

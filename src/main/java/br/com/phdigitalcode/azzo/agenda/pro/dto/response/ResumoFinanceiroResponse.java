@@ -18,4 +18,7 @@ public class ResumoFinanceiroResponse {
 
   /** Quem pede tem {@code finance:manage}? A tela usa para nao oferecer o que terminaria em 403. */
   public boolean canManage;
+
+  /** {@code INDIVIDUAL}, {@code DAILY} ou {@code MONTHLY} (V158). */
+  public String reconciliationMode;
 }

@@ -962,6 +962,53 @@ public class TenantOperationalSettingsService {
     return toDiscountPolicyResponse(entity);
   }
 
+  public SettingsDtos.ReconciliationModeResponse getReconciliationMode(UUID tenantId) {
+    return toReconciliationModeResponse(findByTenantIdOrCreate(tenantId));
+  }
+
+  /** Modo invalido e recusado, como o teto de desconto: o dono nao pode achar que salvou. */
+  @Transactional
+  public SettingsDtos.ReconciliationModeResponse updateReconciliationMode(
+      UUID tenantId, SettingsDtos.ReconciliationModeRequest request) {
+    br.com.phdigitalcode.azzo.agenda.pro.entity.enums.ModoDeConciliacao modo;
+    try {
+      modo =
+          br.com.phdigitalcode.azzo.agenda.pro.entity.enums.ModoDeConciliacao.valueOf(
+              request.reconciliationMode.trim().toUpperCase(java.util.Locale.ROOT));
+    } catch (IllegalArgumentException | NullPointerException e) {
+      throw new IllegalArgumentException("Informe o modo de conciliação: individual, por dia ou por mês.");
+    }
+    TenantOperationalSettings entity = findByTenantIdOrCreate(tenantId);
+    br.com.phdigitalcode.azzo.agenda.pro.entity.enums.ModoDeConciliacao anterior = entity.getReconciliationMode();
+    entity.setReconciliationMode(modo);
+    if (anterior != modo) {
+      try {
+        br.com.phdigitalcode.azzo.agenda.pro.integration.AuditEventCommand command =
+            new br.com.phdigitalcode.azzo.agenda.pro.integration.AuditEventCommand();
+        command.tenantId = tenantId;
+        command.module = br.com.phdigitalcode.azzo.agenda.pro.integration.AuditConstants.Module.FINANCE;
+        command.action = "FINANCE_RECONCILIATION_MODE_UPDATE";
+        command.entityType = "RECONCILIATION_MODE";
+        command.entityId = tenantId.toString();
+        command.sourceChannel =
+            br.com.phdigitalcode.azzo.agenda.pro.integration.AuditConstants.SourceChannel.API;
+        command.before = java.util.Map.of("reconciliationMode", anterior.name());
+        command.after = java.util.Map.of("reconciliationMode", modo.name());
+        auditService.recordSuccess(command);
+      } catch (Exception ignored) {
+        // Auditoria nao deve quebrar o fluxo principal.
+      }
+    }
+    return toReconciliationModeResponse(entity);
+  }
+
+  private SettingsDtos.ReconciliationModeResponse toReconciliationModeResponse(
+      TenantOperationalSettings entity) {
+    SettingsDtos.ReconciliationModeResponse r = new SettingsDtos.ReconciliationModeResponse();
+    r.reconciliationMode = entity.getReconciliationMode().name();
+    return r;
+  }
+
   private SettingsDtos.DiscountPolicyResponse toDiscountPolicyResponse(
       TenantOperationalSettings entity) {
     SettingsDtos.DiscountPolicyResponse r = new SettingsDtos.DiscountPolicyResponse();

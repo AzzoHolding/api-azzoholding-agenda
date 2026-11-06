@@ -5,12 +5,16 @@ import java.util.UUID;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.Setter;
+
+import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.ModoDeConciliacao;
 
 /**
  * Espelha {@code modules/settings/domain/entity/TenantOperationalSettingsEntity.java}. Tabela
@@ -127,6 +131,11 @@ public class TenantOperationalSettings {
    */
   @Column(name = "pos_max_discount_percent", nullable = false)
   private int posMaxDiscountPercent = 100;
+
+  /** Como o salao concilia (V158). O padrao e lancamento a lancamento. */
+  @Enumerated(EnumType.STRING)
+  @Column(name = "reconciliation_mode", nullable = false, length = 20)
+  private ModoDeConciliacao reconciliationMode = ModoDeConciliacao.INDIVIDUAL;
 
   @Column(name = "created_at", nullable = false)
   private Instant createdAt;
