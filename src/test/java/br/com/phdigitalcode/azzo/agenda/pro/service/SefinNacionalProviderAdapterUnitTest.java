@@ -314,4 +314,11 @@ class SefinNacionalProviderAdapterUnitTest {
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessage("NFSE_PROVIDER_SEFIN_NACIONAL_CANCEL_REASON_TOO_SHORT");
   }
+
+  /** Teste em homologacao de 06/11/2026: a Sefin corta HTTP/2 com "Use HTTP/1.1 for request". */
+  @Test
+  void falaComAReceitaEmHttp11() throws Exception {
+    assertThat(adapter.buildHttpClient(1000, null, false).version())
+        .isEqualTo(java.net.http.HttpClient.Version.HTTP_1_1);
+  }
 }

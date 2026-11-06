@@ -623,7 +623,10 @@ public class SefinNacionalProviderAdapter implements NfseProviderAdapter {
   }
 
   HttpClient buildHttpClient(int connectTimeoutMs, String certificatePassword, boolean mtlsEnabled) throws Exception {
+    // HTTP/1.1 fixo: o HttpClient do Java tenta HTTP/2, e a Sefin corta o pedido com
+    // "RST_STREAM: Use HTTP/1.1 for request" antes de processar (teste em homologacao de 06/11/2026).
     HttpClient.Builder builder = HttpClient.newBuilder()
+        .version(HttpClient.Version.HTTP_1_1)
         .connectTimeout(Duration.ofMillis(Math.max(connectTimeoutMs, 1000)));
     if (!mtlsEnabled) {
       return builder.build();
