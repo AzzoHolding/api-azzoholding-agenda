@@ -334,6 +334,14 @@ public class GlobalExceptionHandler {
     return normalized.matches("[A-Z0-9_]{6,}") && FUNCTIONAL_CODE_MESSAGES.containsKey(normalized);
   }
 
+  /**
+   * A mensagem em portugues de um codigo funcional (ex.: NFSE_CONFIG_IBS_CBS_INCOMPLETO), ou nulo se
+   * o codigo nao for conhecido. Usada fora do fluxo de excecao (assistente de configuracao da NFS-e).
+   */
+  public static String mensagemDoCodigo(String codigo) {
+    return codigo == null ? null : FUNCTIONAL_CODE_MESSAGES.get(codigo.trim());
+  }
+
   private String resolveFunctionalMessage(String functionalCode) {
     return FUNCTIONAL_CODE_MESSAGES.getOrDefault(functionalCode, "Erro funcional de validacao.");
   }

@@ -62,6 +62,26 @@ public class SefinNacionalXmlLayoutBuilder extends AbstractNfseXmlLayoutBuilder 
     FiscalTaxConfigEntity taxConfig = fiscalTaxConfigRepository.findByTenantId(invoice.getTenantId())
         .orElseThrow(() -> new IllegalArgumentException("NFSE_PROVIDER_SEFIN_NACIONAL_TAX_CONFIG_MISSING"));
     List<NfseInvoiceItemEntity> items = nfseInvoiceItemRepository.listByTenantAndInvoice(invoice.getTenantId(), invoice.getId());
+    return montar(invoice, config, taxConfig, items);
+  }
+
+  /**
+   * Monta e confere (XSD oficial) uma DPS a partir de dados em memoria, sem ler nem gravar nada. Usada
+   * pelo assistente de configuracao para mostrar o que falta antes do primeiro envio.
+   */
+  public String montarDpsDeExemplo(
+      NfseInvoiceEntity invoice,
+      NfseConfigEntity config,
+      FiscalTaxConfigEntity taxConfig,
+      List<NfseInvoiceItemEntity> items) {
+    return montar(invoice, config, taxConfig, items);
+  }
+
+  private String montar(
+      NfseInvoiceEntity invoice,
+      NfseConfigEntity config,
+      FiscalTaxConfigEntity taxConfig,
+      List<NfseInvoiceItemEntity> items) {
     if (items == null || items.isEmpty()) {
       throw new IllegalArgumentException("NFSE_PROVIDER_SEFIN_NACIONAL_ITEMS_REQUIRED");
     }
