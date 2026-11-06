@@ -189,6 +189,13 @@
       <artifactId>minio</artifactId>
       <version>${minio.version}</version>
     </dependency>
+    <!-- Argon2id do CofreDoCertificado (certificado A1 trancado pela senha). Antes vinha so de
+         carona no MinIO; explicita para nao sumir se o MinIO trocar de dependencia. Versao no
+         dependencyManagement (1.86). -->
+    <dependency>
+      <groupId>org.bouncycastle</groupId>
+      <artifactId>bcprov-jdk18on</artifactId>
+    </dependency>
     <!-- MinIO 8.6 usa okhttp 5, que e Kotlin Multiplatform: no Maven o artefato "okhttp" so traz os
          metadados, e as classes JVM ficam em okhttp-jvm (o Gradle resolve sozinho, o Maven nao).
          Sem isto: "cannot access okhttp3.HttpUrl" na compilacao. -->

@@ -52,6 +52,10 @@ class FiscalCertificateServiceTest {
   @Mock private AuditService auditService;
   @Mock private AuthenticatedUser authenticatedUser;
 
+  /** Cofre de verdade (Argon2id + AES-GCM), com uma pimenta de teste. */
+  private final CofreDoCertificado cofre =
+      new CofreDoCertificado(Base64.getEncoder().encodeToString(new byte[32]));
+
   private FiscalCertificateService service;
   private final UUID tenantId = UUID.randomUUID();
   private String pfxBase64;
@@ -60,7 +64,7 @@ class FiscalCertificateServiceTest {
   void setUp() {
     service =
         new FiscalCertificateService(
-            contextoTenant, fiscalCertificateRepository, encryptionService, auditService, authenticatedUser);
+            contextoTenant, fiscalCertificateRepository, encryptionService, auditService, authenticatedUser, cofre);
     pfxBase64 = Base64.getEncoder().encodeToString(lerCertificadoTeste());
   }
 
@@ -123,7 +127,8 @@ class FiscalCertificateServiceTest {
     request.pfxBase64 = pfxBase64;
     request.password = CERT_PASSWORD;
     when(contextoTenant.obterTenantIdOuFalhar()).thenReturn(tenantId);
-    when(encryptionService.encrypt(pfxBase64)).thenReturn("cifrado-xyz");
+    // A chave do servidor fica por fora: aqui ela so marca o que recebeu.
+    when(encryptionService.encrypt(any())).thenAnswer(invocation -> "externo:" + invocation.getArgument(0));
     when(fiscalCertificateRepository.save(any(FiscalCertificateEntity.class)))
         .thenAnswer(invocation -> invocation.getArgument(0));
     when(authenticatedUser.idOuNulo()).thenReturn(UUID.randomUUID());
@@ -134,7 +139,11 @@ class FiscalCertificateServiceTest {
     ArgumentCaptor<FiscalCertificateEntity> captor = ArgumentCaptor.forClass(FiscalCertificateEntity.class);
     verify(fiscalCertificateRepository).save(captor.capture());
     assertThat(captor.getValue().getTenantId()).isEqualTo(tenantId);
-    assertThat(captor.getValue().getCertificatePfxEnc()).isEqualTo("cifrado-xyz");
+    // Trancado pela senha por dentro: nem o .pfx nem o Base64 dele vao para a chave do servidor.
+    FiscalCertificateEntity gravado = captor.getValue();
+    assertThat(gravado.getProtecao()).isEqualTo(CofreDoCertificado.PROTECAO);
+    assertThat(gravado.getKdfSal()).isNotBlank();
+    assertThat(gravado.getCertificatePfxEnc()).startsWith("externo:").doesNotContain(pfxBase64);
     assertThat(captor.getValue().getStatus()).isEqualTo("ACTIVE");
     assertThat(captor.getValue().getThumbprint()).isNotBlank();
     assertThat(captor.getValue().getSubjectName()).contains("Salao Teste LTDA");
@@ -152,7 +161,7 @@ class FiscalCertificateServiceTest {
     request.pfxBase64 = pfxBase64;
     request.password = CERT_PASSWORD;
     when(contextoTenant.obterTenantIdOuFalhar()).thenReturn(tenantId);
-    when(encryptionService.encrypt(pfxBase64)).thenReturn("cifrado-xyz");
+    when(encryptionService.encrypt(any())).thenReturn("cifrado-xyz");
     when(fiscalCertificateRepository.save(any(FiscalCertificateEntity.class)))
         .thenAnswer(invocation -> invocation.getArgument(0));
     when(authenticatedUser.idOuNulo()).thenThrow(new RuntimeException("sem contexto de seguranca"));
@@ -268,6 +277,25 @@ class FiscalCertificateServiceTest {
     assertThatThrownBy(() -> service.validarSenhaCertificadoAtivo(CERT_PASSWORD))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessage(FiscalCertificateService.ERR_CERTIFICATE_EXPIRED);
+  }
+
+  /** O certificado gravado pelo cofre abre com a senha e entrega a chave privada para assinar. */
+  @Test
+  void certificadoTrancadoPelaSenhaAbreSoComASenha() {
+    FiscalCertificateEntity entity = entidadeAtiva();
+    CofreDoCertificado.Trancado trancado = cofre.trancar(Base64.getDecoder().decode(pfxBase64), CERT_PASSWORD);
+    entity.setCertificatePfxEnc("externo");
+    entity.setProtecao(CofreDoCertificado.PROTECAO);
+    entity.setKdfSal(trancado.sal());
+    when(contextoTenant.obterTenantIdOuFalhar()).thenReturn(tenantId);
+    when(fiscalCertificateRepository.findActiveByTenant(tenantId)).thenReturn(Optional.of(entity));
+    when(encryptionService.decrypt("externo")).thenReturn(trancado.conteudo());
+
+    service.validarSenhaCertificadoAtivo(CERT_PASSWORD);
+    assertThat(service.loadActiveKeyMaterial(CERT_PASSWORD).privateKey()).isNotNull();
+    assertThatThrownBy(() -> service.validarSenhaCertificadoAtivo("senha-errada"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage(FiscalCertificateService.ERR_CERTIFICATE_PASSWORD_INVALID);
   }
 
   // ─── validarSenhaCertificadoAtivo ───────────────────────────────────────

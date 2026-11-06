@@ -84,6 +84,7 @@ public class GlobalExceptionHandler {
       Map.entry("NFSE_CONFIG_IBS_CBS_INCOMPLETO", "Para IBS/CBS, informe juntos o CST, a classificacao tributaria (cClassTrib) e o indicador da operacao (cIndOp), ou deixe os tres vazios."),
       Map.entry("NFSE_CONFIG_IBS_CBS_FORMATO", "IBS/CBS: o CST tem 3 digitos, a classificacao tributaria tem 6 e o indicador da operacao tem 6."),
       Map.entry("NFSE_CONFIG_IBS_CBS_CLASS_TRIB_DIFERENTE_DO_CST", "IBS/CBS: a classificacao tributaria (cClassTrib) deve comecar pelos 3 digitos do CST."),
+      Map.entry("NFSE_CERTIFICADO_PIMENTA_AUSENTE", "O servidor ainda nao esta preparado para guardar certificados digitais. Fale com o suporte."),
       Map.entry("NFSE_CERTIFICATE_EXPIRED", "O certificado digital esta vencido. Envie um certificado valido em Configuracoes > Certificados."),
       Map.entry("NFSE_PROVIDER_ABRASF_WS_URL_MISSING", "URL do webservice ABRASF nao configurada para o ambiente da nota."),
       Map.entry("NFSE_PROVIDER_SEFIN_NACIONAL_AUTHORIZE_URL_MISSING", "URL de autorizacao da Receita Nacional nao configurada para o ambiente da nota."),
