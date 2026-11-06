@@ -74,6 +74,7 @@ public class NfseProviderCapabilitiesService {
       throw new IllegalArgumentException("NFSE_PROVIDER_CAP_MISSING_MUNICIPIO");
     }
     if (isBlank(request.provedor)) throw new IllegalArgumentException("NFSE_PROVIDER_CAP_MISSING_PROVEDOR");
+    request.provedor = NfseConfigService.provedorConhecidoOuNulo(request.provedor);
     if (isBlank(request.layoutVersion)) {
       throw new IllegalArgumentException("NFSE_PROVIDER_CAP_MISSING_LAYOUT_VERSION");
     }

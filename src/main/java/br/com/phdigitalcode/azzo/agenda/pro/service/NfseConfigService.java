@@ -124,7 +124,25 @@ public class NfseConfigService {
     return "ABRASF";
   }
 
+  /**
+   * Os provedores que o sistema sabe chamar (NfseProviderRouterService). Antes o campo era texto livre
+   * e aceitava qualquer palavra: o salao teste ficou com "MOCK" (25/10/2026), e nenhuma nota sairia.
+   * TEST_OK e MOCK_FAIL so funcionam com app.nfse.test-providers.enabled; em producao a emissao os recusa.
+   */
+  static final java.util.Set<String> PROVEDORES_CONHECIDOS =
+      java.util.Set.of("SEFIN_NACIONAL", "ABRASF", "ABRASF_204", "TEST_OK", "MOCK_FAIL");
+
+  static String provedorConhecidoOuNulo(String provedor) {
+    if (provedor == null || provedor.isBlank()) return null;
+    String codigo = provedor.trim().toUpperCase(java.util.Locale.ROOT);
+    if (!PROVEDORES_CONHECIDOS.contains(codigo)) {
+      throw new IllegalArgumentException("NFSE_CONFIG_PROVEDOR_DESCONHECIDO");
+    }
+    return codigo;
+  }
+
   private void validarConfig(NfseDtos.Config request) {
+    request.provedor = provedorConhecidoOuNulo(request.provedor);
     validarIbsCbs(request);
     if (isBlank(request.municipioCodigoIbge)) {
       throw new IllegalArgumentException("NFSE_CONFIG_MISSING_MUNICIPIO");

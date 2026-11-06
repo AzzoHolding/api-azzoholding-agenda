@@ -81,9 +81,9 @@ class NfseProviderCapabilitiesServiceTest {
 
   @Test
   void salvarProviderCapabilitiesCriaNovaEntidadeQuandoNaoExisteENormalizaCampos() {
-    // findByMunicipioProvedor recebe o request cru (sem trim) — o service so normaliza os
-    // campos gravados na entidade depois de resolver a linha existente.
-    when(nfseProviderCapabilitiesRepository.findByMunicipioProvedor("  3550308  ", "  ABRASF  "))
+    // O provedor e normalizado ANTES da busca (06/11/2026: lista de provedores conhecidos), para
+    // "  abrasf  " e "ABRASF" acharem a mesma linha. O municipio segue cru na busca.
+    when(nfseProviderCapabilitiesRepository.findByMunicipioProvedor("  3550308  ", "ABRASF"))
         .thenReturn(Optional.empty());
     when(nfseProviderCapabilitiesRepository.save(any(NfseProviderCapabilitiesEntity.class)))
         .thenAnswer(invocation -> invocation.getArgument(0));

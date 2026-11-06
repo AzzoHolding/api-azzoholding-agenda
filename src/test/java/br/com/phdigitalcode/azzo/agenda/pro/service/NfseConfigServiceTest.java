@@ -362,6 +362,20 @@ class NfseConfigServiceTest {
     assertThat(resultado.percentualTributosSn).isEqualByComparingTo("6.00");
   }
 
+  /** O campo era texto livre: o salao teste ficou com "MOCK" e nenhuma nota sairia. */
+  @Test
+  void salvarConfigRecusaProvedorDesconhecidoENormalizaOConhecido() {
+    NfseDtos.Config mock = requestValido();
+    mock.provedor = "MOCK";
+    assertThatThrownBy(() -> service.salvarConfig(mock))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("NFSE_CONFIG_PROVEDOR_DESCONHECIDO");
+
+    assertThat(NfseConfigService.provedorConhecidoOuNulo(" abrasf ")).isEqualTo("ABRASF");
+    assertThat(NfseConfigService.provedorConhecidoOuNulo("sefin_nacional")).isEqualTo("SEFIN_NACIONAL");
+    assertThat(NfseConfigService.provedorConhecidoOuNulo("")).isNull();
+  }
+
   private NfseDtos.Config requestValido() {
     NfseDtos.Config request = new NfseDtos.Config();
     request.ambiente = "HOMOLOGACAO";
