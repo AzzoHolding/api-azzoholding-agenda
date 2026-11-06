@@ -217,18 +217,17 @@ app:
         base-url: ${NFSE_PROVIDER_SEFIN_NACIONAL_BASE_URL:https://sefin.nfse.gov.br/SefinNacional}
         base-url-homologacao: ${NFSE_PROVIDER_SEFIN_NACIONAL_BASE_URL_HOMOLOGACAO:https://sefin.producaorestrita.nfse.gov.br/SefinNacional}
         production-enabled: ${NFSE_PROVIDER_SEFIN_NACIONAL_PRODUCTION_ENABLED:false}
-        authorize-path: ${NFSE_PROVIDER_SEFIN_NACIONAL_AUTHORIZE_PATH:__unset__}
-        authorize-path-homologacao: ${NFSE_PROVIDER_SEFIN_NACIONAL_AUTHORIZE_PATH_HOMOLOGACAO:__unset__}
+        # Contrato da API do Emissor Nacional (ver SefinNacionalProviderAdapter). Todas as
+        # chamadas usam mTLS com o certificado do salao.
+        authorize-path: ${NFSE_PROVIDER_SEFIN_NACIONAL_AUTHORIZE_PATH:/nfse}
+        authorize-path-homologacao: ${NFSE_PROVIDER_SEFIN_NACIONAL_AUTHORIZE_PATH_HOMOLOGACAO:/nfse}
         cancel-path: ${NFSE_PROVIDER_SEFIN_NACIONAL_CANCEL_PATH:/nfse/{chaveAcesso}/eventos}
         cancel-path-homologacao: ${NFSE_PROVIDER_SEFIN_NACIONAL_CANCEL_PATH_HOMOLOGACAO:/nfse/{chaveAcesso}/eventos}
         query-path: ${NFSE_PROVIDER_SEFIN_NACIONAL_QUERY_PATH:/nfse/{chaveAcesso}}
         query-path-homologacao: ${NFSE_PROVIDER_SEFIN_NACIONAL_QUERY_PATH_HOMOLOGACAO:/nfse/{chaveAcesso}}
+        dps-path: ${NFSE_PROVIDER_SEFIN_NACIONAL_DPS_PATH:/dps/{idDps}}
+        dps-path-homologacao: ${NFSE_PROVIDER_SEFIN_NACIONAL_DPS_PATH_HOMOLOGACAO:/dps/{idDps}}
         cancel-reason-code-default: ${NFSE_PROVIDER_SEFIN_NACIONAL_CANCEL_REASON_CODE_DEFAULT:9}
-        query-http-method: ${NFSE_PROVIDER_SEFIN_NACIONAL_QUERY_HTTP_METHOD:GET}
-        query-access-key-param: ${NFSE_PROVIDER_SEFIN_NACIONAL_QUERY_ACCESS_KEY_PARAM:chNFSe}
-        query-protocol-param: ${NFSE_PROVIDER_SEFIN_NACIONAL_QUERY_PROTOCOL_PARAM:protocolo}
-        query-include-protocol: ${NFSE_PROVIDER_SEFIN_NACIONAL_QUERY_INCLUDE_PROTOCOL:true}
-        query-mtls-enabled: ${NFSE_PROVIDER_SEFIN_NACIONAL_QUERY_MTLS_ENABLED:false}
   checkout:
     # POST /checkout/intents + /confirm confirmam a compra com pagamento FALSO (stub) e liberam
     # licenca paga sem cobrar. So para desenvolvimento; o pagamento de verdade e o

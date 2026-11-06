@@ -36,6 +36,10 @@ import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.NfseAmbiente;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.NfseCustomerType;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.NfseFiscalStatus;
 import br.com.phdigitalcode.azzo.agenda.pro.exception.ApiClientErrorException;
+import br.com.phdigitalcode.azzo.agenda.pro.entity.NfseInvoiceEventEntity;
+import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.NfseOperationalStatus;
+import br.com.phdigitalcode.azzo.agenda.pro.exception.NfseProvedorRecusouException;
+import br.com.phdigitalcode.azzo.agenda.pro.exception.NfseProvedorSemRespostaException;
 import br.com.phdigitalcode.azzo.agenda.pro.exception.NfseStateTransitionException;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.BrasilApiCnpjClient;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.NfseConfigRepository;
@@ -84,6 +88,26 @@ class NfseServiceTest {
 
   private final UUID tenantId = UUID.randomUUID();
 
+  /** Gerenciador de transacao sem banco, que so conta quantas transacoes foram abertas. */
+  private final java.util.concurrent.atomic.AtomicInteger transacoesAbertas =
+      new java.util.concurrent.atomic.AtomicInteger();
+
+  private final org.springframework.transaction.PlatformTransactionManager transacoes =
+      new org.springframework.transaction.PlatformTransactionManager() {
+        @Override
+        public org.springframework.transaction.TransactionStatus getTransaction(
+            org.springframework.transaction.TransactionDefinition definition) {
+          transacoesAbertas.incrementAndGet();
+          return new org.springframework.transaction.support.SimpleTransactionStatus();
+        }
+
+        @Override
+        public void commit(org.springframework.transaction.TransactionStatus status) {}
+
+        @Override
+        public void rollback(org.springframework.transaction.TransactionStatus status) {}
+      };
+
   @BeforeEach
   void setUp() {
     meterRegistry = new SimpleMeterRegistry();
@@ -107,7 +131,8 @@ class NfseServiceTest {
             brasilApiCnpjClient,
             nfseConfigService,
             true,
-            true);
+            true,
+            transacoes);
     // lenient: consultarTomadorPorCnpj (fatia sem tenant, ver original) nao consome este stub
     org.mockito.Mockito.lenient().when(contextoTenant.obterTenantIdOuFalhar()).thenReturn(tenantId);
   }
@@ -473,9 +498,8 @@ class NfseServiceTest {
     assertThat(result.provedor).isEqualTo("SEFIN_NACIONAL");
   }
 
-  @Test
-  void autorizar_providerLancaExcecao_registraMetricaFalhaERelanca() {
-    UUID invoiceId = UUID.randomUUID();
+  /** Prepara um rascunho ABRASF pronto para sair, com o provedor mockado. */
+  private NfseInvoiceEntity rascunhoProntoParaEnviar(UUID invoiceId) {
     NfseInvoiceEntity entity = draftEntity(invoiceId);
     when(nfseInvoiceRepository.findByTenantAndIdForUpdate(tenantId, invoiceId)).thenReturn(Optional.of(entity));
     when(nfseFiscalStateMachine.canReach(any(), any())).thenReturn(true);
@@ -483,15 +507,154 @@ class NfseServiceTest {
     when(nfseXmlSignerService.sign(anyString(), anyString())).thenReturn("<xml-assinado/>");
     when(encryptionService.encrypt(anyString())).thenReturn("ENC");
     when(nfseProviderRouterService.resolve("ABRASF")).thenReturn(providerAdapter);
-    when(providerAdapter.authorize(entity, "senha123")).thenThrow(new IllegalStateException("timeout"));
+    org.mockito.Mockito.lenient()
+        .when(nfseInvoiceItemRepository.listByTenantAndInvoice(tenantId, invoiceId))
+        .thenReturn(List.of());
+    return entity;
+  }
 
+  private NfseDtos.AuthorizeRequest comSenha() {
     NfseDtos.AuthorizeRequest request = new NfseDtos.AuthorizeRequest();
     request.certificatePassword = "senha123";
+    return request;
+  }
 
-    assertThatThrownBy(() -> service.autorizar(invoiceId.toString(), request))
-        .isInstanceOf(IllegalStateException.class)
-        .hasMessageContaining("timeout");
+  private List<NfseInvoiceEventEntity> eventosGravados() {
+    org.mockito.ArgumentCaptor<NfseInvoiceEventEntity> captor =
+        org.mockito.ArgumentCaptor.forClass(NfseInvoiceEventEntity.class);
+    verify(nfseInvoiceEventRepository, org.mockito.Mockito.atLeastOnce()).save(captor.capture());
+    return captor.getAllValues();
+  }
+
+  @Test
+  void autorizar_semRespostaDeProvedorSemConsulta_gravaRejeitadaEAvisaParaConferirNoPortal() {
+    UUID invoiceId = UUID.randomUUID();
+    NfseInvoiceEntity entity = rascunhoProntoParaEnviar(invoiceId);
+    when(providerAdapter.authorize(entity, "senha123")).thenThrow(new IllegalStateException("timeout"));
+
+    assertThatThrownBy(() -> service.autorizar(invoiceId.toString(), comSenha()))
+        .isInstanceOf(ApiClientErrorException.class)
+        .hasMessageContaining("portal da prefeitura");
+    // A falha fica GRAVADA (antes, o rollback devolvia a nota a rascunho sem rastro).
+    assertThat(entity.getFiscalStatus()).isEqualTo(NfseFiscalStatus.REJECTED);
+    assertThat(eventosGravados())
+        .anySatisfy(e -> {
+          assertThat(e.getEventType()).isEqualTo("AUTHORIZE_REJECTED");
+          assertThat(e.getProviderMessage()).isEqualTo("timeout");
+        });
     assertThat(meterRegistry.find("nfse.rejection.total").counter()).isNotNull();
+  }
+
+  @Test
+  void autorizar_recusaDoProvedor_gravaRejeitadaComOMotivo() {
+    UUID invoiceId = UUID.randomUUID();
+    NfseInvoiceEntity entity = rascunhoProntoParaEnviar(invoiceId);
+    when(providerAdapter.authorize(entity, "senha123"))
+        .thenThrow(new NfseProvedorRecusouException("E0312", "E0312 - CNPJ do prestador invalido"));
+
+    assertThatThrownBy(() -> service.autorizar(invoiceId.toString(), comSenha()))
+        .isInstanceOf(ApiClientErrorException.class)
+        .hasMessageContaining("CNPJ do prestador invalido");
+    assertThat(entity.getFiscalStatus()).isEqualTo(NfseFiscalStatus.REJECTED);
+    assertThat(entity.getOperationalStatus()).isNull();
+    assertThat(eventosGravados())
+        .anySatisfy(e -> {
+          assertThat(e.getProviderCode()).isEqualTo("E0312");
+          assertThat(e.getProviderMessage()).contains("CNPJ do prestador invalido");
+        });
+  }
+
+  @Test
+  void autorizar_semRespostaDeProvedorQueConsulta_ficaPendenteAguardandoOUsuario() {
+    UUID invoiceId = UUID.randomUUID();
+    NfseInvoiceEntity entity = rascunhoProntoParaEnviar(invoiceId);
+    when(providerAdapter.consultaEmissaoAposFalha()).thenReturn(true);
+    when(providerAdapter.authorize(entity, "senha123"))
+        .thenThrow(new NfseProvedorSemRespostaException("503", "A Receita Nacional nao respondeu (HTTP 503)."));
+
+    assertThatThrownBy(() -> service.autorizar(invoiceId.toString(), comSenha()))
+        .isInstanceOf(ApiClientErrorException.class)
+        .hasMessageContaining("Emitir de novo");
+    // Nunca REJECTED: a nota pode ter sido emitida, e reenviar as cegas duplica.
+    assertThat(entity.getFiscalStatus()).isEqualTo(NfseFiscalStatus.PENDING);
+    assertThat(entity.getOperationalStatus()).isEqualTo(NfseOperationalStatus.PENDING_PASSWORD_UNLOCK);
+  }
+
+  @Test
+  void autorizar_retomadaAchaANotaNoProvedor_naoReenvia() {
+    UUID invoiceId = UUID.randomUUID();
+    NfseInvoiceEntity entity = draftEntity(invoiceId);
+    entity.setFiscalStatus(NfseFiscalStatus.PENDING);
+    entity.setOperationalStatus(NfseOperationalStatus.PENDING_PASSWORD_UNLOCK);
+    when(nfseInvoiceRepository.findByTenantAndIdForUpdate(tenantId, invoiceId)).thenReturn(Optional.of(entity));
+    when(nfseFiscalStateMachine.canReach(any(), any())).thenReturn(true);
+    when(encryptionService.encrypt(anyString())).thenReturn("ENC");
+    when(nfseProviderRouterService.resolve("ABRASF")).thenReturn(providerAdapter);
+    when(providerAdapter.consultarEmissao(entity, "senha123"))
+        .thenReturn(Optional.of(new NfseProviderAdapter.AuthorizationResult("100", "Encontrada", "77", "DPS1", null, "CHAVE")));
+    when(nfseXmlBuilderService.buildAuthorizationReturnXml(any(), any(), any())).thenReturn("<retorno/>");
+    when(nfseInvoiceItemRepository.listByTenantAndInvoice(tenantId, invoiceId)).thenReturn(List.of());
+
+    NfseDtos.Invoice result = service.autorizar(invoiceId.toString(), comSenha());
+
+    assertThat(result.fiscalStatus).isEqualTo("AUTHORIZED");
+    assertThat(result.numeroNfse).isEqualTo("77");
+    verify(providerAdapter, never()).authorize(any(), any());
+    verify(nfseXmlSignerService, never()).sign(anyString(), anyString());
+  }
+
+  @Test
+  void autorizar_retomadaSemNotaNoProvedor_reenviaAMesmaDps() {
+    UUID invoiceId = UUID.randomUUID();
+    NfseInvoiceEntity entity = draftEntity(invoiceId);
+    entity.setFiscalStatus(NfseFiscalStatus.PENDING);
+    entity.setOperationalStatus(NfseOperationalStatus.PENDING_PASSWORD_UNLOCK);
+    when(nfseInvoiceRepository.findByTenantAndIdForUpdate(tenantId, invoiceId)).thenReturn(Optional.of(entity));
+    when(nfseFiscalStateMachine.canReach(any(), any())).thenReturn(true);
+    when(encryptionService.encrypt(anyString())).thenReturn("ENC");
+    when(nfseProviderRouterService.resolve("ABRASF")).thenReturn(providerAdapter);
+    when(providerAdapter.consultarEmissao(entity, "senha123")).thenReturn(Optional.empty());
+    when(providerAdapter.authorize(entity, "senha123"))
+        .thenReturn(new NfseProviderAdapter.AuthorizationResult("100", "OK", "78", "DPS1", null, "CHAVE"));
+    when(nfseXmlBuilderService.buildAuthorizationReturnXml(any(), any(), any())).thenReturn("<retorno/>");
+    when(nfseInvoiceItemRepository.listByTenantAndInvoice(tenantId, invoiceId)).thenReturn(List.of());
+
+    NfseDtos.Invoice result = service.autorizar(invoiceId.toString(), comSenha());
+
+    assertThat(result.fiscalStatus).isEqualTo("AUTHORIZED");
+    // Reenvia o XML ja assinado: nao monta nem assina de novo (mesmo Id de DPS).
+    verify(nfseXmlBuilderService, never()).buildAndValidateAuthorizationXml(any());
+  }
+
+  @Test
+  void autorizar_falhaAntesDeSair_gravaRejeitadaEDevolveOErroOriginal() {
+    UUID invoiceId = UUID.randomUUID();
+    NfseInvoiceEntity entity = rascunhoProntoParaEnviar(invoiceId);
+    when(providerAdapter.authorize(entity, "senha123"))
+        .thenThrow(new IllegalArgumentException("NFSE_PROVIDER_SEFIN_NACIONAL_AUTHORIZE_URL_MISSING"));
+
+    assertThatThrownBy(() -> service.autorizar(invoiceId.toString(), comSenha()))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("NFSE_PROVIDER_SEFIN_NACIONAL_AUTHORIZE_URL_MISSING");
+    assertThat(entity.getFiscalStatus()).isEqualTo(NfseFiscalStatus.REJECTED);
+  }
+
+  @Test
+  void autorizar_chamaOProvedorEntreDuasTransacoesSeparadas() {
+    UUID invoiceId = UUID.randomUUID();
+    NfseInvoiceEntity entity = rascunhoProntoParaEnviar(invoiceId);
+    when(providerAdapter.authorize(entity, "senha123"))
+        .thenAnswer(inv -> {
+          // Durante a chamada, a etapa de preparo ja foi gravada e a de registro nao comecou.
+          assertThat(transacoesAbertas.get()).isEqualTo(1);
+          assertThat(entity.getFiscalStatus()).isEqualTo(NfseFiscalStatus.SUBMITTED);
+          return new NfseProviderAdapter.AuthorizationResult("100", "OK", "1", "P", null, "CHAVE");
+        });
+    when(nfseXmlBuilderService.buildAuthorizationReturnXml(any(), any(), any())).thenReturn("<retorno/>");
+
+    service.autorizar(invoiceId.toString(), comSenha());
+
+    assertThat(transacoesAbertas.get()).isEqualTo(2);
   }
 
   @Test
@@ -535,9 +698,44 @@ class NfseServiceTest {
 
     NfseDtos.CancelRequest request = new NfseDtos.CancelRequest();
     request.reason = "erro de digitacao";
+    request.certificatePassword = "senha";
 
     assertThatThrownBy(() -> service.cancelar(invoiceId.toString(), request))
         .isInstanceOf(NfseStateTransitionException.class);
+  }
+
+  @Test
+  void cancelar_semSenha_naoMexeNaNota() {
+    NfseDtos.CancelRequest request = new NfseDtos.CancelRequest();
+    request.reason = "erro de digitacao";
+
+    assertThatThrownBy(() -> service.cancelar(UUID.randomUUID().toString(), request))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage(FiscalCertificateService.ERR_CERTIFICATE_PASSWORD_REQUIRED);
+    verify(nfseInvoiceRepository, never()).findByTenantAndIdForUpdate(any(), any());
+  }
+
+  @Test
+  void cancelar_comSessaoDeSenha_usaASenhaDaSessao() {
+    UUID invoiceId = UUID.randomUUID();
+    NfseInvoiceEntity entity = draftEntity(invoiceId);
+    entity.setFiscalStatus(NfseFiscalStatus.AUTHORIZED);
+    when(nfseCertificateUnlockService.resolvePasswordFromToken("tok-1")).thenReturn("senha-da-sessao");
+    when(nfseInvoiceRepository.findByTenantAndIdForUpdate(tenantId, invoiceId)).thenReturn(Optional.of(entity));
+    when(nfseFiscalStateMachine.canReach(any(), any())).thenReturn(true);
+    when(nfseProviderRouterService.resolve("ABRASF")).thenReturn(providerAdapter);
+    when(providerAdapter.cancel(entity, "motivo", "senha-da-sessao"))
+        .thenReturn(new NfseProviderAdapter.CancellationResult("200", "Cancelado"));
+    when(nfseXmlBuilderService.buildCancelReturnXml(entity, "200", "Cancelado")).thenReturn("<retorno/>");
+    when(encryptionService.encrypt(anyString())).thenReturn("ENC");
+    when(nfseInvoiceItemRepository.listByTenantAndInvoice(tenantId, invoiceId)).thenReturn(List.of());
+
+    NfseDtos.CancelRequest request = new NfseDtos.CancelRequest();
+    request.reason = "motivo";
+    request.unlockTokenId = "tok-1";
+
+    assertThat(service.cancelar(invoiceId.toString(), request).fiscalStatus).isEqualTo("CANCELLED");
+    verify(fiscalCertificateService).validarSenhaCertificadoAtivo("senha-da-sessao");
   }
 
   @Test
@@ -564,29 +762,69 @@ class NfseServiceTest {
   }
 
   @Test
-  void cancelar_seProviderFalha_naoRegistraEventoENaoRebaixaParaCancelRejected() {
-    // Assimetria do original (Etapa 25, achado 1): sem try/catch ao redor de provider.cancel —
-    // a excecao propaga direto, a invoice fica CANCEL_PENDING em memoria mas a transacao inteira
-    // sofre rollback (fora do escopo deste teste unitario, que nao usa @Transactional real).
+  void cancelar_recusaDoProvedor_gravaCancelRejectedComOMotivo() {
     UUID invoiceId = UUID.randomUUID();
     NfseInvoiceEntity entity = draftEntity(invoiceId);
     entity.setFiscalStatus(NfseFiscalStatus.AUTHORIZED);
     when(nfseInvoiceRepository.findByTenantAndIdForUpdate(tenantId, invoiceId)).thenReturn(Optional.of(entity));
     when(nfseFiscalStateMachine.canReach(any(), any())).thenReturn(true);
     when(nfseProviderRouterService.resolve("ABRASF")).thenReturn(providerAdapter);
-    when(providerAdapter.cancel(entity, "motivo", "senha")).thenThrow(new IllegalStateException("provider indisponivel"));
+    when(providerAdapter.cancel(entity, "motivo", "senha"))
+        .thenThrow(new NfseProvedorRecusouException("E1235", "E1235 - Prazo de cancelamento expirado"));
+    when(nfseInvoiceItemRepository.listByTenantAndInvoice(tenantId, invoiceId)).thenReturn(List.of());
 
     NfseDtos.CancelRequest request = new NfseDtos.CancelRequest();
     request.reason = "motivo";
     request.certificatePassword = "senha";
 
     assertThatThrownBy(() -> service.cancelar(invoiceId.toString(), request))
-        .isInstanceOf(IllegalStateException.class)
-        .hasMessageContaining("provider indisponivel");
-    // apenas o evento CANCEL_PENDING foi registrado (transicao antes da chamada ao provider);
-    // CANCEL_SUCCESS nunca e registrado porque o metodo nao tem try/catch ao redor do provider
-    verify(nfseInvoiceEventRepository, times(1)).save(any());
-    assertThat(entity.getFiscalStatus()).isEqualTo(NfseFiscalStatus.CANCEL_PENDING);
+        .isInstanceOf(ApiClientErrorException.class)
+        .hasMessageContaining("Prazo de cancelamento expirado");
+    // Antes, o rollback devolvia a nota a AUTHORIZED e CANCEL_REJECTED nunca era gravado.
+    assertThat(entity.getFiscalStatus()).isEqualTo(NfseFiscalStatus.CANCEL_REJECTED);
+    assertThat(eventosGravados())
+        .anySatisfy(e -> assertThat(e.getProviderCode()).isEqualTo("E1235"));
+  }
+
+  @Test
+  void cancelar_aposRecusa_permitePedirDeNovo() {
+    UUID invoiceId = UUID.randomUUID();
+    NfseInvoiceEntity entity = draftEntity(invoiceId);
+    entity.setFiscalStatus(NfseFiscalStatus.CANCEL_REJECTED);
+    when(nfseInvoiceRepository.findByTenantAndIdForUpdate(tenantId, invoiceId)).thenReturn(Optional.of(entity));
+    when(nfseFiscalStateMachine.canReach(any(), any())).thenReturn(true);
+    when(nfseProviderRouterService.resolve("ABRASF")).thenReturn(providerAdapter);
+    when(providerAdapter.cancel(entity, "motivo", "senha"))
+        .thenReturn(new NfseProviderAdapter.CancellationResult("200", "Cancelado"));
+    when(nfseXmlBuilderService.buildCancelReturnXml(entity, "200", "Cancelado")).thenReturn("<retorno/>");
+    when(encryptionService.encrypt(anyString())).thenReturn("ENC");
+    when(nfseInvoiceItemRepository.listByTenantAndInvoice(tenantId, invoiceId)).thenReturn(List.of());
+
+    NfseDtos.CancelRequest request = new NfseDtos.CancelRequest();
+    request.reason = "motivo";
+    request.certificatePassword = "senha";
+
+    assertThat(service.cancelar(invoiceId.toString(), request).fiscalStatus).isEqualTo("CANCELLED");
+  }
+
+  @Test
+  void obterInvoice_mostraOUltimoMotivoDoProvedor() {
+    UUID invoiceId = UUID.randomUUID();
+    NfseInvoiceEntity entity = draftEntity(invoiceId);
+    entity.setFiscalStatus(NfseFiscalStatus.REJECTED);
+    when(nfseInvoiceRepository.findByTenantAndId(tenantId, invoiceId)).thenReturn(Optional.of(entity));
+    when(nfseInvoiceItemRepository.listByTenantAndInvoice(tenantId, invoiceId)).thenReturn(List.of());
+    NfseInvoiceEventEntity semMensagem = new NfseInvoiceEventEntity();
+    semMensagem.setEventType("REJECTED");
+    NfseInvoiceEventEntity recusa = new NfseInvoiceEventEntity();
+    recusa.setProviderCode("E0312");
+    recusa.setProviderMessage("E0312 - CNPJ do prestador invalido");
+    when(nfseInvoiceEventRepository.listByTenantAndInvoice(tenantId, invoiceId)).thenReturn(List.of(semMensagem, recusa));
+
+    NfseDtos.Invoice dto = service.obterInvoice(invoiceId.toString());
+
+    assertThat(dto.ultimoRetornoCodigo).isEqualTo("E0312");
+    assertThat(dto.ultimoRetornoMensagem).contains("CNPJ do prestador invalido");
   }
 
   // ---------------------------------------------------------------- listarInvoices
@@ -647,7 +885,8 @@ class NfseServiceTest {
             brasilApiCnpjClient,
             nfseConfigService,
             false,
-            true);
+            true,
+            transacoes);
 
     assertThatThrownBy(() -> disabledService.consultarTomadorPorCnpj("11222333000181"))
         .isInstanceOf(IllegalArgumentException.class)

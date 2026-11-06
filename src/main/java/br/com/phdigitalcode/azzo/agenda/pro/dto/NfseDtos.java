@@ -91,6 +91,13 @@ public final class NfseDtos {
     public List<Item> items = new ArrayList<>();
     public String createdAt;
     public String updatedAt;
+    /**
+     * O ultimo retorno do provedor com mensagem (recusa, falta de resposta), so no detalhe da nota.
+     * E o que a tela mostra para o salao saber o que corrigir.
+     */
+    public String ultimoRetornoCodigo;
+    public String ultimoRetornoMensagem;
+    public String ultimoRetornoEm;
   }
 
   public static class InvoiceListResponse {
@@ -110,6 +117,8 @@ public final class NfseDtos {
   public static class CancelRequest {
     public String reason;
     public String certificatePassword;
+    /** Sessao de senha destravada (certificate-unlock), como na autorizacao. */
+    public String unlockTokenId;
   }
 
   public static class PdfJobResponse {

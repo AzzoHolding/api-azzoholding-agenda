@@ -74,6 +74,7 @@ public class GlobalExceptionHandler {
       Map.entry("NFSE_CERTIFICATE_PASSWORD_REQUIRED", "Informe a senha do certificado para continuar."),
       Map.entry("NFSE_CERTIFICATE_ACTIVE_MISSING", "Nenhum certificado fiscal ativo esta configurado."),
       Map.entry("NFSE_CERTIFICATE_PASSWORD_INVALID", "Nao foi possivel validar o certificado com os dados informados."),
+      Map.entry("NFSE_CERTIFICATE_EXPIRED", "O certificado digital esta vencido. Envie um certificado valido em Configuracoes > Certificados."),
       Map.entry("NFSE_PROVIDER_ABRASF_WS_URL_MISSING", "URL do webservice ABRASF nao configurada para o ambiente da nota."),
       Map.entry("NFSE_PROVIDER_SEFIN_NACIONAL_AUTHORIZE_URL_MISSING", "URL de autorizacao da Receita Nacional nao configurada para o ambiente da nota."),
       Map.entry("NFSE_PROVIDER_SEFIN_NACIONAL_CANCEL_URL_MISSING", "URL de cancelamento da Receita Nacional nao configurada para o ambiente da nota."),
