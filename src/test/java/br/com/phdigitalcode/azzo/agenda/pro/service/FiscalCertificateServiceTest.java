@@ -241,6 +241,35 @@ class FiscalCertificateServiceTest {
     assertThat(resposta.status).isEqualTo("ACTIVE");
   }
 
+  /** INT-024: certificado vencido nao pode voltar a ser o ativo. */
+  @Test
+  void ativarCertificadoVencidoLancaErroDeValidade() {
+    FiscalCertificateEntity entity = entidadeAtiva();
+    entity.setStatus("INACTIVE");
+    entity.setValidTo(java.time.Instant.now().minusSeconds(60));
+    when(contextoTenant.obterTenantIdOuFalhar()).thenReturn(tenantId);
+    when(fiscalCertificateRepository.findByTenantAndId(tenantId, entity.getId()))
+        .thenReturn(Optional.of(entity));
+
+    assertThatThrownBy(() -> service.ativar(entity.getId().toString()))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage(FiscalCertificateService.ERR_CERTIFICATE_EXPIRED);
+    assertThat(entity.getStatus()).isEqualTo("INACTIVE");
+  }
+
+  /** INT-024: com o certificado ativo vencido, a emissao para antes de chegar a Receita. */
+  @Test
+  void validarSenhaComCertificadoAtivoVencidoLancaErroDeValidade() {
+    FiscalCertificateEntity entity = entidadeAtiva();
+    entity.setValidTo(java.time.Instant.now().minusSeconds(60));
+    when(contextoTenant.obterTenantIdOuFalhar()).thenReturn(tenantId);
+    when(fiscalCertificateRepository.findActiveByTenant(tenantId)).thenReturn(Optional.of(entity));
+
+    assertThatThrownBy(() -> service.validarSenhaCertificadoAtivo(CERT_PASSWORD))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage(FiscalCertificateService.ERR_CERTIFICATE_EXPIRED);
+  }
+
   // ─── validarSenhaCertificadoAtivo ───────────────────────────────────────
 
   @Test

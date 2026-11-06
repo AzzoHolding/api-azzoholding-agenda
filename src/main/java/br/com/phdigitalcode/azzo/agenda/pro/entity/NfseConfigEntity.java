@@ -79,6 +79,28 @@ public class NfseConfigEntity {
   @Column(name = "especial_regime_tributacao")
   private String especialRegimeTributacao;
 
+  // NT 009 (DPS 1.01): classificacao do IBS/CBS e total aproximado de tributos. Ver V160.
+  @Column(name = "ibs_cbs_cst")
+  private String ibsCbsCst;
+
+  @Column(name = "ibs_cbs_class_trib")
+  private String ibsCbsClassTrib;
+
+  @Column(name = "ibs_cbs_ind_op")
+  private String ibsCbsIndOp;
+
+  @Column(name = "percentual_tributos_sn")
+  private BigDecimal percentualTributosSn;
+
+  @Column(name = "percentual_tributos_federais")
+  private BigDecimal percentualTributosFederais;
+
+  @Column(name = "percentual_tributos_estaduais")
+  private BigDecimal percentualTributosEstaduais;
+
+  @Column(name = "percentual_tributos_municipais")
+  private BigDecimal percentualTributosMunicipais;
+
   @Column(name = "ws_url", length = 512)
   private String wsUrl;
 
@@ -112,5 +134,60 @@ public class NfseConfigEntity {
   @PreUpdate
   void preUpdate() {
     updatedAt = Instant.now();
+  }
+  public String getIbsCbsCst() {
+    return ibsCbsCst;
+  }
+
+  public void setIbsCbsCst(String ibsCbsCst) {
+    this.ibsCbsCst = ibsCbsCst;
+  }
+
+  public String getIbsCbsClassTrib() {
+    return ibsCbsClassTrib;
+  }
+
+  public void setIbsCbsClassTrib(String ibsCbsClassTrib) {
+    this.ibsCbsClassTrib = ibsCbsClassTrib;
+  }
+
+  public String getIbsCbsIndOp() {
+    return ibsCbsIndOp;
+  }
+
+  public void setIbsCbsIndOp(String ibsCbsIndOp) {
+    this.ibsCbsIndOp = ibsCbsIndOp;
+  }
+
+  public BigDecimal getPercentualTributosSn() {
+    return percentualTributosSn;
+  }
+
+  public void setPercentualTributosSn(BigDecimal percentualTributosSn) {
+    this.percentualTributosSn = percentualTributosSn;
+  }
+
+  public BigDecimal getPercentualTributosFederais() {
+    return percentualTributosFederais;
+  }
+
+  public void setPercentualTributosFederais(BigDecimal percentualTributosFederais) {
+    this.percentualTributosFederais = percentualTributosFederais;
+  }
+
+  public BigDecimal getPercentualTributosEstaduais() {
+    return percentualTributosEstaduais;
+  }
+
+  public void setPercentualTributosEstaduais(BigDecimal percentualTributosEstaduais) {
+    this.percentualTributosEstaduais = percentualTributosEstaduais;
+  }
+
+  public BigDecimal getPercentualTributosMunicipais() {
+    return percentualTributosMunicipais;
+  }
+
+  public void setPercentualTributosMunicipais(BigDecimal percentualTributosMunicipais) {
+    this.percentualTributosMunicipais = percentualTributosMunicipais;
   }
 }

@@ -28,18 +28,11 @@ import br.com.phdigitalcode.azzo.agenda.pro.repository.NfseConfigRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.NfseInvoiceItemRepository;
 
 /**
- * Cobre {@code modules/nfse/application/xml/SefinNacionalXmlLayoutBuilder.java} — porta os 2 casos
- * do original ({@code SefinNacionalXmlLayoutBuilderUnitTest}) e adiciona casos de borda
- * (EXTERIOR/CNPJ do tomador, dedução, ambiente de producao).
+ * A DPS do Emissor Nacional no leiaute 1.01 (NT SE/CGNFS-e 009).
  *
- * <p>Armadilha 6 do briefing: os repositories tem metodos {@code default}
- * ({@code findByTenantAndAmbiente}/{@code listByTenantAndInvoice}) que delegam para o metodo
- * concreto do Spring Data — e o {@code default} que a producao efetivamente chama. Os stubs abaixo
- * miram sempre o metodo {@code default} invocado de verdade, porque o mock do Mockito NAO executa
- * o corpo do metodo default (ele intercepta a chamada como qualquer outra e devolve o valor padrao
- * se nao houver stub para ela) — estubar o metodo abstrato por baixo (ex.:
- * {@code findByTenantIdAndAmbiente}) nunca seria consultado e o teste "provaria" o comportamento
- * errado.
+ * <p>O proprio {@code buildAndValidateAuthorizationXml} confere o XML contra os XSD oficiais da
+ * Receita ({@link LeiauteNfseNacional}): todo teste que gera XML com sucesso ja prova que ele passa
+ * no esquema oficial. Os casos de regra de negocio vem do Anexo VI (codigos E0xxx citados).
  */
 @ExtendWith(MockitoExtension.class)
 class SefinNacionalXmlLayoutBuilderTest {
@@ -66,21 +59,208 @@ class SefinNacionalXmlLayoutBuilderTest {
   }
 
   @Test
-  void deveGerarDpsMinimaParaReceitaNacional() {
+  void dpsDoSimplesPassaNoEsquemaOficialDoLeiaute101() {
     NfseInvoiceEntity invoice = invoiceBase();
     stubRepositories(invoice, configBase(), taxConfigBase(), List.of(itemBase()));
 
     String xml = builder.buildAndValidateAuthorizationXml(invoice);
 
-    assertThat(xml).contains("<DPS xmlns=\"http://www.sped.fazenda.gov.br/nfse\" versao=\"1.00\">");
-    assertThat(xml).contains("<infDPS Id=\"DPS");
-    assertThat(xml).contains("<tpAmb>2</tpAmb>");
-    assertThat(xml).contains("<cTribNac>010101</cTribNac>");
-    assertThat(xml).contains("<xDescServ>Corte masculino</xDescServ>");
-    assertThat(xml).contains("<opSimpNac>3</opSimpNac>");
-    assertThat(xml).contains("<regEspTrib>0</regEspTrib>");
-    assertThat(xml).contains("<tpRetISSQN>1</tpRetISSQN>");
-    assertThat(xml).contains("<indTotTrib>0</indTotTrib>");
+    assertThat(xml).startsWith("<DPS xmlns=\"http://www.sped.fazenda.gov.br/nfse\" versao=\"1.01\">");
+    assertThat(xml).contains("<tpEmit>1</tpEmit><finNFSe>0</finNFSe><cLocEmi>3304557</cLocEmi>");
+    assertThat(xml).contains("<regTrib><opSimpNac>3</opSimpNac><regApTribSN>1</regApTribSN><regEspTrib>0</regEspTrib></regTrib>");
+    assertThat(xml).contains("<cTribNac>010101</cTribNac><cNBS>123456789</cNBS><xDescServ>Corte masculino</xDescServ>");
+    // ME/EPP: "nao informar" e proibido (E0712); vai o percentual do Simples.
+    assertThat(xml).contains("<totTrib><pTotTribSN>6.00</pTotTribSN></totTrib>");
+    assertThat(xml).doesNotContain("indTotTrib");
+  }
+
+  @Test
+  void prestadorQueEmiteNaoLevaNomeNemEndereco() {
+    NfseInvoiceEntity invoice = invoiceBase();
+    stubRepositories(invoice, configBase(), taxConfigBase(), List.of(itemBase()));
+
+    String xml = builder.buildAndValidateAuthorizationXml(invoice);
+
+    String prest = xml.substring(xml.indexOf("<prest>"), xml.indexOf("</prest>"));
+    // E0121 / E0128: a Receita usa o cadastro do CNPJ.
+    assertThat(prest).doesNotContain("<xNome>").doesNotContain("<end>");
+    assertThat(prest).contains("<CNPJ>12345678000199</CNPJ><IM>1234567</IM>");
+  }
+
+  @Test
+  void dataDeEmissaoTemFusoESerieNaoGanhaZerosADireita() {
+    NfseInvoiceEntity invoice = invoiceBase();
+    stubRepositories(invoice, configBase(), taxConfigBase(), List.of(itemBase()));
+
+    String xml = builder.buildAndValidateAuthorizationXml(invoice);
+
+    assertThat(xml).containsPattern("<dhEmi>20\\d\\d-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d-03:00</dhEmi>");
+    assertThat(xml).contains("<serie>1</serie>");
+    // Id: DPS + municipio + 2 (CNPJ) + CNPJ + serie com zeros a esquerda + numero com zeros a esquerda.
+    assertThat(xml).contains("<infDPS Id=\"DPS" + "3304557" + "2" + "12345678000199" + "00001" + "000000000000123" + "\">");
+  }
+
+  @Test
+  void serieComLetraERecusadaAntesDeEnviar() {
+    NfseInvoiceEntity invoice = invoiceBase();
+    invoice.setSerieRps("A1");
+    stubRepositories(invoice, configBase(), taxConfigBase(), List.of(itemBase()));
+
+    assertThatThrownBy(() -> builder.buildAndValidateAuthorizationXml(invoice))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("NFSE_PROVIDER_SEFIN_NACIONAL_SERIE_INVALIDA");
+  }
+
+  @Test
+  void aliquotaDoIssSoVaiParaMeEppComIssRetido() {
+    NfseInvoiceEntity semRetencao = invoiceBase();
+    stubRepositories(semRetencao, configBase(), taxConfigBase(), List.of(itemBase()));
+    assertThat(builder.buildAndValidateAuthorizationXml(semRetencao)).doesNotContain("<pAliq>");
+
+    NfseInvoiceEntity comRetencao = invoiceBase();
+    comRetencao.setIssRetido(true);
+    stubRepositories(comRetencao, configBase(), taxConfigBase(), List.of(itemBase()));
+    assertThat(builder.buildAndValidateAuthorizationXml(comRetencao))
+        .contains("<tribMun><tribISSQN>1</tribISSQN><tpRetISSQN>2</tpRetISSQN><pAliq>5.00</pAliq></tribMun>");
+  }
+
+  @Test
+  void regraDaAliquotaSegueOAnexoVI() {
+    assertThat(SefinNacionalXmlLayoutBuilder.informaAliquota("3", "1", "0", true)).isTrue();
+    assertThat(SefinNacionalXmlLayoutBuilder.informaAliquota("3", "1", "0", false)).isFalse(); // E0625
+    assertThat(SefinNacionalXmlLayoutBuilder.informaAliquota("3", "2", "0", true)).isFalse(); // E0635
+    assertThat(SefinNacionalXmlLayoutBuilder.informaAliquota("1", null, "0", true)).isFalse(); // E0617
+    assertThat(SefinNacionalXmlLayoutBuilder.informaAliquota("2", null, "0", true)).isFalse(); // E0600
+    assertThat(SefinNacionalXmlLayoutBuilder.informaAliquota("3", "1", "1", true)).isFalse(); // E0604
+  }
+
+  @Test
+  void naoOptanteMandaOsPercentuaisFederalEstadualEMunicipal() {
+    NfseInvoiceEntity invoice = invoiceBase();
+    NfseConfigEntity config = configBase();
+    config.setSimplesNacionalSituacao("1");
+    config.setPercentualTributosFederais(new BigDecimal("13.45"));
+    config.setPercentualTributosEstaduais(BigDecimal.ZERO);
+    config.setPercentualTributosMunicipais(new BigDecimal("5"));
+    stubRepositories(invoice, config, taxConfigBase(), List.of(itemBase()));
+
+    String xml = builder.buildAndValidateAuthorizationXml(invoice);
+
+    // E0162: nao optante nao manda regApTribSN, mesmo se estiver na configuracao.
+    assertThat(xml).contains("<regTrib><opSimpNac>1</opSimpNac><regEspTrib>0</regEspTrib></regTrib>");
+    assertThat(xml).contains(
+        "<pTotTrib><pTotTribFed>13.45</pTotTribFed><pTotTribEst>0.00</pTotTribEst><pTotTribMun>5.00</pTotTribMun></pTotTrib>");
+  }
+
+  @Test
+  void naoOptanteSemPercentuaisNaoSai() {
+    NfseInvoiceEntity invoice = invoiceBase();
+    NfseConfigEntity config = configBase();
+    config.setSimplesNacionalSituacao("1");
+    stubRepositories(invoice, config, taxConfigBase(), List.of(itemBase()));
+
+    assertThatThrownBy(() -> builder.buildAndValidateAuthorizationXml(invoice))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("NFSE_PROVIDER_SEFIN_NACIONAL_PERCENTUAL_TRIBUTOS_REQUIRED");
+  }
+
+  @Test
+  void meEppSemPercentualDoSimplesNaoSai() {
+    NfseInvoiceEntity invoice = invoiceBase();
+    NfseConfigEntity config = configBase();
+    config.setPercentualTributosSn(null);
+    stubRepositories(invoice, config, taxConfigBase(), List.of(itemBase()));
+
+    assertThatThrownBy(() -> builder.buildAndValidateAuthorizationXml(invoice))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("NFSE_PROVIDER_SEFIN_NACIONAL_PERCENTUAL_TRIBUTOS_SN_REQUIRED");
+  }
+
+  @Test
+  void meiNaoInformaTotalDeTributos() {
+    NfseInvoiceEntity invoice = invoiceBase();
+    NfseConfigEntity config = configBase();
+    config.setSimplesNacionalSituacao("2");
+    stubRepositories(invoice, config, taxConfigBase(), List.of(itemBase()));
+
+    String xml = builder.buildAndValidateAuthorizationXml(invoice);
+
+    assertThat(xml).contains("<totTrib><indTotTrib>0</indTotTrib></totTrib>");
+    assertThat(xml).doesNotContain("<regApTribSN>").doesNotContain("<pAliq>");
+  }
+
+  @Test
+  void semClassificacaoDoIbsCbsOGrupoNaoVai() {
+    NfseInvoiceEntity invoice = invoiceBase();
+    stubRepositories(invoice, configBase(), taxConfigBase(), List.of(itemBase()));
+
+    assertThat(builder.buildAndValidateAuthorizationXml(invoice)).doesNotContain("<IBSCBS>");
+  }
+
+  @Test
+  void comClassificacaoOGrupoIbsCbsVaiSoComOsCodigos() {
+    NfseInvoiceEntity invoice = invoiceBase();
+    NfseConfigEntity config = configComIbsCbs();
+    stubRepositories(invoice, config, taxConfigBase(), List.of(itemBase()));
+
+    String xml = builder.buildAndValidateAuthorizationXml(invoice);
+
+    // Os valores do IBS e da CBS sao calculados pela Receita: a DPS so classifica.
+    assertThat(xml).contains(
+        "<IBSCBS><indFinal>1</indFinal><cIndOp>100301</cIndOp><indDest>0</indDest>"
+            + "<valores><trib><CST>000</CST><cClassTrib>000001</cClassTrib></trib></valores></IBSCBS></infDPS>");
+  }
+
+  @Test
+  void tomadorPessoaJuridicaNaoEConsumidorFinal() {
+    NfseInvoiceEntity invoice = invoiceBase();
+    invoice.setCustomerType(NfseCustomerType.CNPJ);
+    invoice.setCustomerDocument("12345678000199");
+    stubRepositories(invoice, configComIbsCbs(), taxConfigBase(), List.of(itemBase()));
+
+    String xml = builder.buildAndValidateAuthorizationXml(invoice);
+
+    assertThat(xml).contains("<toma><CNPJ>12345678000199</CNPJ>");
+    assertThat(xml).contains("<indFinal>0</indFinal>");
+  }
+
+  @Test
+  void ibsCbsSemNbsNaoSai() {
+    NfseInvoiceEntity invoice = invoiceBase();
+    invoice.setNbsCode(null);
+    NfseInvoiceItemEntity item = itemBase();
+    item.setNbsCode(null);
+    NfseConfigEntity config = configComIbsCbs();
+    config.setNbsCodeDefault(null);
+    stubRepositories(invoice, config, taxConfigBase(), List.of(item));
+
+    // E0322: com o grupo IBS/CBS, o NBS e obrigatorio.
+    assertThatThrownBy(() -> builder.buildAndValidateAuthorizationXml(invoice))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("NFSE_PROVIDER_SEFIN_NACIONAL_NBS_REQUIRED_IBS_CBS");
+  }
+
+  @Test
+  void deducaoNaoESuportadaNoLeiaute101() {
+    NfseInvoiceEntity invoice = invoiceBase();
+    invoice.setValorDeducoes(new BigDecimal("10.00"));
+    stubRepositories(invoice, configBase(), taxConfigBase(), List.of(itemBase()));
+
+    assertThatThrownBy(() -> builder.buildAndValidateAuthorizationXml(invoice))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("NFSE_PROVIDER_SEFIN_NACIONAL_DEDUCAO_NAO_SUPORTADA");
+  }
+
+  @Test
+  void campoForaDoEsquemaERecusadoAntesDeEnviar() {
+    NfseInvoiceEntity invoice = invoiceBase();
+    // cTribMun tem 3 digitos no esquema; o rascunho trouxe 4.
+    invoice.setCodigoTributacaoMunicipio("0101");
+    stubRepositories(invoice, configBase(), taxConfigBase(), List.of(itemBase()));
+
+    assertThatThrownBy(() -> builder.buildAndValidateAuthorizationXml(invoice))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageStartingWith("NFSE_DPS_FORA_DO_LEIAUTE:");
   }
 
   @Test
@@ -89,9 +269,7 @@ class SefinNacionalXmlLayoutBuilderTest {
     invoice.setAmbiente(NfseAmbiente.PRODUCAO);
     stubRepositories(invoice, configBase(), taxConfigBase(), List.of(itemBase()));
 
-    String xml = builder.buildAndValidateAuthorizationXml(invoice);
-
-    assertThat(xml).contains("<tpAmb>1</tpAmb>");
+    assertThat(builder.buildAndValidateAuthorizationXml(invoice)).contains("<tpAmb>1</tpAmb>");
   }
 
   @Test
@@ -104,30 +282,8 @@ class SefinNacionalXmlLayoutBuilderTest {
     String xml = builder.buildAndValidateAuthorizationXml(invoice);
 
     assertThat(xml).contains("<cNaoNIF>0</cNaoNIF>");
-    assertThat(xml).contains("<tribISSQN>2</tribISSQN>");
-  }
-
-  @Test
-  void tomadorPessoaJuridicaGeraTagCnpj() {
-    NfseInvoiceEntity invoice = invoiceBase();
-    invoice.setCustomerType(NfseCustomerType.CNPJ);
-    invoice.setCustomerDocument("12345678000199");
-    stubRepositories(invoice, configBase(), taxConfigBase(), List.of(itemBase()));
-
-    String xml = builder.buildAndValidateAuthorizationXml(invoice);
-
-    assertThat(xml).contains("<CNPJ>12345678000199</CNPJ>");
-  }
-
-  @Test
-  void deducaoPositivaGeraTagVDedRed() {
-    NfseInvoiceEntity invoice = invoiceBase();
-    invoice.setValorDeducoes(new BigDecimal("10.00"));
-    stubRepositories(invoice, configBase(), taxConfigBase(), List.of(itemBase()));
-
-    String xml = builder.buildAndValidateAuthorizationXml(invoice);
-
-    assertThat(xml).contains("<vDedRed><vDR>10.00</vDR></vDedRed>");
+    // Antes ia "2" (imunidade) so por o tomador ser do exterior, o que nao e a regra do ISS.
+    assertThat(xml).contains("<tribISSQN>1</tribISSQN>");
   }
 
   @Test
@@ -186,7 +342,7 @@ class SefinNacionalXmlLayoutBuilderTest {
     entity.setAmbiente(NfseAmbiente.HOMOLOGACAO);
     entity.setProvedor("SEFIN_NACIONAL");
     entity.setNumeroRps(123L);
-    entity.setSerieRps("A1");
+    entity.setSerieRps("1");
     entity.setCustomerType(NfseCustomerType.CPF);
     entity.setCustomerDocument("12345678901");
     entity.setCustomerName("Cliente Teste");
@@ -194,8 +350,8 @@ class SefinNacionalXmlLayoutBuilderTest {
     entity.setCustomerPhone("11999999999");
     entity.setMunicipioCodigoIbge("3304557");
     entity.setLocalPrestacaoCodigoIbge("3304557");
-    entity.setDataCompetencia(LocalDate.of(2026, 3, 14));
-    entity.setCreatedAt(Instant.parse("2026-03-14T10:00:00Z"));
+    entity.setDataCompetencia(LocalDate.of(2026, 11, 6));
+    entity.setCreatedAt(Instant.parse("2026-11-06T10:00:00Z"));
     entity.setNaturezaOperacao("Prestacao de servico");
     entity.setItemListaServico("0101");
     entity.setNationalTaxCode("010101");
@@ -234,13 +390,22 @@ class SefinNacionalXmlLayoutBuilderTest {
     config.setAmbiente(NfseAmbiente.HOMOLOGACAO);
     config.setProvedor("SEFIN_NACIONAL");
     config.setMunicipioCodigoIbge("3304557");
-    config.setSerieRps("A1");
+    config.setSerieRps("1");
     config.setApplicationVersion("AZZO-1.0");
     config.setNationalTaxCodeDefault("010101");
     config.setNbsCodeDefault("123456789");
     config.setSimplesNacionalSituacao("3");
     config.setSimplesNacionalRegimeTributacao("1");
     config.setEspecialRegimeTributacao("0");
+    config.setPercentualTributosSn(new BigDecimal("6.00"));
+    return config;
+  }
+
+  private NfseConfigEntity configComIbsCbs() {
+    NfseConfigEntity config = configBase();
+    config.setIbsCbsCst("000");
+    config.setIbsCbsClassTrib("000001");
+    config.setIbsCbsIndOp("100301");
     return config;
   }
 

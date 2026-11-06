@@ -26,7 +26,10 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
@@ -47,6 +50,8 @@ import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.NfseCustomerType;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.NfseFiscalStatus;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.NfseOperationalStatus;
 import br.com.phdigitalcode.azzo.agenda.pro.exception.ApiClientErrorException;
+import br.com.phdigitalcode.azzo.agenda.pro.exception.NfseProvedorRecusouException;
+import br.com.phdigitalcode.azzo.agenda.pro.exception.NfseProvedorSemRespostaException;
 import br.com.phdigitalcode.azzo.agenda.pro.exception.NfseStateTransitionException;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.BrasilApiCnpjClient;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.NfseConfigRepository;
@@ -112,6 +117,7 @@ public class NfseService {
   private final NfseConfigService nfseConfigService;
   private final boolean tomadorCnpjLookupEnabled;
   private final boolean testProvidersEnabled;
+  private final TransactionTemplate transacao;
 
   public NfseService(
       ContextoTenant contextoTenant,
@@ -132,7 +138,8 @@ public class NfseService {
       BrasilApiCnpjClient brasilApiCnpjClient,
       NfseConfigService nfseConfigService,
       @Value("${app.nfse.tomador.cnpj-lookup.enabled:true}") boolean tomadorCnpjLookupEnabled,
-      @Value("${app.nfse.test-providers.enabled:false}") boolean testProvidersEnabled) {
+      @Value("${app.nfse.test-providers.enabled:false}") boolean testProvidersEnabled,
+      PlatformTransactionManager transactionManager) {
     this.contextoTenant = contextoTenant;
     this.authenticatedUser = authenticatedUser;
     this.meterRegistry = meterRegistry;
@@ -152,6 +159,8 @@ public class NfseService {
     this.nfseConfigService = nfseConfigService;
     this.tomadorCnpjLookupEnabled = tomadorCnpjLookupEnabled;
     this.testProvidersEnabled = testProvidersEnabled;
+    this.transacao = new TransactionTemplate(transactionManager);
+    this.transacao.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
   }
 
   @Transactional
@@ -217,7 +226,9 @@ public class NfseService {
         nfseInvoiceRepository
             .findByTenantAndId(tenantId, id)
             .orElseThrow(() -> new ApiClientErrorException("NFS-e não encontrada.", 404));
-    if (entity.getFiscalStatus() != NfseFiscalStatus.DRAFT) {
+    // Rejeitada tambem: o provedor recusou e nada foi emitido, entao o salao corrige e emite de novo.
+    if (entity.getFiscalStatus() != NfseFiscalStatus.DRAFT
+        && entity.getFiscalStatus() != NfseFiscalStatus.REJECTED) {
       throw new NfseStateTransitionException("Somente rascunhos podem ser alterados.");
     }
     if (request == null) throw new IllegalArgumentException("Payload de NFS-e obrigatório.");
@@ -268,10 +279,44 @@ public class NfseService {
             .findByTenantAndId(tenantId, id)
             .orElseThrow(() -> new ApiClientErrorException("NFS-e não encontrada.", 404));
     List<NfseInvoiceItemEntity> items = nfseInvoiceItemRepository.listByTenantAndInvoice(tenantId, id);
-    return toInvoiceDto(entity, items);
+    NfseDtos.Invoice dto = toInvoiceDto(entity, items);
+    preencherUltimoRetorno(dto, tenantId, id);
+    return dto;
   }
 
-  @Transactional
+  /**
+   * O ultimo motivo que o provedor deu (recusa, falta de resposta). Sem isso a nota rejeitada
+   * aparece na tela sem dizer o que corrigir (INT-026).
+   */
+  private void preencherUltimoRetorno(NfseDtos.Invoice dto, UUID tenantId, UUID id) {
+    nfseInvoiceEventRepository.listByTenantAndInvoice(tenantId, id).stream()
+        .filter(evento -> !isBlank(evento.getProviderMessage()))
+        .findFirst()
+        .ifPresent(evento -> {
+          dto.ultimoRetornoCodigo = evento.getProviderCode();
+          dto.ultimoRetornoMensagem = evento.getProviderMessage();
+          dto.ultimoRetornoEm = evento.getCreatedAt() != null ? evento.getCreatedAt().toString() : null;
+        });
+  }
+
+  /**
+   * Emite a nota no provedor, em tres etapas (INT-003, corrigido em 06/11/2026):
+   *
+   * <ol>
+   *   <li><b>Preparar</b> (transacao propria, com a linha travada): confere a situacao, monta e
+   *       assina o XML e grava {@code SUBMITTED}. Essa situacao gravada impede um segundo envio
+   *       simultaneo da mesma nota.
+   *   <li><b>Enviar</b> (sem transacao e sem trava): a chamada ao provedor.
+   *   <li><b>Registrar</b> (transacao propria): grava o resultado. Autorizada vira {@code
+   *       AUTHORIZED}; recusada vira {@code REJECTED} com o motivo no evento; sem resposta vira
+   *       {@code PENDING} aguardando o usuario emitir de novo, que entao CONSULTA antes de reenviar.
+   * </ol>
+   *
+   * <p>Antes, as tres etapas eram uma transacao so: se algo falhasse depois de o provedor aceitar,
+   * o banco desfazia tudo, e a nota ficava emitida na Receita sem registro aqui. As transacoes sao
+   * {@code REQUIRES_NEW} porque o controller chama este metodo dentro da transacao do {@link
+   * NfseIdempotencyService}.
+   */
   public NfseDtos.Invoice autorizar(String invoiceId, NfseDtos.AuthorizeRequest request) {
     Instant startedAt = Instant.now();
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
@@ -286,10 +331,44 @@ public class NfseService {
     }
     fiscalCertificateService.validarSenhaCertificadoAtivo(certificatePassword);
 
+    String senha = certificatePassword;
+    Envio envio = transacao.execute(status -> prepararEnvio(tenantId, id, request, senha));
+    Resultado resultado = enviar(envio, senha);
+    NfseDtos.Invoice dto =
+        transacao.execute(status -> registrarResultado(tenantId, id, correlationId, startedAt, resultado));
+    if (resultado.falha() != null) {
+      throw paraOUsuario(resultado.falha(), envio.provider());
+    }
+    return dto;
+  }
+
+  /** O que a etapa 1 entrega para a etapa 2: a nota pronta e se o envio e uma retomada. */
+  private record Envio(NfseInvoiceEntity nota, NfseProviderAdapter provider, boolean retomada) {}
+
+  /** O resultado da etapa 2: ou a resposta do provedor, ou a falha classificada. */
+  private record Resultado(NfseProviderAdapter.AuthorizationResult autorizacao, Falha falha) {}
+
+  private enum TipoDeFalha { RECUSADA, NAO_ENVIADA, SEM_RESPOSTA }
+
+  private record Falha(TipoDeFalha tipo, String codigo, String mensagem, RuntimeException causa) {}
+
+  private Envio prepararEnvio(
+      UUID tenantId, UUID id, NfseDtos.AuthorizeRequest request, String certificatePassword) {
     NfseInvoiceEntity entity =
         nfseInvoiceRepository
             .findByTenantAndIdForUpdate(tenantId, id)
             .orElseThrow(() -> new ApiClientErrorException("NFS-e não encontrada.", 404));
+
+    // Envio anterior sem resposta: consultar o provedor antes de mandar de novo.
+    if (entity.getFiscalStatus() == NfseFiscalStatus.PENDING
+        && entity.getOperationalStatus() == NfseOperationalStatus.PENDING_PASSWORD_UNLOCK) {
+      NfseProviderAdapter provider = nfseProviderRouterService.resolve(entity.getProvedor());
+      // Marca como em andamento: um segundo clique simultaneo nao passa daqui.
+      entity.setOperationalStatus(NfseOperationalStatus.WAITING_PROVIDER);
+      registrarEvento(tenantId, id, "AUTHORIZE_LOOKUP", "PENDING", null, null, null);
+      return new Envio(entity, provider, true);
+    }
+
     if (entity.getFiscalStatus() != NfseFiscalStatus.DRAFT
         && entity.getFiscalStatus() != NfseFiscalStatus.REJECTED) {
       throw new NfseStateTransitionException("Estado inválido para autorização.");
@@ -312,36 +391,133 @@ public class NfseService {
       entity.setXmlEnvioEnc(asEncryptedBytes("<nfse-test-provider/>"));
       transicionarFiscalStatus(entity, NfseFiscalStatus.SIGNED, tenantId, id, "SIGNED");
       transicionarFiscalStatus(entity, NfseFiscalStatus.SUBMITTED, tenantId, id, "SUBMITTED");
-      NfseProviderAdapter.AuthorizationResult authorizationResult =
-          authorizeWithProvider(entity, certificatePassword);
-      return finalizarAutorizacao(entity, tenantId, id, correlationId, startedAt, authorizationResult);
+      return new Envio(entity, null, false);
     }
 
+    NfseProviderAdapter provider = nfseProviderRouterService.resolve(entity.getProvedor());
     transicionarFiscalStatus(entity, NfseFiscalStatus.READY_TO_SEND, tenantId, id, "READY_TO_SEND");
     String xmlAutorizacao = nfseXmlBuilderService.buildAndValidateAuthorizationXml(entity);
     String xmlAssinado = nfseXmlSignerService.sign(xmlAutorizacao, certificatePassword);
     entity.setXmlEnvioEnc(asEncryptedBytes(xmlAssinado));
     transicionarFiscalStatus(entity, NfseFiscalStatus.SIGNED, tenantId, id, "SIGNED");
     transicionarFiscalStatus(entity, NfseFiscalStatus.SUBMITTED, tenantId, id, "SUBMITTED");
+    return new Envio(entity, provider, false);
+  }
 
-    NfseProviderAdapter.AuthorizationResult authorizationResult;
+  private Resultado enviar(Envio envio, String certificatePassword) {
     try {
-      authorizationResult = authorizeWithProvider(entity, certificatePassword);
+      if (envio.retomada()) {
+        var achada = envio.provider().consultarEmissao(envio.nota(), certificatePassword);
+        if (achada.isPresent()) return new Resultado(achada.get(), null);
+        // A Receita nao recebeu o envio anterior: reenviar a mesma DPS assinada e seguro.
+        return new Resultado(envio.provider().authorize(envio.nota(), certificatePassword), null);
+      }
+      return new Resultado(authorizeWithProvider(envio.nota(), certificatePassword), null);
     } catch (RuntimeException ex) {
-      registrarMetricasAutorizacao(false, entity, startedAt, "NA");
-      LOG.warn(
-          "nfse_authorize_error correlationId={} tenant_id={} invoice_id={} ambiente={} municipio={} provedor={}",
-          correlationId,
-          tenantId,
-          id,
-          entity.getAmbiente(),
-          entity.getMunicipioCodigoIbge(),
-          entity.getProvedor(),
-          ex);
-      throw ex;
+      return new Resultado(null, classificar(ex));
+    }
+  }
+
+  private NfseDtos.Invoice registrarResultado(
+      UUID tenantId, UUID id, String correlationId, Instant startedAt, Resultado resultado) {
+    NfseInvoiceEntity entity =
+        nfseInvoiceRepository
+            .findByTenantAndIdForUpdate(tenantId, id)
+            .orElseThrow(() -> new ApiClientErrorException("NFS-e não encontrada.", 404));
+    if (resultado.falha() == null) {
+      return finalizarAutorizacao(entity, tenantId, id, correlationId, startedAt, resultado.autorizacao());
     }
 
-    return finalizarAutorizacao(entity, tenantId, id, correlationId, startedAt, authorizationResult);
+    Falha falha = resultado.falha();
+    registrarMetricasAutorizacao(false, entity, startedAt, falha.codigo());
+    LOG.warn(
+        "nfse_authorize_error correlationId={} tenant_id={} invoice_id={} ambiente={} municipio={} provedor={} tipo={} codigo={}",
+        correlationId,
+        tenantId,
+        id,
+        entity.getAmbiente(),
+        entity.getMunicipioCodigoIbge(),
+        entity.getProvedor(),
+        falha.tipo(),
+        falha.codigo(),
+        falha.causa());
+
+    boolean podeConsultarDepois =
+        falha.tipo() == TipoDeFalha.SEM_RESPOSTA
+            && !isTestProvider(entity.getProvedor())
+            && nfseProviderRouterService.resolve(entity.getProvedor()).consultaEmissaoAposFalha();
+    if (podeConsultarDepois) {
+      transicionarFiscalStatus(entity, NfseFiscalStatus.PENDING, tenantId, id, "PENDING");
+      // Fora do polling: so o usuario, com a senha do certificado, pode consultar a Receita.
+      entity.setOperationalStatus(NfseOperationalStatus.PENDING_PASSWORD_UNLOCK);
+      registrarEvento(tenantId, id, "AUTHORIZE_NO_RESPONSE", "PENDING", falha.codigo(), falha.mensagem(), null);
+    } else {
+      transicionarFiscalStatus(entity, NfseFiscalStatus.REJECTED, tenantId, id, "REJECTED");
+      entity.setOperationalStatus(null);
+      registrarEvento(tenantId, id, "AUTHORIZE_REJECTED", "REJECTED", falha.codigo(), falha.mensagem(), null);
+    }
+    List<NfseInvoiceItemEntity> items = nfseInvoiceItemRepository.listByTenantAndInvoice(tenantId, id);
+    return toInvoiceDto(entity, items);
+  }
+
+  /**
+   * Separa o que o provedor recusou (definitivo), o que nem chegou a sair (configuracao, senha) e
+   * o que ficou sem resposta (incerto). Na duvida, sem resposta: tratar um envio incerto como
+   * recusa e reenviar e o caminho da nota duplicada.
+   */
+  Falha classificar(RuntimeException ex) {
+    if (ex instanceof NfseProvedorRecusouException recusa) {
+      return new Falha(TipoDeFalha.RECUSADA, codigoCurto(recusa.getCodigo()), recusa.getMotivo(), ex);
+    }
+    if (ex instanceof NfseProvedorSemRespostaException semResposta) {
+      return new Falha(TipoDeFalha.SEM_RESPOSTA, codigoCurto(semResposta.getCodigo()), semResposta.getMessage(), ex);
+    }
+    String mensagem = ex.getMessage() == null ? ex.getClass().getSimpleName() : ex.getMessage();
+    if (ex instanceof IllegalArgumentException) {
+      return new Falha(TipoDeFalha.NAO_ENVIADA, "NAO_ENVIADA", mensagem, ex);
+    }
+    // ABRASF: "NFSE_PROVIDER_ABRASF_REJECTED: motivo" e HTTP 4xx sao recusa; falta de URL ou de
+    // dado do prestador e envio que nem saiu.
+    if (mensagem.contains("_REJECTED")) {
+      int separador = mensagem.indexOf(": ");
+      String motivo = separador >= 0 ? mensagem.substring(separador + 2) : mensagem;
+      return new Falha(TipoDeFalha.RECUSADA, "RECUSADA", motivo, ex);
+    }
+    var http = java.util.regex.Pattern.compile("_HTTP_ERROR_(\\d{3})").matcher(mensagem);
+    if (http.find()) {
+      int status = Integer.parseInt(http.group(1));
+      boolean semResposta = status >= 500 || status == 408 || status == 429;
+      return new Falha(semResposta ? TipoDeFalha.SEM_RESPOSTA : TipoDeFalha.RECUSADA, http.group(1), mensagem, ex);
+    }
+    if (mensagem.endsWith("_MISSING") || mensagem.endsWith("_REQUIRED")) {
+      return new Falha(TipoDeFalha.NAO_ENVIADA, "NAO_ENVIADA", mensagem, ex);
+    }
+    return new Falha(TipoDeFalha.SEM_RESPOSTA, "SEM_RESPOSTA", mensagem, ex);
+  }
+
+  /** O erro devolvido a tela, ja com a nota gravada na situacao certa. */
+  private RuntimeException paraOUsuario(Falha falha, NfseProviderAdapter provider) {
+    return switch (falha.tipo()) {
+      // A mensagem tecnica (codigo) e traduzida pelo GlobalExceptionHandler, como antes.
+      case NAO_ENVIADA -> falha.causa();
+      case RECUSADA -> new ApiClientErrorException(
+          "O provedor recusou a nota: " + falha.mensagem() + " Corrija e emita de novo.", 422);
+      case SEM_RESPOSTA -> provider != null && provider.consultaEmissaoAposFalha()
+          ? new ApiClientErrorException(
+              "O provedor não respondeu. A nota ficou pendente: clique em Emitir de novo para consultar se ela"
+                  + " foi gerada antes de reenviar.",
+              422)
+          : new ApiClientErrorException(
+              "O provedor não respondeu. Confira no portal da prefeitura se a nota foi gerada antes de emitir"
+                  + " de novo.",
+              422);
+    };
+  }
+
+  private static String codigoCurto(String codigo) {
+    if (codigo == null || codigo.isBlank()) return null;
+    String limpo = codigo.trim();
+    return limpo.length() <= 30 ? limpo : limpo.substring(0, 30);
   }
 
   private NfseDtos.Invoice finalizarAutorizacao(
@@ -473,43 +649,94 @@ public class NfseService {
     return provider.authorize(entity, certificatePassword);
   }
 
-  @Transactional
+  /**
+   * Cancela no provedor, nas mesmas tres etapas de {@link #autorizar} (INT-003): grava {@code
+   * CANCEL_PENDING} e solta a trava, chama o provedor, e grava {@code CANCELLED} ou {@code
+   * CANCEL_REJECTED} com o motivo. Antes, uma recusa desfazia tudo e {@code CANCEL_REJECTED} nunca
+   * era gravado. Sem resposta tambem vira {@code CANCEL_REJECTED}, com o aviso de conferir: pedir
+   * de novo uma nota ja cancelada so devolve outra recusa, nunca um efeito duplicado.
+   */
   public NfseDtos.Invoice cancelar(String invoiceId, NfseDtos.CancelRequest request) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     UUID id = parseUuid(invoiceId);
     if (request == null || isBlank(request.reason)) {
       throw new IllegalArgumentException("Motivo do cancelamento obrigatório.");
     }
+    String senhaInformada = request.certificatePassword;
+    if (isBlank(senhaInformada) && !isBlank(request.unlockTokenId)) {
+      senhaInformada = nfseCertificateUnlockService.resolvePasswordFromToken(request.unlockTokenId);
+    }
+    if (isBlank(senhaInformada)) {
+      throw new IllegalArgumentException(FiscalCertificateService.ERR_CERTIFICATE_PASSWORD_REQUIRED);
+    }
+    // Senha errada ou certificado vencido param aqui, antes de mexer na situacao da nota.
+    fiscalCertificateService.validarSenhaCertificadoAtivo(senhaInformada);
+    String senha = senhaInformada;
 
-    NfseInvoiceEntity entity =
-        nfseInvoiceRepository
-            .findByTenantAndIdForUpdate(tenantId, id)
-            .orElseThrow(() -> new ApiClientErrorException("NFS-e não encontrada.", 404));
-    if (entity.getFiscalStatus() != NfseFiscalStatus.AUTHORIZED) {
-      throw new NfseStateTransitionException("Estado inválido para cancelamento.");
+    NfseInvoiceEntity nota = transacao.execute(status -> {
+      NfseInvoiceEntity entity =
+          nfseInvoiceRepository
+              .findByTenantAndIdForUpdate(tenantId, id)
+              .orElseThrow(() -> new ApiClientErrorException("NFS-e não encontrada.", 404));
+      if (entity.getFiscalStatus() != NfseFiscalStatus.AUTHORIZED
+          && entity.getFiscalStatus() != NfseFiscalStatus.CANCEL_REJECTED) {
+        throw new NfseStateTransitionException("Estado inválido para cancelamento.");
+      }
+      transicionarFiscalStatus(entity, NfseFiscalStatus.CANCEL_PENDING, tenantId, id, "CANCEL_PENDING");
+      return entity;
+    });
+
+    NfseProviderAdapter.CancellationResult cancelResult = null;
+    Falha falha = null;
+    try {
+      NfseProviderAdapter provider = nfseProviderRouterService.resolve(nota.getProvedor());
+      cancelResult = provider.cancel(nota, request.reason, senha);
+    } catch (RuntimeException ex) {
+      falha = classificar(ex);
     }
 
-    transicionarFiscalStatus(entity, NfseFiscalStatus.CANCEL_PENDING, tenantId, id, "CANCEL_PENDING");
+    NfseProviderAdapter.CancellationResult resposta = cancelResult;
+    Falha falhaFinal = falha;
+    NfseDtos.Invoice dto = transacao.execute(status -> {
+      NfseInvoiceEntity entity =
+          nfseInvoiceRepository
+              .findByTenantAndIdForUpdate(tenantId, id)
+              .orElseThrow(() -> new ApiClientErrorException("NFS-e não encontrada.", 404));
+      if (falhaFinal == null) {
+        transicionarFiscalStatus(entity, NfseFiscalStatus.CANCELLED, tenantId, id, "CANCELLED");
+        entity.setXmlRetornoEnc(
+            asEncryptedBytes(
+                nfseXmlBuilderService.buildCancelReturnXml(
+                    entity, resposta.providerStatusCode(), resposta.providerStatusMessage())));
+        registrarEvento(
+            tenantId,
+            id,
+            "CANCEL_SUCCESS",
+            "CANCELLED",
+            resposta.providerStatusCode(),
+            resposta.providerStatusMessage(),
+            null);
+      } else {
+        transicionarFiscalStatus(entity, NfseFiscalStatus.CANCEL_REJECTED, tenantId, id, "CANCEL_REJECTED");
+        registrarEvento(
+            tenantId, id, "CANCEL_REJECTED", "CANCEL_REJECTED", falhaFinal.codigo(), falhaFinal.mensagem(), null);
+      }
+      List<NfseInvoiceItemEntity> items = nfseInvoiceItemRepository.listByTenantAndInvoice(tenantId, id);
+      return toInvoiceDto(entity, items);
+    });
 
-    NfseProviderAdapter provider = nfseProviderRouterService.resolve(entity.getProvedor());
-    NfseProviderAdapter.CancellationResult cancelResult =
-        provider.cancel(entity, request.reason, request.certificatePassword);
-    transicionarFiscalStatus(entity, NfseFiscalStatus.CANCELLED, tenantId, id, "CANCELLED");
-    entity.setXmlRetornoEnc(
-        asEncryptedBytes(
-            nfseXmlBuilderService.buildCancelReturnXml(
-                entity, cancelResult.providerStatusCode(), cancelResult.providerStatusMessage())));
-    registrarEvento(
-        tenantId,
-        id,
-        "CANCEL_SUCCESS",
-        "CANCELLED",
-        cancelResult.providerStatusCode(),
-        cancelResult.providerStatusMessage(),
-        null);
-
-    List<NfseInvoiceItemEntity> items = nfseInvoiceItemRepository.listByTenantAndInvoice(tenantId, id);
-    return toInvoiceDto(entity, items);
+    if (falhaFinal != null) {
+      throw switch (falhaFinal.tipo()) {
+        case NAO_ENVIADA -> falhaFinal.causa();
+        case RECUSADA -> new ApiClientErrorException(
+            "O provedor recusou o cancelamento: " + falhaFinal.mensagem(), 422);
+        case SEM_RESPOSTA -> new ApiClientErrorException(
+            "O provedor não respondeu ao cancelamento. Confira a situação da nota e peça o cancelamento de novo"
+                + " se ela ainda estiver ativa.",
+            422);
+      };
+    }
+    return dto;
   }
 
   @Transactional(readOnly = true)

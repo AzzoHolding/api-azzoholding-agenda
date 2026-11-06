@@ -315,6 +315,53 @@ class NfseConfigServiceTest {
     return entity;
   }
 
+  /** NT 009: os codigos do IBS/CBS vao juntos ou nenhum, e o cClassTrib comeca pelo CST. */
+  @Test
+  void salvarConfigValidaOsCodigosDoIbsCbs() {
+    NfseDtos.Config incompleto = requestValido();
+    incompleto.ibsCbsCst = "000";
+    assertThatThrownBy(() -> service.salvarConfig(incompleto))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("NFSE_CONFIG_IBS_CBS_INCOMPLETO");
+
+    NfseDtos.Config formato = requestValido();
+    formato.ibsCbsCst = "00";
+    formato.ibsCbsClassTrib = "000001";
+    formato.ibsCbsIndOp = "100301";
+    assertThatThrownBy(() -> service.salvarConfig(formato))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("NFSE_CONFIG_IBS_CBS_FORMATO");
+
+    NfseDtos.Config divergente = requestValido();
+    divergente.ibsCbsCst = "200";
+    divergente.ibsCbsClassTrib = "000001";
+    divergente.ibsCbsIndOp = "100301";
+    assertThatThrownBy(() -> service.salvarConfig(divergente))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("NFSE_CONFIG_IBS_CBS_CLASS_TRIB_DIFERENTE_DO_CST");
+  }
+
+  @Test
+  void salvarConfigGuardaOsCamposDaNt009() {
+    when(nfseConfigRepository.findByTenantAndAmbiente(tenantId, NfseAmbiente.HOMOLOGACAO))
+        .thenReturn(Optional.empty());
+    lenient()
+        .when(nfseConfigRepository.save(any(NfseConfigEntity.class)))
+        .thenAnswer(invocation -> invocation.getArgument(0));
+    NfseDtos.Config request = requestValido();
+    request.provedor = "ABRASF";
+    request.ibsCbsCst = "000";
+    request.ibsCbsClassTrib = "000001";
+    request.ibsCbsIndOp = "100301";
+    request.percentualTributosSn = new BigDecimal("6.00");
+
+    NfseDtos.Config resultado = service.salvarConfig(request);
+
+    assertThat(resultado.ibsCbsClassTrib).isEqualTo("000001");
+    assertThat(resultado.ibsCbsIndOp).isEqualTo("100301");
+    assertThat(resultado.percentualTributosSn).isEqualByComparingTo("6.00");
+  }
+
   private NfseDtos.Config requestValido() {
     NfseDtos.Config request = new NfseDtos.Config();
     request.ambiente = "HOMOLOGACAO";

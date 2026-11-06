@@ -43,6 +43,7 @@ public class FiscalCertificateService {
   public static final String ERR_CERTIFICATE_PASSWORD_REQUIRED = "NFSE_CERTIFICATE_PASSWORD_REQUIRED";
   public static final String ERR_CERTIFICATE_ACTIVE_MISSING = "NFSE_CERTIFICATE_ACTIVE_MISSING";
   public static final String ERR_CERTIFICATE_PASSWORD_INVALID = "NFSE_CERTIFICATE_PASSWORD_INVALID";
+  public static final String ERR_CERTIFICATE_EXPIRED = "NFSE_CERTIFICATE_EXPIRED";
 
   private final ContextoTenant contextoTenant;
   private final FiscalCertificateRepository fiscalCertificateRepository;
@@ -82,6 +83,7 @@ public class FiscalCertificateService {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     byte[] pfx = decodeBase64(request.pfxBase64);
     CertificateInfo info = extrairInfo(pfx, request.password.toCharArray());
+    exigirDentroDaValidade(info.validTo());
 
     fiscalCertificateRepository.deactivateAllActive(tenantId);
 
@@ -129,6 +131,7 @@ public class FiscalCertificateService {
         fiscalCertificateRepository
             .findByTenantAndId(tenantId, id)
             .orElseThrow(() -> new ApiClientErrorException("Certificado fiscal não encontrado.", 404));
+    exigirDentroDaValidade(entity.getValidTo());
     fiscalCertificateRepository.deactivateAllActive(tenantId);
     String oldStatus = entity.getStatus();
     entity.setStatus("ACTIVE");
@@ -151,10 +154,21 @@ public class FiscalCertificateService {
         fiscalCertificateRepository
             .findActiveByTenant(tenantId)
             .orElseThrow(() -> new IllegalArgumentException(ERR_CERTIFICATE_ACTIVE_MISSING));
+    exigirDentroDaValidade(active.getValidTo());
 
     String pfxBase64 = encryptionService.decrypt(active.getCertificatePfxEnc());
     byte[] pfx = decodeBase64(pfxBase64);
-    extrairInfo(pfx, password.toCharArray());
+    exigirDentroDaValidade(extrairInfo(pfx, password.toCharArray()).validTo());
+  }
+
+  /**
+   * INT-024 (06/11/2026): certificado vencido era aceito no envio e na ativacao, e o erro so
+   * aparecia na Receita, na hora de emitir. Agora e recusado logo, com mensagem clara.
+   */
+  private void exigirDentroDaValidade(Instant validTo) {
+    if (validTo != null && !validTo.isAfter(Instant.now())) {
+      throw new IllegalArgumentException(ERR_CERTIFICATE_EXPIRED);
+    }
   }
 
   @Transactional(readOnly = true)
@@ -167,6 +181,7 @@ public class FiscalCertificateService {
         fiscalCertificateRepository
             .findActiveByTenant(tenantId)
             .orElseThrow(() -> new IllegalArgumentException(ERR_CERTIFICATE_ACTIVE_MISSING));
+    exigirDentroDaValidade(active.getValidTo());
 
     String pfxBase64 = encryptionService.decrypt(active.getCertificatePfxEnc());
     byte[] pfx = decodeBase64(pfxBase64);

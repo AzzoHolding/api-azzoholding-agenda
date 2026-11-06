@@ -28,6 +28,15 @@ public final class NfseDtos {
     public String simplesNacionalSituacao;
     public String simplesNacionalRegimeTributacao;
     public String especialRegimeTributacao;
+    /** IBS/CBS (NT 009): CST (3 digitos), classificacao tributaria (6) e indicador da operacao (6). */
+    public String ibsCbsCst;
+    public String ibsCbsClassTrib;
+    public String ibsCbsIndOp;
+    /** Total aproximado de tributos: % do Simples (ME/EPP) ou federal/estadual/municipal (nao optante). */
+    public BigDecimal percentualTributosSn;
+    public BigDecimal percentualTributosFederais;
+    public BigDecimal percentualTributosEstaduais;
+    public BigDecimal percentualTributosMunicipais;
     public String emissionMode;
     public String emitForCpfMode;
     public boolean autoIssueOnAppointmentClose;
@@ -91,6 +100,13 @@ public final class NfseDtos {
     public List<Item> items = new ArrayList<>();
     public String createdAt;
     public String updatedAt;
+    /**
+     * O ultimo retorno do provedor com mensagem (recusa, falta de resposta), so no detalhe da nota.
+     * E o que a tela mostra para o salao saber o que corrigir.
+     */
+    public String ultimoRetornoCodigo;
+    public String ultimoRetornoMensagem;
+    public String ultimoRetornoEm;
   }
 
   public static class InvoiceListResponse {
@@ -110,6 +126,8 @@ public final class NfseDtos {
   public static class CancelRequest {
     public String reason;
     public String certificatePassword;
+    /** Sessao de senha destravada (certificate-unlock), como na autorizacao. */
+    public String unlockTokenId;
   }
 
   public static class PdfJobResponse {

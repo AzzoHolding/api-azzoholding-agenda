@@ -88,6 +88,13 @@ public class NfseConfigService {
     entity.setSimplesNacionalSituacao(normalizeOrNull(request.simplesNacionalSituacao));
     entity.setSimplesNacionalRegimeTributacao(normalizeOrNull(request.simplesNacionalRegimeTributacao));
     entity.setEspecialRegimeTributacao(normalizeOrNull(request.especialRegimeTributacao));
+    entity.setIbsCbsCst(normalizeOrNull(request.ibsCbsCst));
+    entity.setIbsCbsClassTrib(normalizeOrNull(request.ibsCbsClassTrib));
+    entity.setIbsCbsIndOp(normalizeOrNull(request.ibsCbsIndOp));
+    entity.setPercentualTributosSn(request.percentualTributosSn);
+    entity.setPercentualTributosFederais(request.percentualTributosFederais);
+    entity.setPercentualTributosEstaduais(request.percentualTributosEstaduais);
+    entity.setPercentualTributosMunicipais(request.percentualTributosMunicipais);
     entity.setEmissionMode(parseEmissionMode(request.emissionMode));
     entity.setEmitForCpfMode(parseCpfPolicyMode(request.emitForCpfMode));
     entity.setAutoIssueOnAppointmentClose(request.autoIssueOnAppointmentClose);
@@ -118,6 +125,7 @@ public class NfseConfigService {
   }
 
   private void validarConfig(NfseDtos.Config request) {
+    validarIbsCbs(request);
     if (isBlank(request.municipioCodigoIbge)) {
       throw new IllegalArgumentException("NFSE_CONFIG_MISSING_MUNICIPIO");
     }
@@ -150,6 +158,27 @@ public class NfseConfigService {
     }
   }
 
+  /**
+   * IBS/CBS: os tres codigos vao juntos ou nenhum (o grupo e opcional em 2026). A classificacao
+   * comeca pelos 3 digitos do CST, como na tabela oficial de cClassTrib.
+   */
+  private void validarIbsCbs(NfseDtos.Config request) {
+    String cst = normalizeOrNull(request.ibsCbsCst);
+    String classTrib = normalizeOrNull(request.ibsCbsClassTrib);
+    String indOp = normalizeOrNull(request.ibsCbsIndOp);
+    boolean algum = cst != null || classTrib != null || indOp != null;
+    if (!algum) return;
+    if (cst == null || classTrib == null || indOp == null) {
+      throw new IllegalArgumentException("NFSE_CONFIG_IBS_CBS_INCOMPLETO");
+    }
+    if (!cst.matches("[0-9]{3}") || !classTrib.matches("[0-9]{6}") || !indOp.matches("[0-9]{6}")) {
+      throw new IllegalArgumentException("NFSE_CONFIG_IBS_CBS_FORMATO");
+    }
+    if (!classTrib.startsWith(cst)) {
+      throw new IllegalArgumentException("NFSE_CONFIG_IBS_CBS_CLASS_TRIB_DIFERENTE_DO_CST");
+    }
+  }
+
   private NfseDtos.Config toConfigDto(NfseConfigEntity entity) {
     NfseDtos.Config dto = new NfseDtos.Config();
     dto.ambiente = entity.getAmbiente() != null ? entity.getAmbiente().name() : null;
@@ -165,6 +194,13 @@ public class NfseConfigService {
     dto.simplesNacionalSituacao = entity.getSimplesNacionalSituacao();
     dto.simplesNacionalRegimeTributacao = entity.getSimplesNacionalRegimeTributacao();
     dto.especialRegimeTributacao = entity.getEspecialRegimeTributacao();
+    dto.ibsCbsCst = entity.getIbsCbsCst();
+    dto.ibsCbsClassTrib = entity.getIbsCbsClassTrib();
+    dto.ibsCbsIndOp = entity.getIbsCbsIndOp();
+    dto.percentualTributosSn = entity.getPercentualTributosSn();
+    dto.percentualTributosFederais = entity.getPercentualTributosFederais();
+    dto.percentualTributosEstaduais = entity.getPercentualTributosEstaduais();
+    dto.percentualTributosMunicipais = entity.getPercentualTributosMunicipais();
     dto.emissionMode = entity.getEmissionMode() != null ? entity.getEmissionMode().name() : null;
     dto.emitForCpfMode = entity.getEmitForCpfMode() != null ? entity.getEmitForCpfMode().name() : null;
     dto.autoIssueOnAppointmentClose = entity.isAutoIssueOnAppointmentClose();
