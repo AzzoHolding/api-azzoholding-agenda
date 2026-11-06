@@ -171,6 +171,7 @@ public class NfseService {
     NfseConfigEntity config = resolveRequiredConfigForInvoice(tenantId, ambiente, request.municipioCodigoIbge);
     String municipioCodigoIbge = resolveMunicipioCodigoIbge(config, request.municipioCodigoIbge);
     String provedor = nfseConfigService.resolveProvedor(config.getProvedor(), municipioCodigoIbge);
+    completarCodigosDaConfiguracao(request, config);
     validarInvoiceRequest(request, municipioCodigoIbge, provedor);
     completarValores(request);
 
@@ -236,6 +237,7 @@ public class NfseService {
     NfseConfigEntity config = resolveRequiredConfigForInvoice(tenantId, ambiente, request.municipioCodigoIbge);
     String municipioCodigoIbge = resolveMunicipioCodigoIbge(config, request.municipioCodigoIbge);
     String provedor = nfseConfigService.resolveProvedor(config.getProvedor(), municipioCodigoIbge);
+    completarCodigosDaConfiguracao(request, config);
     validarInvoiceRequest(request, municipioCodigoIbge, provedor);
     completarValores(request);
 
@@ -297,6 +299,17 @@ public class NfseService {
           dto.ultimoRetornoMensagem = evento.getProviderMessage();
           dto.ultimoRetornoEm = evento.getCreatedAt() != null ? evento.getCreatedAt().toString() : null;
         });
+  }
+
+  /**
+   * O rascunho herda o codigo de tributacao nacional e o NBS padrao da configuracao quando nao traz
+   * os seus. A montagem da DPS ja fazia isso, mas a validacao do rascunho exigia o codigo na propria
+   * nota, e a tela nao o manda: nenhum rascunho do Emissor Nacional passava (teste de 06/11/2026).
+   */
+  private void completarCodigosDaConfiguracao(NfseDtos.Invoice request, NfseConfigEntity config) {
+    if (config == null) return;
+    if (isBlank(request.nationalTaxCode)) request.nationalTaxCode = normalizeOrNull(config.getNationalTaxCodeDefault());
+    if (isBlank(request.nbsCode)) request.nbsCode = normalizeOrNull(config.getNbsCodeDefault());
   }
 
   /**
