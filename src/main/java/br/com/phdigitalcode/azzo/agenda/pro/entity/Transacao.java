@@ -113,6 +113,10 @@ public class Transacao {
   @Column(name = "reconciliation_note")
   private String reconciliationNote;
 
+  /** A conciliacao de dia ou de mes que conciliou este lancamento (V159); nula na individual. */
+  @Column(name = "reconciliation_period_id")
+  private UUID reconciliationPeriodId;
+
   /** O que aparece no extrato, quando diverge. Informativo: nunca entra em saldo. */
   @Column(name = "statement_amount")
   private BigDecimal statementAmount;

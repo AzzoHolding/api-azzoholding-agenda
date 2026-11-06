@@ -29,6 +29,13 @@ public interface TransacaoRepository extends JpaRepository<Transacao, UUID> {
   @Query("select t from Transacao t where t.id = :id and t.tenantId = :tenantId and t.deletedAt is null")
   Optional<Transacao> findAtivaByIdAndTenant(@Param("id") UUID id, @Param("tenantId") UUID tenantId);
 
+  /** Os lancamentos ativos que uma conciliacao de dia ou de mes conciliou. */
+  @Query(
+      "select t from Transacao t where t.tenantId = :tenantId and t.deletedAt is null"
+          + " and t.reconciliationPeriodId = :periodoId order by t.date asc")
+  List<Transacao> listarDaConciliacao(
+      @Param("tenantId") UUID tenantId, @Param("periodoId") UUID periodoId);
+
   /** Lancamentos ativos de um periodo, numa situacao: o fim e exclusivo. */
   @Query(
       "select t from Transacao t where t.tenantId = :tenantId and t.deletedAt is null"

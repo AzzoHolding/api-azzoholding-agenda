@@ -157,11 +157,20 @@ public class FinanceiroController {
     return servicoFinanceiro.previaDoPeriodo(period);
   }
 
-  /** As ultimas conciliacoes finalizadas, da mais nova a mais antiga. */
+  /** As conciliacoes de dia e de mes finalizadas, da mais nova a mais antiga, em paginas. */
   @GetMapping("/reconcile-period")
-  @RequiresPermission("finance:manage")
-  public List<ConciliacaoDoPeriodoResponse> conciliacoesDoPeriodo() {
-    return servicoFinanceiro.conciliacoesFinalizadas();
+  @RequiresPermission("finance:view")
+  public PagedResponse<ConciliacaoDoPeriodoResponse> conciliacoesDoPeriodo(
+      @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int limit) {
+    return servicoFinanceiro.conciliacoesFinalizadas(
+        Math.max(0, page), Math.min(Math.max(1, limit), 100));
+  }
+
+  /** Os lancamentos que uma conciliacao de dia ou de mes conciliou. */
+  @GetMapping("/reconcile-period/{id}/transactions")
+  @RequiresPermission("finance:view")
+  public List<TransacaoResponse> lancamentosDaConciliacao(@PathVariable UUID id) {
+    return servicoFinanceiro.lancamentosDaConciliacao(id);
   }
 
   /** Lancamentos que podem repetir este: so aviso, nada e alterado nem excluido. */

@@ -54,6 +54,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.repository.TenantOperationalSettings
 import br.com.phdigitalcode.azzo.agenda.pro.repository.TransacaoQueryRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.TransacaoQueryRepository.SummaryTotals;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.TransacaoRepository;
+import br.com.phdigitalcode.azzo.agenda.pro.repository.UsuarioRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.TransactionCategoryRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.security.AuthenticatedUser;
 import br.com.phdigitalcode.azzo.agenda.pro.security.ContextoTenant;
@@ -77,6 +78,7 @@ class ServicoFinanceiroTest {
   @Mock private TravaFinanceira travaFinanceira;
   @Mock private TenantOperationalSettingsRepository tenantOperationalSettingsRepository;
   @Mock private PeriodoDeConciliacaoRepository periodoDeConciliacaoRepository;
+  @Mock private UsuarioRepository usuarioRepository;
 
   private ServicoFinanceiro servicoFinanceiro;
 
@@ -96,7 +98,8 @@ class ServicoFinanceiroTest {
             commissionService,
             travaFinanceira,
             tenantOperationalSettingsRepository,
-            periodoDeConciliacaoRepository);
+            periodoDeConciliacaoRepository,
+            usuarioRepository);
   }
 
   private void salaoConciliaPor(ModoDeConciliacao modo) {
@@ -187,7 +190,43 @@ class ServicoFinanceiroTest {
     assertThat(pendente.getReconciliationNote())
         .isEqualTo("Conciliação de 01/09/2026 a 30/09/2026");
     assertThat(divergente.getReconciliationStatus()).isEqualTo(StatusConciliacao.DIVERGENT);
+    // O lancamento fica ligado ao grupo que o conciliou.
+    assertThat(pendente.getReconciliationPeriodId()).isNotNull();
+    assertThat(pendente.getReconciliationPeriodId().toString()).isEqualTo(resposta.id);
     verify(periodoDeConciliacaoRepository).save(any());
+  }
+
+  @Test
+  @DisplayName("Reabrir tira o lancamento do grupo da conciliacao")
+  void reabrirTiraDoGrupo() {
+    when(contextoTenant.obterTenantIdOuFalhar()).thenReturn(TENANT_ID);
+    UUID id = UUID.randomUUID();
+    Transacao t = new Transacao();
+    t.setId(id);
+    t.setTenantId(TENANT_ID);
+    t.setReconciliationStatus(StatusConciliacao.RECONCILED);
+    t.setReconciled(true);
+    t.setReconciliationPeriodId(UUID.randomUUID());
+    when(transacaoRepository.findAtivaByIdAndTenant(id, TENANT_ID)).thenReturn(Optional.of(t));
+    ConciliacaoRequest pedido = new ConciliacaoRequest();
+    pedido.status = "PENDING";
+    pedido.reason = "extrato errado";
+
+    servicoFinanceiro.definirConciliacao(id, pedido);
+
+    assertThat(t.getReconciliationPeriodId()).isNull();
+  }
+
+  @Test
+  @DisplayName("Conciliacao de outro salao nao abre")
+  void conciliacaoDeOutroSalaoNaoAbre() {
+    when(contextoTenant.obterTenantIdOuFalhar()).thenReturn(TENANT_ID);
+    UUID id = UUID.randomUUID();
+
+    assertThatThrownBy(() -> servicoFinanceiro.lancamentosDaConciliacao(id))
+        .isInstanceOf(ApiClientErrorException.class)
+        .hasMessageContaining("não encontrada");
+    verify(transacaoRepository, never()).listarDaConciliacao(any(), any());
   }
 
   @Test

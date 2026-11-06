@@ -29,6 +29,7 @@ public class TransacaoResponse {
   public String reconciliationStatus;
   public String reconciledBy;
   public String reconciliationNote;
+  public String reconciliationPeriodId;
   public BigDecimal statementAmount;
   public String source;
   public String recurringId;
