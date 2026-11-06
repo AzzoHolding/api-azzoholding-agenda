@@ -371,8 +371,23 @@ public class SefinNacionalProviderAdapter implements NfseProviderAdapter {
 
   String jsonComXmlCompactado(String campo, String xml) {
     ObjectNode corpo = JSON.createObjectNode();
-    corpo.put(campo, compactar(xml));
+    corpo.put(campo, compactar(comDeclaracaoUtf8(xml)));
     return corpo.toString();
+  }
+
+  /**
+   * A Sefin exige a declaracao UTF-8 no inicio do XML (E1229, "Xml nao esta utilizando codificacao
+   * UTF-8", teste em homologacao de 06/11/2026). O assinador a omite de proposito, porque o caminho
+   * ABRASF poe o XML dentro de um envelope SOAP; por isso ela entra aqui, so no envio a Sefin.
+   */
+  static String comDeclaracaoUtf8(String xml) {
+    String semBom = xml.startsWith("\uFEFF") ? xml.substring(1) : xml;
+    String inicio = semBom.stripLeading();
+    if (inicio.startsWith("<?xml")) {
+      int fim = inicio.indexOf("?>");
+      inicio = fim >= 0 ? inicio.substring(fim + 2).stripLeading() : inicio;
+    }
+    return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>" + inicio;
   }
 
   static String compactar(String xml) {
