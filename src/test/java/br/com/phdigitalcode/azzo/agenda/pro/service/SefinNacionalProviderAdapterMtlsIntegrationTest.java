@@ -260,7 +260,7 @@ class SefinNacionalProviderAdapterMtlsIntegrationTest {
     assertThat(capturedRequestMethod).isEqualTo("POST");
     var corpo = new com.fasterxml.jackson.databind.ObjectMapper().readTree(capturedRequestBody);
     assertThat(SefinNacionalProviderAdapter.descompactar(corpo.get("dpsXmlGZipB64").asText()))
-        .isEqualTo("<InfDeclaracaoPrestacaoServico/>");
+        .isEqualTo("<?xml version=\"1.0\" encoding=\"UTF-8\"?><InfDeclaracaoPrestacaoServico/>");
     assertThat(capturedPeerCertificate.getEncoded()).isEqualTo(clientKeyMaterial.certificate().getEncoded());
   }
 

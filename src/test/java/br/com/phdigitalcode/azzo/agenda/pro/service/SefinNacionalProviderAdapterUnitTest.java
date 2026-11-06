@@ -142,8 +142,9 @@ class SefinNacionalProviderAdapterUnitTest {
 
     var lido = new com.fasterxml.jackson.databind.ObjectMapper().readTree(json);
     assertThat(lido.fieldNames()).toIterable().containsExactly("dpsXmlGZipB64");
+    // E1229 (homologacao, 06/11/2026): a Sefin exige a declaracao UTF-8 no inicio.
     assertThat(SefinNacionalProviderAdapter.descompactar(lido.get("dpsXmlGZipB64").asText()))
-        .isEqualTo("<DPS>teste</DPS>");
+        .isEqualTo("<?xml version=\"1.0\" encoding=\"UTF-8\"?><DPS>teste</DPS>");
   }
 
   @Test
@@ -320,5 +321,13 @@ class SefinNacionalProviderAdapterUnitTest {
   void falaComAReceitaEmHttp11() throws Exception {
     assertThat(adapter.buildHttpClient(1000, null, false).version())
         .isEqualTo(java.net.http.HttpClient.Version.HTTP_1_1);
+  }
+
+  @Test
+  void declaracaoUtf8NaoDuplicaETrocaOutraCodificacao() {
+    assertThat(SefinNacionalProviderAdapter.comDeclaracaoUtf8("<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?>\n<a/>"))
+        .isEqualTo("<?xml version=\"1.0\" encoding=\"UTF-8\"?><a/>");
+    assertThat(SefinNacionalProviderAdapter.comDeclaracaoUtf8("\uFEFF<a/>"))
+        .isEqualTo("<?xml version=\"1.0\" encoding=\"UTF-8\"?><a/>");
   }
 }
