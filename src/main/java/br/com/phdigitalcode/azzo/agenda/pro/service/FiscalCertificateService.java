@@ -50,18 +50,21 @@ public class FiscalCertificateService {
   private final EncryptionService encryptionService;
   private final AuditService auditService;
   private final AuthenticatedUser authenticatedUser;
+  private final CofreDoCertificado cofreDoCertificado;
 
   public FiscalCertificateService(
       ContextoTenant contextoTenant,
       FiscalCertificateRepository fiscalCertificateRepository,
       EncryptionService encryptionService,
       AuditService auditService,
-      AuthenticatedUser authenticatedUser) {
+      AuthenticatedUser authenticatedUser,
+      CofreDoCertificado cofreDoCertificado) {
     this.contextoTenant = contextoTenant;
     this.fiscalCertificateRepository = fiscalCertificateRepository;
     this.encryptionService = encryptionService;
     this.auditService = auditService;
     this.authenticatedUser = authenticatedUser;
+    this.cofreDoCertificado = cofreDoCertificado;
   }
 
   @Transactional(readOnly = true)
@@ -85,11 +88,17 @@ public class FiscalCertificateService {
     CertificateInfo info = extrairInfo(pfx, request.password.toCharArray());
     exigirDentroDaValidade(info.validTo());
 
+    // Duas camadas: por dentro, a chave que so existe com a senha (CofreDoCertificado); por fora,
+    // a chave do servidor, como os outros segredos.
+    CofreDoCertificado.Trancado trancado = cofreDoCertificado.trancar(pfx, request.password);
+
     fiscalCertificateRepository.deactivateAllActive(tenantId);
 
     FiscalCertificateEntity entity = new FiscalCertificateEntity();
     entity.setTenantId(tenantId);
-    entity.setCertificatePfxEnc(encryptionService.encrypt(request.pfxBase64));
+    entity.setCertificatePfxEnc(encryptionService.encrypt(trancado.conteudo()));
+    entity.setProtecao(CofreDoCertificado.PROTECAO);
+    entity.setKdfSal(trancado.sal());
     entity.setThumbprint(info.thumbprint());
     entity.setSubjectName(info.subjectName());
     entity.setValidTo(info.validTo());
@@ -156,9 +165,20 @@ public class FiscalCertificateService {
             .orElseThrow(() -> new IllegalArgumentException(ERR_CERTIFICATE_ACTIVE_MISSING));
     exigirDentroDaValidade(active.getValidTo());
 
-    String pfxBase64 = encryptionService.decrypt(active.getCertificatePfxEnc());
-    byte[] pfx = decodeBase64(pfxBase64);
+    byte[] pfx = abrirPfx(active, password);
     exigirDentroDaValidade(extrairInfo(pfx, password.toCharArray()).validTo());
+  }
+
+  /**
+   * O .pfx gravado. Trancado pelo cofre: so abre com a senha. Legado (sem {@code protecao}): so a
+   * chave do servidor, como era antes de 06/11/2026 (nenhum em producao nessa data).
+   */
+  private byte[] abrirPfx(FiscalCertificateEntity entity, String password) {
+    String externo = encryptionService.decrypt(entity.getCertificatePfxEnc());
+    if (CofreDoCertificado.PROTECAO.equals(entity.getProtecao())) {
+      return cofreDoCertificado.abrir(externo, entity.getKdfSal(), password);
+    }
+    return decodeBase64(externo);
   }
 
   /**
@@ -183,8 +203,7 @@ public class FiscalCertificateService {
             .orElseThrow(() -> new IllegalArgumentException(ERR_CERTIFICATE_ACTIVE_MISSING));
     exigirDentroDaValidade(active.getValidTo());
 
-    String pfxBase64 = encryptionService.decrypt(active.getCertificatePfxEnc());
-    byte[] pfx = decodeBase64(pfxBase64);
+    byte[] pfx = abrirPfx(active, password);
     return extractKeyMaterial(pfx, password.toCharArray());
   }
 

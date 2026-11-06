@@ -36,6 +36,14 @@ public class FiscalCertificateEntity {
   @Column(name = "certificate_pfx_enc", nullable = false)
   private String certificatePfxEnc;
 
+  /** Como o certificado esta trancado: nulo = so a chave do servidor (legado); ver CofreDoCertificado. */
+  @Column(name = "protecao")
+  private String protecao;
+
+  /** Sal do Argon2id, em Base64. Nao e segredo. */
+  @Column(name = "kdf_sal")
+  private String kdfSal;
+
   @Column(name = "thumbprint", nullable = false)
   private String thumbprint;
 
@@ -64,5 +72,20 @@ public class FiscalCertificateEntity {
   @PreUpdate
   void preUpdate() {
     updatedAt = Instant.now();
+  }
+  public String getProtecao() {
+    return protecao;
+  }
+
+  public void setProtecao(String protecao) {
+    this.protecao = protecao;
+  }
+
+  public String getKdfSal() {
+    return kdfSal;
+  }
+
+  public void setKdfSal(String kdfSal) {
+    this.kdfSal = kdfSal;
   }
 }

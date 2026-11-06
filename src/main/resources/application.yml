@@ -195,6 +195,11 @@ app:
       enabled: ${NFSE_TEST_PROVIDERS_ENABLED:false}
     certificate-unlock:
       ttl-minutes: ${NFSE_CERTIFICATE_UNLOCK_TTL_MINUTES:15}
+    certificado:
+      # Segredo do servidor (Base64, >= 32 bytes) que entra na chave do certificado A1 junto com a
+      # senha do dono. Fica FORA do banco, com backup: sem ele nenhum certificado abre e o dono
+      # precisa enviar o .pfx de novo. Vazio: envio e uso de certificado recusados. Ver CofreDoCertificado.
+      pimenta: ${NFSE_CERTIFICADO_PIMENTA:}
     pdf:
       worker:
         batch-size: ${NFSE_PDF_WORKER_BATCH_SIZE:20}
