@@ -184,6 +184,28 @@ class NfseServiceTest {
     verify(nfseInvoiceItemRepository).save(any(NfseInvoiceItemEntity.class));
   }
 
+  /** Teste de 06/11/2026: a tela nao manda o codigo nacional; o rascunho herda o da configuracao. */
+  @Test
+  void criarRascunho_emissorNacionalHerdaOCodigoNacionalDaConfiguracao() {
+    NfseConfigEntity config = config("3303302", "SEFIN_NACIONAL");
+    config.setNationalTaxCodeDefault("060101");
+    when(nfseConfigRepository.findByTenantAndAmbiente(tenantId, NfseAmbiente.HOMOLOGACAO))
+        .thenReturn(Optional.of(config));
+    when(nfseConfigService.resolveProvedor("SEFIN_NACIONAL", "3303302")).thenReturn("SEFIN_NACIONAL");
+    when(nfseInvoiceRepository.nextRpsNumber(eq(tenantId), eq("3303302"), eq("1"), eq("HOMOLOGACAO")))
+        .thenReturn(1);
+
+    NfseDtos.Invoice request = invoiceRequest();
+    request.municipioCodigoIbge = "3303302";
+    request.nationalTaxCode = null;
+    request.items.forEach(item -> item.nationalTaxCode = null);
+
+    NfseDtos.Invoice result = service.criarRascunho(request);
+
+    assertThat(result.fiscalStatus).isEqualTo("DRAFT");
+    assertThat(result.nationalTaxCode).isEqualTo("060101");
+  }
+
   @Test
   void criarRascunho_semTomador_lancaExcecao() {
     NfseConfigEntity config = config("3550308", "ABRASF");
