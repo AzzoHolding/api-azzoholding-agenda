@@ -282,7 +282,9 @@ public class AbrasfDirectProviderAdapter implements NfseProviderAdapter {
   }
 
   RestClient buildRestClient(int connectTimeoutMs, int readTimeoutMs) {
+    // HTTP/1.1 fixo, como no Emissor Nacional: servidores SOAP de prefeitura costumam recusar HTTP/2.
     HttpClient httpClient = HttpClient.newBuilder()
+        .version(HttpClient.Version.HTTP_1_1)
         .connectTimeout(Duration.ofMillis(Math.max(connectTimeoutMs, 1000)))
         .build();
     JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
