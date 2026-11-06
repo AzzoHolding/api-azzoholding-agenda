@@ -298,5 +298,20 @@ class SefinNacionalProviderAdapterUnitTest {
     assertThat(xml).contains("<CNPJAutor>12345678000199</CNPJAutor>");
     assertThat(xml).contains("<chNFSe>" + "1".repeat(50) + "</chNFSe>");
     assertThat(xml).contains("<cMotivo>1</cMotivo>");
+    // Leiaute 1.01: Id = PRE + chave + evento, sem nPedRegEvento (o XML ja passou no XSD oficial).
+    assertThat(xml).contains("<infPedReg Id=\"PRE" + "1".repeat(50) + "101101\">");
+    assertThat(xml).doesNotContain("nPedRegEvento");
+    assertThat(xml).containsPattern("<dhEvento>20\\d\\d-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d-03:00</dhEvento>");
+
+    // xMotivo tem no minimo 15 caracteres no esquema.
+    assertThatThrownBy(() -> {
+          try {
+            method.invoke(adapter, invoice, "Erro");
+          } catch (java.lang.reflect.InvocationTargetException ex) {
+            throw ex.getCause();
+          }
+        })
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("NFSE_PROVIDER_SEFIN_NACIONAL_CANCEL_REASON_TOO_SHORT");
   }
 }

@@ -28,6 +28,15 @@ public final class NfseDtos {
     public String simplesNacionalSituacao;
     public String simplesNacionalRegimeTributacao;
     public String especialRegimeTributacao;
+    /** IBS/CBS (NT 009): CST (3 digitos), classificacao tributaria (6) e indicador da operacao (6). */
+    public String ibsCbsCst;
+    public String ibsCbsClassTrib;
+    public String ibsCbsIndOp;
+    /** Total aproximado de tributos: % do Simples (ME/EPP) ou federal/estadual/municipal (nao optante). */
+    public BigDecimal percentualTributosSn;
+    public BigDecimal percentualTributosFederais;
+    public BigDecimal percentualTributosEstaduais;
+    public BigDecimal percentualTributosMunicipais;
     public String emissionMode;
     public String emitForCpfMode;
     public boolean autoIssueOnAppointmentClose;

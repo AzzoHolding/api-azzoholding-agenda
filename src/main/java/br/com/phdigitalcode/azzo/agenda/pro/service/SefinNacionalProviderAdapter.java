@@ -179,7 +179,7 @@ public class SefinNacionalProviderAdapter implements NfseProviderAdapter {
     if (resposta.status() == 404) return Optional.empty();
     if (!resposta.sucesso()) throw erroDaResposta(resposta);
 
-    String chave = digitsOrNull(texto(lerJson(resposta.body()), "chaveAcesso"));
+    String chave = chaveOrNull(texto(lerJson(resposta.body()), "chaveAcesso"));
     if (chave == null) return Optional.empty();
 
     String numero = null;
@@ -258,7 +258,7 @@ public class SefinNacionalProviderAdapter implements NfseProviderAdapter {
           String.valueOf(resposta.status()), "A Receita Nacional respondeu sem os dados da nota.");
     }
     String nfseXml = descompactar(texto(json, "nfseXmlGZipB64"));
-    String chave = firstNonBlank(digitsOrNull(texto(json, "chaveAcesso")), extractAccessKey(nfseXml));
+    String chave = firstNonBlank(chaveOrNull(texto(json, "chaveAcesso")), extractAccessKey(nfseXml));
     if (chave == null) {
       throw new NfseProvedorSemRespostaException(
           String.valueOf(resposta.status()), "A Receita Nacional respondeu sem a chave de acesso da nota.");
@@ -523,40 +523,37 @@ public class SefinNacionalProviderAdapter implements NfseProviderAdapter {
     if (authorDocument.length() != 14) {
       throw new IllegalArgumentException("NFSE_PROVIDER_SEFIN_NACIONAL_PRESTADOR_CNPJ_REQUIRED");
     }
-    String chave = digitsOnly(invoice.getChaveAcessoNfse());
+    String chave = chaveOrNull(invoice.getChaveAcessoNfse());
+    if (chave == null) chave = "";
     if (chave.length() != 50) {
       throw new IllegalArgumentException("NFSE_PROVIDER_SEFIN_NACIONAL_ACCESS_KEY_MISSING");
     }
-    String eventCode = "101101";
-    String eventSeq = "001";
-    String eventId = "PRE" + chave + eventCode + eventSeq;
-    String dhEvento = OffsetDateTime.now(ZoneOffset.of("-03:00")).withNano(0).toString();
-    return """
-        <pedRegEvento xmlns="http://www.sped.fazenda.gov.br/nfse" versao="1.00">
-          <infPedReg Id="%s">
-            <tpAmb>%s</tpAmb>
-            <verAplic>%s</verAplic>
-            <dhEvento>%s</dhEvento>
-            <CNPJAutor>%s</CNPJAutor>
-            <chNFSe>%s</chNFSe>
-            <nPedRegEvento>%s</nPedRegEvento>
-            <e101101>
-              <xDesc>Cancelamento de NFS-e</xDesc>
-              <cMotivo>%s</cMotivo>
-              <xMotivo>%s</xMotivo>
-            </e101101>
-          </infPedReg>
-        </pedRegEvento>
-        """.formatted(
-            escape(eventId),
-            toAmbienteCode(invoice.getAmbiente()),
-            escape(applicationVersion),
-            escape(dhEvento),
-            escape(authorDocument),
-            escape(chave),
-            eventSeq,
-            resolveCancelReasonCode(reason),
-            escape(limit(reason, 255)));
+    String motivo = limit(reason, 255);
+    if (motivo == null || motivo.length() < 15) {
+      // Esquema 1.01: xMotivo tem de 15 a 255 caracteres.
+      throw new IllegalArgumentException("NFSE_PROVIDER_SEFIN_NACIONAL_CANCEL_REASON_TOO_SHORT");
+    }
+    // Leiaute 1.01: Id = "PRE" + chave (50) + codigo do evento (6); nPedRegEvento saiu do pedido.
+    String eventId = "PRE" + chave + "101101";
+    // Sempre com segundos e fuso: OffsetDateTime.toString() omite os segundos quando sao zero.
+    String dhEvento = OffsetDateTime.now(ZoneOffset.of("-03:00")).withNano(0)
+        .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ssxxx"));
+    String xml = "<pedRegEvento xmlns=\"http://www.sped.fazenda.gov.br/nfse\" versao=\"" + LeiauteNfseNacional.VERSAO + "\">"
+        + "<infPedReg Id=\"" + escape(eventId) + "\">"
+        + "<tpAmb>" + toAmbienteCode(invoice.getAmbiente()) + "</tpAmb>"
+        + "<verAplic>" + escape(applicationVersion) + "</verAplic>"
+        + "<dhEvento>" + escape(dhEvento) + "</dhEvento>"
+        + "<CNPJAutor>" + escape(authorDocument) + "</CNPJAutor>"
+        + "<chNFSe>" + escape(chave) + "</chNFSe>"
+        + "<e101101>"
+        + "<xDesc>Cancelamento de NFS-e</xDesc>"
+        + "<cMotivo>" + resolveCancelReasonCode(reason) + "</cMotivo>"
+        + "<xMotivo>" + escape(motivo) + "</xMotivo>"
+        + "</e101101>"
+        + "</infPedReg>"
+        + "</pedRegEvento>";
+    LeiauteNfseNacional.validarPedidoDeEvento(xml);
+    return xml;
   }
 
   private String toAmbienteCode(NfseAmbiente ambiente) {
@@ -567,8 +564,9 @@ public class SefinNacionalProviderAdapter implements NfseProviderAdapter {
     String normalized = reason == null ? "" : reason.trim().toLowerCase();
     if (normalized.contains("erro")) return "1";
     if (normalized.contains("nao prest") || normalized.contains("não prest")) return "2";
+    // Esquema 1.01: so 1 (erro na emissao), 2 (servico nao prestado) ou 9 (outros).
     String configured = environment.getProperty("app.nfse.provider.sefin-nacional.cancel-reason-code-default");
-    return isConfigured(configured) ? configured : "9";
+    return isConfigured(configured) && configured.trim().matches("[129]") ? configured.trim() : "9";
   }
 
   // ─── utilitarios ──────────────────────────────────────────────────────────
@@ -582,9 +580,14 @@ public class SefinNacionalProviderAdapter implements NfseProviderAdapter {
     return value == null ? "" : value.replaceAll("\\D", "");
   }
 
-  private String digitsOrNull(String value) {
-    String digits = digitsOnly(value);
-    return digits.isEmpty() ? null : digits;
+  /**
+   * Chave de acesso: 50 posicoes, letras maiusculas e digitos (o CNPJ alfanumerico entra no meio
+   * da chave). So tira o que nao e letra nem digito.
+   */
+  private String chaveOrNull(String value) {
+    if (value == null) return null;
+    String chave = value.trim().toUpperCase().replaceAll("[^0-9A-Z]", "");
+    return chave.isEmpty() ? null : chave;
   }
 
   private String escape(String value) {
