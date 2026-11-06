@@ -222,4 +222,18 @@ class NfseProviderCapabilitiesServiceTest {
   private void verifySavedOnce(ArgumentCaptor<NfseProviderCapabilitiesEntity> captor) {
     org.mockito.Mockito.verify(nfseProviderCapabilitiesRepository).save(captor.capture());
   }
+
+  /** Emissor Nacional sem regra cadastrada no municipio: cancela, sem prazo nosso (a Receita confere). */
+  @Test
+  void emissorNacionalSemCadastroCancelaPorPadrao() {
+    var padrao = NfseProviderCapabilitiesService.padraoDoEmissorNacional("3304557", "sefin_nacional");
+
+    org.assertj.core.api.Assertions.assertThat(padrao).isNotNull();
+    org.assertj.core.api.Assertions.assertThat(padrao.cancelSupported).isTrue();
+    org.assertj.core.api.Assertions.assertThat(padrao.cancelWindowHours).isNull();
+    org.assertj.core.api.Assertions.assertThat(padrao.provedor).isEqualTo("SEFIN_NACIONAL");
+    // Outros provedores seguem sem padrao: a regra e de cada prefeitura.
+    org.assertj.core.api.Assertions.assertThat(NfseProviderCapabilitiesService.padraoDoEmissorNacional("3304557", "ABRASF")).isNull();
+    org.assertj.core.api.Assertions.assertThat(NfseProviderCapabilitiesService.padraoDoEmissorNacional(null, "SEFIN_NACIONAL")).isNull();
+  }
 }

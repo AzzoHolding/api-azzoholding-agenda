@@ -54,6 +54,7 @@ class ServicoFiscalTest {
   private FiscalXmlBuilderService fiscalXmlBuilderService;
   private FiscalXmlSignerService fiscalXmlSignerService;
   private FiscalSefazClient fiscalSefazClient;
+  private ApuracaoMensalDaNfse apuracaoMensalDaNfse;
 
   @BeforeEach
   void setUp() {
@@ -76,6 +77,7 @@ class ServicoFiscalTest {
     fiscalXmlBuilderService = mock(FiscalXmlBuilderService.class);
     fiscalXmlSignerService = mock(FiscalXmlSignerService.class);
     fiscalSefazClient = mock(FiscalSefazClient.class);
+    apuracaoMensalDaNfse = mock(ApuracaoMensalDaNfse.class);
 
     // Por padrao nenhuma invoice local existe (mesma postura do original: default do repository
     // real, aqui explicito porque o mock nao chama o metodo default sozinho).
@@ -100,6 +102,7 @@ class ServicoFiscalTest {
         fiscalXmlBuilderService,
         fiscalXmlSignerService,
         fiscalSefazClient,
+        apuracaoMensalDaNfse,
         1,
         "HOMOLOGACAO");
   }
@@ -190,12 +193,14 @@ class ServicoFiscalTest {
   @Test
   void deveDelegarConsultaDeHistoricoComLimite() {
     ServicoFiscal servicoFiscal = novoServico();
-    when(fiscalProvider.historico(tenantId, 6)).thenReturn(List.of(new FiscalDtos.ApuracaoResumo()));
+    when(apuracaoMensalDaNfse.historico(tenantId, 6)).thenReturn(List.of(new FiscalDtos.ApuracaoResumo()));
 
     List<FiscalDtos.ApuracaoResumo> historico = servicoFiscal.historico(6);
 
-    assertThat(historico).isNotNull();
-    verify(fiscalProvider).historico(tenantId, 6);
+    assertThat(historico).hasSize(1);
+    // A apuracao vem das NFS-e, nao do simulador de nota de produto.
+    verify(apuracaoMensalDaNfse).historico(tenantId, 6);
+    verify(fiscalProvider, org.mockito.Mockito.never()).historico(any(), org.mockito.ArgumentMatchers.anyInt());
   }
 
   @Test

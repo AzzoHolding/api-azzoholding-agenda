@@ -49,6 +49,7 @@ public class ServicoFiscal {
 
   private final ContextoTenant contextoTenant;
   private final FiscalProvider fiscalProvider;
+  private final ApuracaoMensalDaNfse apuracaoMensalDaNfse;
   private final FiscalDocumentStateMachine fiscalDocumentStateMachine;
   private final AuditService auditService;
   private final AuthenticatedUser authenticatedUser;
@@ -81,10 +82,12 @@ public class ServicoFiscal {
       FiscalXmlBuilderService fiscalXmlBuilderService,
       FiscalXmlSignerService fiscalXmlSignerService,
       FiscalSefazClient fiscalSefazClient,
+      ApuracaoMensalDaNfse apuracaoMensalDaNfse,
       @Value("${app.fiscal.serie-padrao:1}") int fiscalSeriePadrao,
       @Value("${app.fiscal.ambiente:HOMOLOGACAO}") String fiscalAmbiente) {
     this.contextoTenant = contextoTenant;
     this.fiscalProvider = fiscalProvider;
+    this.apuracaoMensalDaNfse = apuracaoMensalDaNfse;
     this.fiscalDocumentStateMachine = fiscalDocumentStateMachine;
     this.auditService = auditService;
     this.authenticatedUser = authenticatedUser;
@@ -316,34 +319,38 @@ public class ServicoFiscal {
     fiscalCertificateService.remover(certificateId);
   }
 
+  // Apuracao: a partir das NFS-e (ApuracaoMensalDaNfse), desde 06/11/2026. Antes vinha do
+  // simulador de nota de produto, com ICMS + PIS + COFINS, que o salao nao recolhe.
+
   @Transactional(readOnly = true)
   public FiscalDtos.ApuracaoMensal obterApuracaoAtual() {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
-    return fiscalProvider.obterApuracaoAtual(tenantId);
+    return apuracaoMensalDaNfse.doMesAtual(tenantId);
   }
 
   @Transactional(readOnly = true)
   public FiscalDtos.ApuracaoMensal obterApuracao(int ano, int mes) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
-    return fiscalProvider.obterApuracao(tenantId, ano, mes);
+    return apuracaoMensalDaNfse.doMes(tenantId, ano, mes);
   }
 
-  @Transactional
+  /** Nada fica guardado: a apuracao e sempre calculada das notas. "Recalcular" so le de novo. */
+  @Transactional(readOnly = true)
   public FiscalDtos.ApuracaoMensal recalcularApuracao(int ano, int mes) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
-    return fiscalProvider.recalcularApuracao(tenantId, ano, mes);
+    return apuracaoMensalDaNfse.doMes(tenantId, ano, mes);
   }
 
   @Transactional(readOnly = true)
   public List<FiscalDtos.ApuracaoResumo> historico(int limite) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
-    return fiscalProvider.historico(tenantId, limite);
+    return apuracaoMensalDaNfse.historico(tenantId, limite);
   }
 
   @Transactional(readOnly = true)
   public FiscalDtos.ResumoAnual resumoAnual(int ano) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
-    return fiscalProvider.resumoAnual(tenantId, ano);
+    return apuracaoMensalDaNfse.resumoAnual(tenantId, ano);
   }
 
   private void validarTransicaoComFallback(String fromRaw, String toRaw, String operacao) {
