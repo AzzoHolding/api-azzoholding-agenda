@@ -73,7 +73,10 @@ public class ClienteDaDistribuicaoAdn {
       KeyStore keyStore = KeyStore.getInstance("PKCS12");
       keyStore.load(null, null);
       char[] senha = senhaDoCertificado.toCharArray();
-      keyStore.setKeyEntry("nfse-adn", chave.privateKey(), senha, new java.security.cert.Certificate[] {chave.certificate()});
+      java.security.cert.Certificate[] cadeia = chave.cadeiaParaTls();
+      keyStore.setKeyEntry("nfse-adn", chave.privateKey(), senha, cadeia);
+      org.slf4j.LoggerFactory.getLogger(ClienteDaDistribuicaoAdn.class)
+          .info("nfse_adn.cliente cadeia_enviada={}", cadeia.length);
       KeyManagerFactory kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
       kmf.init(keyStore, senha);
       SSLContext ssl = SSLContext.getInstance("TLS");
