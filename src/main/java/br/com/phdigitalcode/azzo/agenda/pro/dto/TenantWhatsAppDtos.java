@@ -154,6 +154,13 @@ public final class TenantWhatsAppDtos {
     public String phoneNumberId;
     public String businessId;
     public String phoneNumber;
+    /**
+     * Numero que ja estava no app WhatsApp Business e continua nele (coexistencia, Embedded
+     * Signup v5: evento FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING / is_on_biz_app). Ele ja esta
+     * registrado na Meta: nao se chama o /register, e os contatos e o historico do app precisam
+     * ser sincronizados em ate 24 horas.
+     */
+    public Boolean coexistencia;
   }
 
   public static class EmbeddedSignupStatusResponse {
