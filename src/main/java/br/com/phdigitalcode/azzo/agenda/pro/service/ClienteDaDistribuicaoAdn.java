@@ -78,9 +78,11 @@ public class ClienteDaDistribuicaoAdn {
       kmf.init(keyStore, senha);
       SSLContext ssl = SSLContext.getInstance("TLS");
       ssl.init(kmf.getKeyManagers(), null, null);
-      // HTTP/1.1 fixo, como na Sefin: os servidores do Sistema Nacional cortam o HTTP/2 do Java.
+      // HTTP/2 com volta automatica para 1.1 (ALPN). O ADN de PRODUCAO fechava a conexao sem
+      // responder ao HTTP/1.1 fixo ("header parser received no bytes", 07/11/2026), enquanto o de
+      // homologacao aceitava. (A Sefin e outro servidor: la o 1.1 fixo continua.)
       HttpClient http = HttpClient.newBuilder()
-          .version(HttpClient.Version.HTTP_1_1)
+          .version(HttpClient.Version.HTTP_2)
           .connectTimeout(Duration.ofSeconds(30))
           .sslContext(ssl)
           .build();
@@ -101,9 +103,20 @@ public class ClienteDaDistribuicaoAdn {
   public Lote buscar(RestClient cliente, String ambiente, long depoisDoNsu, String cnpj) {
     String url = baseDoAmbiente(ambiente) + "/DFe/" + Math.max(0, depoisDoNsu)
         + "?lote=true&cnpjConsulta=" + URLEncoder.encode(cnpj, StandardCharsets.UTF_8);
+    try {
+      return pedir(cliente, url);
+    } catch (org.springframework.web.client.ResourceAccessException primeiraFalha) {
+      // Conexao derrubada sem resposta: uma nova tentativa, numa conexao nova.
+      return pedir(cliente, url);
+    }
+  }
+
+  private Lote pedir(RestClient cliente, String url) {
     return cliente.get()
         .uri(URI.create(url))
         .header(HttpHeaders.ACCEPT, "application/json")
+        // Sem identificacao, pedido de cliente Java pode ser descartado por firewall.
+        .header(HttpHeaders.USER_AGENT, "AzzoAgendaPro-NFSe/1.0 (+https://app.azzoholding.com.br)")
         .exchange((pedido, resposta) -> {
           byte[] corpo = resposta.getBody().readAllBytes();
           return lerLote(resposta.getStatusCode().value(), new String(corpo, StandardCharsets.UTF_8));
