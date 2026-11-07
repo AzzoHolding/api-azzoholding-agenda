@@ -583,6 +583,9 @@ public class NfseService {
       entity.setDataEmissao(Instant.now());
       String retornoXml = buildAuthorizationReturnXml(entity, authorizationResult);
       entity.setXmlRetornoEnc(asEncryptedBytes(retornoXml));
+      if (authorizationResult.xmlNfse() != null && !authorizationResult.xmlNfse().isBlank()) {
+        entity.setXmlNfseEnc(asEncryptedBytes(authorizationResult.xmlNfse()));
+      }
       registrarEvento(
           tenantId,
           id,

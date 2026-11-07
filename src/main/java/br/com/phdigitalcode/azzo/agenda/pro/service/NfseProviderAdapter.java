@@ -48,7 +48,20 @@ public interface NfseProviderAdapter {
       String numeroNfse,
       String protocolo,
       String codigoVerificacao,
-      String chaveAcessoNfse) {}
+      String chaveAcessoNfse,
+      String xmlNfse) {
+
+    /** Provedores que nao devolvem o XML da NFS-e (ABRASF, teste). */
+    AuthorizationResult(
+        String providerStatusCode,
+        String providerStatusMessage,
+        String numeroNfse,
+        String protocolo,
+        String codigoVerificacao,
+        String chaveAcessoNfse) {
+      this(providerStatusCode, providerStatusMessage, numeroNfse, protocolo, codigoVerificacao, chaveAcessoNfse, null);
+    }
+  }
 
   record CancellationResult(String providerStatusCode, String providerStatusMessage) {}
 

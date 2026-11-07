@@ -147,6 +147,10 @@ public class NfseInvoiceEntity {
   @Column(name = "xml_retorno_enc")
   private byte[] xmlRetornoEnc;
 
+  /** XML da NFS-e autorizada, como a Receita Nacional devolveu (cifrado). Fonte do DANFSe. */
+  @Column(name = "xml_nfse_enc")
+  private byte[] xmlNfseEnc;
+
   @Column(name = "pdf_storage_key")
   private String pdfStorageKey;
 
