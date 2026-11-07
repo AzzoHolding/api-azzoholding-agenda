@@ -44,6 +44,15 @@ public interface NfseDocumentoDaReceitaRepository extends JpaRepository<NfseDocu
   boolean existeCancelamentoPara(
       @Param("tenantId") UUID tenantId, @Param("ambiente") String ambiente, @Param("chave") String chave);
 
+  /** O evento de cancelamento de cada chave, para mostrar quando e por que a nota foi cancelada. */
+  @Query(
+      "from NfseDocumentoDaReceitaEntity d where d.tenantId = :tenantId and d.ambiente = :ambiente"
+          + " and d.tipoDocumento = 'EVENTO' and d.cancelada = true and d.chaveDoEvento in :chaves")
+  List<NfseDocumentoDaReceitaEntity> eventosDeCancelamento(
+      @Param("tenantId") UUID tenantId,
+      @Param("ambiente") String ambiente,
+      @Param("chaves") Collection<String> chaves);
+
   @Modifying
   @Query(
       "update NfseDocumentoDaReceitaEntity d set d.cancelada = true where d.tenantId = :tenantId"
