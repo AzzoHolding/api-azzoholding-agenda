@@ -219,6 +219,13 @@
       <version>${openpdf.version}</version>
     </dependency>
 
+    <!-- QR Code do DANFSe v2.0 (NT 008/2026) -->
+    <dependency>
+      <groupId>com.google.zxing</groupId>
+      <artifactId>core</artifactId>
+      <version>3.4.0</version>
+    </dependency>
+
     <!-- Envio de email SMTP (modulo email - fila/worker), equivalente ao Jakarta Mail do Quarkus original -->
     <dependency>
       <groupId>org.springframework.boot</groupId>

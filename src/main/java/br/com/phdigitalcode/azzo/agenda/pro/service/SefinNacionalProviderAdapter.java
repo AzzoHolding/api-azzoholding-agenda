@@ -183,6 +183,7 @@ public class SefinNacionalProviderAdapter implements NfseProviderAdapter {
     if (chave == null) return Optional.empty();
 
     String numero = null;
+    String nfseXml = null;
     NfseInvoiceEntity comChave = new NfseInvoiceEntity();
     comChave.setChaveAcessoNfse(chave);
     String urlNota = expandPathPlaceholders(
@@ -191,13 +192,14 @@ public class SefinNacionalProviderAdapter implements NfseProviderAdapter {
     try {
       RespostaHttp nota = doGet(urlNota, invoice, "query", certificatePassword);
       if (nota.sucesso()) {
-        numero = extractFirst(descompactar(texto(lerJson(nota.body()), "nfseXmlGZipB64")), "nNFSe");
+        nfseXml = descompactar(texto(lerJson(nota.body()), "nfseXmlGZipB64"));
+        numero = extractFirst(nfseXml, "nNFSe");
       }
     } catch (NfseProvedorSemRespostaException ex) {
       // A chave ja prova que a nota existe; o numero fica para depois, nao vale perder a nota.
       LOG.warn("nfse_sefin_nacional_numero_indisponivel invoice_id={}", invoice.getId(), ex);
     }
-    return Optional.of(new AuthorizationResult("100", "NFS-e encontrada na Receita Nacional", numero, idDps, null, chave));
+    return Optional.of(new AuthorizationResult("100", "NFS-e encontrada na Receita Nacional", numero, idDps, null, chave, nfseXml));
   }
 
   String resolveOperationUrl(NfseInvoiceEntity invoice, String operation, String missingCode) {
@@ -266,7 +268,7 @@ public class SefinNacionalProviderAdapter implements NfseProviderAdapter {
     String numero = extractFirst(nfseXml, "nNFSe");
     String idDps = texto(json, "idDps");
     String mensagem = firstNonBlank(juntarMensagens(json, "alertas"), "NFS-e autorizada pela Receita Nacional");
-    return new AuthorizationResult("100", limit(mensagem, LIMITE_DA_MENSAGEM), numero, idDps, null, chave);
+    return new AuthorizationResult("100", limit(mensagem, LIMITE_DA_MENSAGEM), numero, idDps, null, chave, nfseXml);
   }
 
   CancellationResult parseCancellationResponse(RespostaHttp resposta) {

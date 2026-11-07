@@ -2,10 +2,13 @@ package br.com.phdigitalcode.azzo.agenda.pro.service;
 
 import java.awt.Color;
 import java.io.ByteArrayOutputStream;
+import java.nio.charset.StandardCharsets;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import com.lowagie.text.Document;
@@ -21,6 +24,8 @@ import com.lowagie.text.pdf.PdfWriter;
 
 import br.com.phdigitalcode.azzo.agenda.pro.entity.NfseInvoiceEntity;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.NfseInvoiceItemEntity;
+import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.NfseFiscalStatus;
+import br.com.phdigitalcode.azzo.agenda.pro.security.EncryptionService;
 
 /**
  * Porte verbatim de {@code modules/nfse/application/NfsePdfRenderService.java} (Fronteira 7).
@@ -36,7 +41,42 @@ public class NfsePdfRenderService {
   private static final DateTimeFormatter DATE_TIME_FORMATTER =
       DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm:ss").withZone(ZoneId.of("America/Sao_Paulo"));
 
+  private static final Logger LOG = LoggerFactory.getLogger(NfsePdfRenderService.class);
+
+  private final EncryptionService encryptionService;
+  private final DanfseRenderer danfseRenderer;
+
+  public NfsePdfRenderService(EncryptionService encryptionService, DanfseRenderer danfseRenderer) {
+    this.encryptionService = encryptionService;
+    this.danfseRenderer = danfseRenderer;
+  }
+
+  /**
+   * DANFSe v2.0 (NT 008/2026) quando a nota guarda o XML da NFS-e devolvido pela Receita Nacional.
+   * Sem esse XML (notas antigas, provedor ABRASF ou de teste), o documento auxiliar simples abaixo.
+   */
   public byte[] render(NfseInvoiceEntity invoice, List<NfseInvoiceItemEntity> items) {
+    String xmlNfse = xmlDaNfse(invoice);
+    if (xmlNfse != null) {
+      boolean cancelada = invoice.getFiscalStatus() == NfseFiscalStatus.CANCELLED;
+      return danfseRenderer.render(xmlNfse, cancelada);
+    }
+    return renderSimples(invoice, items);
+  }
+
+  private String xmlDaNfse(NfseInvoiceEntity invoice) {
+    byte[] cifrado = invoice.getXmlNfseEnc();
+    if (cifrado == null || cifrado.length == 0) return null;
+    try {
+      String xml = encryptionService.decrypt(new String(cifrado, StandardCharsets.UTF_8));
+      return xml == null || xml.isBlank() ? null : xml;
+    } catch (RuntimeException ex) {
+      LOG.warn("nfse_danfse_xml_ilegivel invoice_id={}", invoice.getId(), ex);
+      return null;
+    }
+  }
+
+  byte[] renderSimples(NfseInvoiceEntity invoice, List<NfseInvoiceItemEntity> items) {
     Document document = new Document(PageSize.A4, 24f, 24f, 24f, 24f);
     ByteArrayOutputStream output = new ByteArrayOutputStream();
     try {
