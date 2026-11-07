@@ -55,7 +55,7 @@ class AppointmentServiceTest {
 
   private static final ZoneId ZONE_BR = ZoneId.of("America/Sao_Paulo");
   /** Data futura fixa, usada em todos os testes que nao exercitam a regra de "hoje". */
-  private static final LocalDate DATA = LocalDate.of(2027, 3, 10);
+  private static final LocalDate DATA = LocalDate.of(2094, 3, 10); // futuro: dia passado nao tem horario livre
 
   private final UUID tenantId = UUID.randomUUID();
   private final UUID professionalId = UUID.randomUUID();
@@ -84,6 +84,14 @@ class AppointmentServiceTest {
   }
 
   // ---------- validacao de entrada ----------
+
+  @Test
+  @DisplayName("dia que ja passou nao tem horario livre")
+  void diaPassadoSemHorarioLivre() {
+    assertThat(service.findAvailableSlots(tenantId, professionalId, LocalDate.now(ZoneId.of("America/Sao_Paulo")).minusDays(1), 30, 0))
+        .isEmpty();
+    verify(specialClosureService, never()).isClosedAt(any(), any(), any(), any(), any());
+  }
 
   @Test
   @DisplayName("tenantId/professionalId/date nulos e duracao/buffer invalidos sao rejeitados")
@@ -411,7 +419,7 @@ class AppointmentServiceTest {
   @Test
   @DisplayName("domingo cadastrado na convencao JavaScript (0) casa com o domingo ISO (7)")
   void domingoNaConvencaoJavaScript() {
-    LocalDate domingo = LocalDate.of(2027, 3, 14);
+    LocalDate domingo = LocalDate.of(2094, 3, 14);
     assertThat(domingo.getDayOfWeek().getValue()).isEqualTo(7);
 
     when(tenantOperationalSettingsService.getBusinessHourForDate(tenantId, domingo))

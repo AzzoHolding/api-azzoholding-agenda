@@ -2028,6 +2028,40 @@ class ServicoAgendamentosTest {
     }
 
     @Test
+    @DisplayName("timeline traduz a presenca e nao mostra codigo cru")
+    void timelineSemCodigoCru() {
+      Agendamento a = agendamentoExistente(StatusAgendamento.CONFIRMED, LocalDate.now(ZONE_BR), "10:00", "10:30");
+      when(agendamentoRepository.findByIdAndTenantId(a.getId(), tenantId)).thenReturn(Optional.of(a));
+      when(appointmentCustomerNoteRepository.findByTenantIdAndAppointmentIdOrderByCreatedAtDesc(
+              tenantId, a.getId()))
+          .thenReturn(List.of());
+      br.com.phdigitalcode.azzo.agenda.pro.entity.AuditEvent presenca =
+          new br.com.phdigitalcode.azzo.agenda.pro.entity.AuditEvent();
+      presenca.setId(UUID.randomUUID());
+      presenca.setAction("APPOINTMENT_ATTENDANCE_MARK");
+      presenca.setCreatedAt(Instant.now());
+      br.com.phdigitalcode.azzo.agenda.pro.entity.AuditEvent desconhecido =
+          new br.com.phdigitalcode.azzo.agenda.pro.entity.AuditEvent();
+      desconhecido.setId(UUID.randomUUID());
+      desconhecido.setAction("APPOINTMENT_ALGO_NOVO");
+      desconhecido.setCreatedAt(Instant.now());
+      when(auditEventRepository.listByTenantAndEntity(
+              eq(tenantId), eq("APPOINTMENT"), eq(a.getId().toString()), anyInt()))
+          .thenReturn(List.of(presenca, desconhecido));
+      lenient().when(usuarioRepository.mapNamesByTenantAndIds(eq(tenantId), anyList())).thenReturn(java.util.Map.of());
+      lenient().when(clienteRepository.findByIdAndTenantId(clientId, tenantId)).thenReturn(Optional.empty());
+      lenient()
+          .when(profissionalRepository.findByIdAndTenantId(professionalId, tenantId))
+          .thenReturn(Optional.empty());
+      lenient().when(servicoRepository.findByIdAndTenantId(serviceId, tenantId)).thenReturn(Optional.empty());
+
+      AppointmentDetailResponse detalhe = service.obterDetalhe(a.getId());
+
+      assertThat(detalhe.timeline).extracting(evento -> evento.actionLabel)
+          .containsExactly("Presença registrada", "Registro operacional");
+    }
+
+    @Test
     @DisplayName("agendamento de outro tenant nao e encontrado")
     void detalheDeOutroTenant() {
       UUID id = UUID.randomUUID();

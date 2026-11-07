@@ -1678,7 +1678,12 @@ public class ServicoAgendamentos {
       case "APPOINTMENT_CUSTOMER_NOTE_CREATE" -> "Nota operacional criada";
       case "APPOINTMENT_CUSTOMER_NOTE_UPDATE" -> "Nota operacional atualizada";
       case "APPOINTMENT_CUSTOMER_NOTE_DELETE" -> "Nota operacional removida";
-      default -> action;
+      case "APPOINTMENT_ATTENDANCE_MARK" -> "Presença registrada";
+      case "APPOINTMENT_DISCOUNT" -> "Desconto aplicado";
+      case "APPOINTMENT_REVENUE_REVERSE" -> "Receita estornada";
+      case "APPOINTMENT_CANCELLED_BY_CLOSURE" -> "Cancelado por fechamento do salão";
+      // Codigo sem traducao nao vai cru para a tela (o salao via "APPOINTMENT_ATTENDANCE_MARK").
+      default -> "Registro operacional";
     };
   }
 
