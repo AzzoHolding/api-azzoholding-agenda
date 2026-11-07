@@ -202,8 +202,34 @@ public class ServicoDeNotasDaReceita {
         ? Set.of()
         : new HashSet<>(documentos.chavesEmitidasPeloAzzo(tenantId, chaves));
 
+    // O motivo sai do XML do evento de cancelamento (so das canceladas: poucas, e o XML e pequeno).
+    java.util.Map<String, LeitorDoDocumentoDaReceita.Cancelamento> cancelamentos = new java.util.HashMap<>();
+    Set<String> chavesCanceladas = new HashSet<>();
+    for (NfseDocumentoDaReceitaEntity nota : notas) {
+      if (nota.isCancelada() && nota.getChaveAcesso() != null) chavesCanceladas.add(nota.getChaveAcesso());
+    }
+    if (!chavesCanceladas.isEmpty()) {
+      for (NfseDocumentoDaReceitaEntity evento : documentos.eventosDeCancelamento(tenantId, amb, chavesCanceladas)) {
+        try {
+          LeitorDoDocumentoDaReceita.Cancelamento dados = LeitorDoDocumentoDaReceita.cancelamento(decifrar(evento));
+          if (dados != null) cancelamentos.putIfAbsent(evento.getChaveDoEvento(), dados);
+        } catch (RuntimeException ex) {
+          LOG.warn("nfse_receita.evento_ilegivel tenant_id={} evento={}", tenantId, evento.getId(), ex);
+        }
+      }
+    }
+
     NfseReceitaDtos.ListaResponse resposta = new NfseReceitaDtos.ListaResponse();
-    for (NfseDocumentoDaReceitaEntity nota : notas) resposta.itens.add(paraDto(nota, doAzzo));
+    for (NfseDocumentoDaReceitaEntity nota : notas) {
+      NfseReceitaDtos.Nota dto = paraDto(nota, doAzzo);
+      LeitorDoDocumentoDaReceita.Cancelamento dados = cancelamentos.get(nota.getChaveAcesso());
+      if (dados != null) {
+        dto.canceladaEm = dados.quando();
+        dto.motivoCancelamento = dados.motivo();
+        dto.justificativaCancelamento = dados.justificativa();
+      }
+      resposta.itens.add(dto);
+    }
     cursores.findById(new NfseReceitaCursorEntity.Chave(tenantId, amb)).ifPresent(cursor -> {
       resposta.ultimoNsu = cursor.getUltimoNsu();
       resposta.ultimaBuscaEm = cursor.getUltimaBuscaEm() == null ? null : cursor.getUltimaBuscaEm().toString();

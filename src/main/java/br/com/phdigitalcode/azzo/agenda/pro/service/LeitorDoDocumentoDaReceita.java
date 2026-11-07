@@ -65,6 +65,36 @@ final class LeitorDoDocumentoDaReceita {
     doc.setCancelada(cancelamento);
   }
 
+  /** Quando e por que a nota foi cancelada, lido do evento. */
+  record Cancelamento(String quando, String motivo, String justificativa) {}
+
+  /**
+   * O evento traz {@code dhEvento} (ou {@code dhProc}), e no grupo {@code e101101} (cancelamento) ou
+   * {@code e105102} (cancelamento por substituicao) o {@code cMotivo}, a descricao {@code xDesc} e a
+   * justificativa {@code xMotivo}.
+   */
+  static Cancelamento cancelamento(String xml) {
+    if (xml == null || xml.isBlank()) return null;
+    DanfseRenderer.Xml evento = DanfseRenderer.Xml.ler(xml);
+    Instant quando = instante(primeiro(evento.busca("dhEvento"), evento.busca("dhProc")));
+    String codigo = evento.busca("cMotivo");
+    boolean substituicao = xml.contains("e105102");
+    String motivo = motivoDoCancelamento(codigo, substituicao, evento.busca("xDesc"));
+    return new Cancelamento(quando == null ? null : quando.toString(), motivo, evento.busca("xMotivo"));
+  }
+
+  /** Tabela do evento 101101 (leiaute nacional): 1, 2 e 9. Substituicao usa outra tabela: o texto do evento. */
+  static String motivoDoCancelamento(String codigo, boolean substituicao, String descricaoDoEvento) {
+    if (substituicao) return descricaoDoEvento != null ? descricaoDoEvento : "Cancelamento por substituição";
+    if (codigo == null) return descricaoDoEvento;
+    return switch (codigo.trim().replaceFirst("^0+(?=\\d)", "")) {
+      case "1" -> "Erro na emissão";
+      case "2" -> "Serviço não prestado";
+      case "9" -> "Outros";
+      default -> descricaoDoEvento != null ? descricaoDoEvento : "Código " + codigo.trim();
+    };
+  }
+
   /** O papel do salao: a consulta e pela raiz do CNPJ, entao a comparacao tambem. */
   static String papel(String cnpjDoSalao, String prestador, String tomador, String intermediario) {
     String raiz = raiz(cnpjDoSalao);

@@ -88,6 +88,23 @@ class NotasDaReceitaTest {
     assertThat(doc.getChaveDoEvento()).isEqualTo(CHAVE);
   }
 
+  @Test
+  void motivoEJustificativaDoCancelamento() {
+    LeitorDoDocumentoDaReceita.Cancelamento dados = LeitorDoDocumentoDaReceita.cancelamento("""
+        <evento xmlns="http://www.sped.fazenda.gov.br/nfse"><infEvento><pedRegEvento><infPedReg>
+          <dhEvento>2026-11-07T14:30:00-03:00</dhEvento><chNFSe>%s</chNFSe>
+          <e101101><xDesc>Cancelamento de NFS-e</xDesc><cMotivo>2</cMotivo><xMotivo>Cliente desistiu do servico</xMotivo></e101101>
+        </infPedReg></pedRegEvento></infEvento></evento>
+        """.formatted(CHAVE));
+
+    assertThat(dados.quando()).isEqualTo("2026-11-07T17:30:00Z");
+    assertThat(dados.motivo()).isEqualTo("Serviço não prestado");
+    assertThat(dados.justificativa()).isEqualTo("Cliente desistiu do servico");
+    assertThat(LeitorDoDocumentoDaReceita.motivoDoCancelamento("1", false, null)).isEqualTo("Erro na emissão");
+    assertThat(LeitorDoDocumentoDaReceita.motivoDoCancelamento("01", true, "Cancelamento de NFS-e por Substituicao"))
+        .isEqualTo("Cancelamento de NFS-e por Substituicao");
+  }
+
   private static String nfse(String prestador, String tomador) {
     String tagToma = tomador.length() == 11 ? "CPF" : "CNPJ";
     return """

@@ -45,6 +45,12 @@ public final class NfseReceitaDtos {
     public String tomadorNome;
     public String descricao;
     public boolean cancelada;
+    /** Do evento de cancelamento (quando a Receita o distribuiu). */
+    public String canceladaEm;
+    /** "Erro na emissão", "Serviço não prestado", "Outros"... */
+    public String motivoCancelamento;
+    /** O texto digitado por quem cancelou. */
+    public String justificativaCancelamento;
   }
 
   public static class ListaResponse {
