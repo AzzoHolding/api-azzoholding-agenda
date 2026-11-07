@@ -148,7 +148,11 @@ jobs:
           while IFS= read -r t; do [ -n "$t" ] && ARGS+=(-t "$t"); done <<< "$TAGS"
           while IFS= read -r l; do [ -n "$l" ] && ARGS+=(--label "$l"); done <<< "$LABELS"
 
-          docker build "${ARGS[@]}" -f Dockerfile .
+          # Imagem simples (um manifesto so). Com atestacao/SBOM o runner publica um INDICE cujas
+          # partes nao tem tag — e a limpeza abaixo as apagava como "antigas", deixando a tag
+          # `develop` apontando para um manifesto inexistente (07/11/2026: o Watchtower pulava a
+          # API e o pull falhava com "manifest not found").
+          docker build --provenance=false --sbom=false "${ARGS[@]}" -f Dockerfile .
 
           while IFS= read -r t; do
             [ -n "$t" ] || continue
@@ -207,7 +211,13 @@ jobs:
               ...taggedVersions.slice(0, 2).map(v => v.id),
             ]);
 
-            const toDelete = versions.filter(v => !keepIds.has(v.id));
+            // Versao SEM tag recente pode ser parte da imagem que acabou de subir (manifesto da
+            // plataforma, atestacao): nunca apagar antes de 7 dias.
+            const SETE_DIAS = 7 * 24 * 60 * 60 * 1000;
+            const semTagRecente = (v) =>
+              !(v.metadata?.container?.tags?.length) &&
+              Date.now() - new Date(v.created_at).getTime() < SETE_DIAS;
+            const toDelete = versions.filter(v => !keepIds.has(v.id) && !semTagRecente(v));
             for (const version of toDelete) {
               const tags = version.metadata?.container?.tags?.join(', ') || '(sem tag)';
               console.log(`Deletando versao ${version.id} [${tags}]`);
