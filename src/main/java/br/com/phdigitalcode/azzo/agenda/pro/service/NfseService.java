@@ -310,6 +310,11 @@ public class NfseService {
     if (config == null) return;
     if (isBlank(request.nationalTaxCode)) request.nationalTaxCode = normalizeOrNull(config.getNationalTaxCodeDefault());
     if (isBlank(request.nbsCode)) request.nbsCode = normalizeOrNull(config.getNbsCodeDefault());
+    // Codigo municipal do servico (cTribMun): municipios como Niteroi desdobram cada codigo nacional
+    // (06.01.01.001) e recusam a nota sem ele com E0312 (teste em homologacao de 07/11/2026).
+    if (isBlank(request.codigoTributacaoMunicipio)) {
+      request.codigoTributacaoMunicipio = normalizeOrNull(config.getCodigoTributacaoMunicipio());
+    }
   }
 
   /**
