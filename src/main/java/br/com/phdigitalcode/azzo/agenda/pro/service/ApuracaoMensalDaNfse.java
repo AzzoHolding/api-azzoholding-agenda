@@ -6,16 +6,20 @@ import java.time.LocalDate;
 import java.time.YearMonth;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import br.com.phdigitalcode.azzo.agenda.pro.dto.FiscalDtos;
+import br.com.phdigitalcode.azzo.agenda.pro.entity.NfseDocumentoDaReceitaEntity;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.NfseInvoiceEntity;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.NfseAmbiente;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.NfseFiscalStatus;
+import br.com.phdigitalcode.azzo.agenda.pro.repository.NfseDocumentoDaReceitaRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.NfseInvoiceRepository;
 
 /**
@@ -36,6 +40,10 @@ import br.com.phdigitalcode.azzo.agenda.pro.repository.NfseInvoiceRepository;
  *       pelo tomador. Para quem apura o ISS pelo Simples, o valor e uma estimativa: o ISS entra no
  *       DAS, pela aliquota do Simples.
  *   <li>Valores em centavos, como o resto deste DTO.
+ *   <li><b>Notas emitidas fora do Azzo</b> (portal, contador, outro sistema), trazidas da Receita
+ *       pela aba "Notas na Receita", tambem entram: as de producao em que o salao e o prestador, nao
+ *       canceladas, que nao sejam uma nota do proprio Azzo (mesma chave). Sem isso, o mes ficava
+ *       incompleto para quem emite parte das notas em outro lugar.
  * </ul>
  */
 @Service
@@ -46,9 +54,12 @@ public class ApuracaoMensalDaNfse {
       List.of(NfseFiscalStatus.AUTHORIZED, NfseFiscalStatus.CANCEL_PENDING, NfseFiscalStatus.CANCEL_REJECTED);
 
   private final NfseInvoiceRepository nfseInvoiceRepository;
+  private final NfseDocumentoDaReceitaRepository notasDaReceita;
 
-  public ApuracaoMensalDaNfse(NfseInvoiceRepository nfseInvoiceRepository) {
+  public ApuracaoMensalDaNfse(
+      NfseInvoiceRepository nfseInvoiceRepository, NfseDocumentoDaReceitaRepository notasDaReceita) {
     this.nfseInvoiceRepository = nfseInvoiceRepository;
+    this.notasDaReceita = notasDaReceita;
   }
 
   @Transactional(readOnly = true)
@@ -69,7 +80,20 @@ public class ApuracaoMensalDaNfse {
       if (!nota.isIssRetido()) apuracao.totalImpostos += centavos(nota.getValorIss());
       apuracao.documentos.add(documento(nota));
     }
-    apuracao.totalDocumentos = notas.size();
+    Set<String> chavesDoAzzo = new HashSet<>();
+    for (NfseInvoiceEntity nota : notas) {
+      if (nota.getChaveAcessoNfse() != null) chavesDoAzzo.add(nota.getChaveAcessoNfse());
+    }
+    int externas = 0;
+    for (NfseDocumentoDaReceitaEntity externa :
+        notasDaReceita.emitidasPeloSalaoNaCompetencia(tenantId, periodo.atDay(1), periodo.atEndOfMonth())) {
+      if (externa.getChaveAcesso() != null && chavesDoAzzo.contains(externa.getChaveAcesso())) continue;
+      apuracao.totalServicos += centavos(externa.getValorServicos());
+      if (!externa.isIssRetido()) apuracao.totalImpostos += centavos(externa.getValorIss());
+      apuracao.documentos.add(documentoExterno(externa));
+      externas++;
+    }
+    apuracao.totalDocumentos = notas.size() + externas;
     return apuracao;
   }
 
@@ -128,6 +152,26 @@ public class ApuracaoMensalDaNfse {
     FiscalDtos.InvoiceCustomer tomador = new FiscalDtos.InvoiceCustomer();
     tomador.name = nota.getCustomerName();
     tomador.document = nota.getCustomerDocument();
+    documento.customer = tomador;
+    return documento;
+  }
+
+  /** Nota emitida fora do Azzo: "EXTERNA" no status diz de onde veio. */
+  private FiscalDtos.Invoice documentoExterno(NfseDocumentoDaReceitaEntity nota) {
+    FiscalDtos.Invoice documento = new FiscalDtos.Invoice();
+    documento.id = nota.getId() != null ? nota.getId().toString() : null;
+    documento.type = "NFSE";
+    documento.status = "EXTERNA";
+    documento.numeroNf = nota.getNumeroNfse();
+    documento.accessKey = nota.getChaveAcesso();
+    documento.operationNature = "Emitida fora do Azzo";
+    documento.createdAt = nota.getEmitidaEm() != null
+        ? nota.getEmitidaEm().toString()
+        : nota.getCompetencia() != null ? nota.getCompetencia().toString() : null;
+    documento.totalAmount = centavos(nota.getValorServicos());
+    FiscalDtos.InvoiceCustomer tomador = new FiscalDtos.InvoiceCustomer();
+    tomador.name = nota.getTomadorNome();
+    tomador.document = nota.getTomadorDocumento();
     documento.customer = tomador;
     return documento;
   }

@@ -23,6 +23,7 @@ import org.apache.poi.xssf.usermodel.XSSFSheet;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.stereotype.Service;
@@ -842,7 +843,13 @@ public class NfseService {
 
     List<NfseFiscalStatus> statuses = parseFiscalStatusList(statusRaw);
     NfseAccountingExportFormat format = parseAccountingExportFormat(formatRaw);
-    List<NfseInvoiceEntity> rows = nfseInvoiceRepository.listForAccountingExport(tenantId, from, to, statuses);
+    List<NfseInvoiceEntity> rows = new java.util.ArrayList<>(
+        nfseInvoiceRepository.listForAccountingExport(tenantId, from, to, statuses));
+    // Notas emitidas fora do Azzo (trazidas da Receita) vao junto, como autorizadas: o contador
+    // precisa do mes inteiro, e nao so do que passou pelo sistema.
+    if (notasDaReceita != null && statuses.contains(NfseFiscalStatus.AUTHORIZED)) {
+      rows.addAll(notasExternasParaExportacao(tenantId, from, to, rows));
+    }
 
     byte[] bytes;
     String fileName;
@@ -1382,6 +1389,49 @@ public class NfseService {
     }
   }
 
+  /** Injetado por setter: o construtor ja e grande e e montado a mao nos testes. */
+  private br.com.phdigitalcode.azzo.agenda.pro.repository.NfseDocumentoDaReceitaRepository notasDaReceita;
+
+  @Autowired(required = false)
+  void setNotasDaReceita(br.com.phdigitalcode.azzo.agenda.pro.repository.NfseDocumentoDaReceitaRepository notasDaReceita) {
+    this.notasDaReceita = notasDaReceita;
+  }
+
+  /**
+   * As notas de producao emitidas pelo salao fora do Azzo, na forma das linhas da exportacao. Nao
+   * sao gravadas em nfse_invoices: so viajam no arquivo. Provedor "EXTERNA" diz de onde vieram.
+   */
+  private List<NfseInvoiceEntity> notasExternasParaExportacao(
+      UUID tenantId, LocalDate from, LocalDate to, List<NfseInvoiceEntity> doAzzo) {
+    java.util.Set<String> chavesDoAzzo = new java.util.HashSet<>();
+    for (NfseInvoiceEntity nota : doAzzo) {
+      if (nota.getChaveAcessoNfse() != null) chavesDoAzzo.add(nota.getChaveAcessoNfse());
+    }
+    List<NfseInvoiceEntity> externas = new java.util.ArrayList<>();
+    for (br.com.phdigitalcode.azzo.agenda.pro.entity.NfseDocumentoDaReceitaEntity doc :
+        notasDaReceita.emitidasPeloSalaoNaCompetencia(tenantId, from, to)) {
+      if (doc.getChaveAcesso() != null && chavesDoAzzo.contains(doc.getChaveAcesso())) continue;
+      NfseInvoiceEntity linha = new NfseInvoiceEntity();
+      linha.setId(doc.getId());
+      linha.setTenantId(tenantId);
+      linha.setAmbiente(NfseAmbiente.PRODUCAO);
+      linha.setProvedor("EXTERNA");
+      linha.setDataCompetencia(doc.getCompetencia());
+      linha.setDataEmissao(doc.getEmitidaEm());
+      linha.setFiscalStatus(NfseFiscalStatus.AUTHORIZED);
+      linha.setNumeroNfse(doc.getNumeroNfse());
+      linha.setChaveAcessoNfse(doc.getChaveAcesso());
+      linha.setCustomerDocument(doc.getTomadorDocumento());
+      linha.setCustomerName(doc.getTomadorNome());
+      linha.setValorServicos(doc.getValorServicos());
+      linha.setValorIss(doc.getValorIss());
+      linha.setIssRetido(doc.isIssRetido());
+      linha.setXmlNfseEnc(doc.getXmlEnc());
+      externas.add(linha);
+    }
+    return externas;
+  }
+
   private byte[] buildAccountingXmlZip(List<NfseInvoiceEntity> rows) {
     try (ByteArrayOutputStream output = new ByteArrayOutputStream(); ZipOutputStream zip = new ZipOutputStream(output)) {
       String manifest = buildAccountingCsv(rows);
@@ -1401,6 +1451,13 @@ public class NfseService {
         if (!isBlank(retorno)) {
           zip.putNextEntry(new ZipEntry("xml/" + invoiceKey + "/retorno.xml"));
           zip.write(retorno.getBytes(StandardCharsets.UTF_8));
+          zip.closeEntry();
+        }
+        // O XML oficial da NFS-e (o que a Receita devolveu ou distribuiu): o que o contador usa.
+        String nfse = decryptStoredXml(row.getXmlNfseEnc());
+        if (!isBlank(nfse)) {
+          zip.putNextEntry(new ZipEntry("xml/" + invoiceKey + "/nfse.xml"));
+          zip.write(nfse.getBytes(StandardCharsets.UTF_8));
           zip.closeEntry();
         }
       }
