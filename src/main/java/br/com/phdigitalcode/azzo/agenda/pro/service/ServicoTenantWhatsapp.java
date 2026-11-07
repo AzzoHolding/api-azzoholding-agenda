@@ -312,6 +312,36 @@ public class ServicoTenantWhatsapp {
    *
    * @return {@code true} se o numero esta registrado ao fim (inclusive se ja estava).
    */
+  /**
+   * Numero que continua no app WhatsApp Business (coexistencia). Ele JA esta registrado na Meta —
+   * chamar o /register aqui e o que a documentacao manda pular. Falta o resto do onboarding:
+   * inscrever o webhook, criar o template de teste e pedir os contatos e o historico do app (so
+   * podem ser pedidos uma vez, nas 24 horas seguintes a conexao).
+   *
+   * <p>Nenhum desses passos derruba a conexao: o numero ja envia, e o que falhar fica no log.
+   */
+  private boolean prepararCoexistencia(TenantWhatsAppConfig config) {
+    config.setWhatsappRegisteredAt(Instant.now());
+    try {
+      whatsAppClient.inscreverNoWebhook(config);
+    } catch (RuntimeException erro) {
+      LOG.warn(
+          "whatsapp.coexistencia.subscribeFailed tenantId={} reason={}",
+          config.getTenantId(), sanitizeEmbeddedError(erro.getMessage()));
+    }
+    servicoTemplates.criarTemplateDeTeste(config);
+    for (String tipo : List.of("smb_app_state_sync", "history")) {
+      try {
+        whatsAppClient.sincronizarDadosDoApp(config, tipo);
+      } catch (RuntimeException erro) {
+        LOG.warn(
+            "whatsapp.coexistencia.syncFailed tenantId={} tipo={} reason={}",
+            config.getTenantId(), tipo, sanitizeEmbeddedError(erro.getMessage()));
+      }
+    }
+    return true;
+  }
+
   private boolean registrarSeNecessario(TenantWhatsAppConfig config) {
     if (config.getWhatsappRegisteredAt() != null) return true;
     if (!hasAccessTokenConfigured(config)
@@ -607,7 +637,9 @@ public class ServicoTenantWhatsapp {
       //
       // Registrar e inscrever o webhook sao acoes do PROVEDOR: feitas com o token da integracao,
       // sem o cliente fazer nada.
-      boolean registrado = registrarSeNecessario(config);
+      boolean coexistencia =
+          request.setupInfo != null && Boolean.TRUE.equals(request.setupInfo.coexistencia);
+      boolean registrado = coexistencia ? prepararCoexistencia(config) : registrarSeNecessario(config);
 
       // A credencial e boa: a conexao esta feita, e obrigar a refazer o popup por causa do
       // registro seria perder o que deu certo. Mas LIGAR um numero que nao envia era o bug de

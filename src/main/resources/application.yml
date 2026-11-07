@@ -129,7 +129,7 @@ app:
   meta:
     app-id: ${META_APP_ID:__unset__}
     app-secret: ${META_APP_SECRET:__unset__}
-    graph-api-version: ${META_GRAPH_API_VERSION:v18.0}
+    graph-api-version: ${META_GRAPH_API_VERSION:v25.0}
   # Espelha app.chat.* do application.properties do Quarkus. app.chat.manual-mode.duration-hours
   # nao existe no original (so o default "24" do @ConfigProperty) — mantido sem entry no yml de
   # proposito, mesmo comportamento.
