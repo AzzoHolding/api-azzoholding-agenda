@@ -25,17 +25,22 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 import br.com.phdigitalcode.azzo.agenda.pro.dto.request.AtualizarCategoriaRequest;
+import br.com.phdigitalcode.azzo.agenda.pro.dto.request.ConciliacaoDoPeriodoRequest;
+import br.com.phdigitalcode.azzo.agenda.pro.dto.request.ConciliacaoRequest;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.request.CriarCategoriaRequest;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.request.RecurringTransactionRequest;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.request.TransacaoRequest;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.response.CategoriaResponse;
+import br.com.phdigitalcode.azzo.agenda.pro.dto.response.ConciliacaoDoPeriodoResponse;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.response.FluxoCaixaDiarioResponse;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.response.PagedResponse;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.response.RecurringTransactionResponse;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.response.ResumoFinanceiroResponse;
 import br.com.phdigitalcode.azzo.agenda.pro.dto.response.TransacaoResponse;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.MetodoPagamento;
+import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.StatusConciliacao;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.TipoTransacao;
+import br.com.phdigitalcode.azzo.agenda.pro.security.PermissionService;
 import br.com.phdigitalcode.azzo.agenda.pro.security.RequiresPermission;
 import br.com.phdigitalcode.azzo.agenda.pro.service.ServicoFinanceiro;
 import br.com.phdigitalcode.azzo.agenda.pro.util.DataUtil;
@@ -54,9 +59,12 @@ public class FinanceiroController {
   private static final ZoneId ZONA_BR = ZoneId.of("America/Sao_Paulo");
 
   private final ServicoFinanceiro servicoFinanceiro;
+  private final PermissionService permissionService;
 
-  public FinanceiroController(ServicoFinanceiro servicoFinanceiro) {
+  public FinanceiroController(
+      ServicoFinanceiro servicoFinanceiro, PermissionService permissionService) {
     this.servicoFinanceiro = servicoFinanceiro;
+    this.permissionService = permissionService;
   }
 
   // ─── TRANSACOES ──────────────────────────────────────────────────────────
@@ -71,6 +79,8 @@ public class FinanceiroController {
       @RequestParam(required = false) String paymentMethod,
       @RequestParam(required = false) String professionalId,
       @RequestParam(required = false) String reconciled,
+      @RequestParam(required = false) String q,
+      @RequestParam(required = false) String reconciliationStatus,
       @RequestParam(defaultValue = "0") int page,
       @RequestParam(defaultValue = "50") int limit) {
     int safeLimit = Math.min(Math.max(1, limit), 200);
@@ -82,6 +92,8 @@ public class FinanceiroController {
         parseEnumNullable(paymentMethod, MetodoPagamento.class),
         parseUuidNullable(professionalId),
         parseBooleanNullable(reconciled),
+        q,
+        parseEnumNullable(reconciliationStatus, StatusConciliacao.class),
         Math.max(0, page),
         safeLimit);
   }
@@ -95,15 +107,21 @@ public class FinanceiroController {
       @RequestParam(required = false) String categoryId,
       @RequestParam(required = false) String paymentMethod,
       @RequestParam(required = false) String professionalId,
-      @RequestParam(required = false) String reconciled) {
-    return servicoFinanceiro.resumo(
+      @RequestParam(required = false) String reconciled,
+      @RequestParam(required = false) String q,
+      @RequestParam(required = false) String reconciliationStatus) {
+    ResumoFinanceiroResponse resumo = servicoFinanceiro.resumo(
         parseFilterStartInstantNullable(from),
         parseFilterEndInstantNullable(to),
         parseEnumNullable(type, TipoTransacao.class),
         parseUuidNullable(categoryId),
         parseEnumNullable(paymentMethod, MetodoPagamento.class),
         parseUuidNullable(professionalId),
-        parseBooleanNullable(reconciled));
+        parseBooleanNullable(reconciled),
+        q,
+        parseEnumNullable(reconciliationStatus, StatusConciliacao.class));
+    resumo.canManage = permissionService.possuiPermissao("finance:manage");
+    return resumo;
   }
 
   @PostMapping
@@ -120,8 +138,46 @@ public class FinanceiroController {
 
   @PatchMapping("/{id}/reconcile")
   @RequiresPermission("finance:manage")
-  public TransacaoResponse conciliar(@PathVariable UUID id) {
-    return servicoFinanceiro.conciliar(id);
+  public TransacaoResponse conciliar(
+      @PathVariable UUID id, @Valid @RequestBody ConciliacaoRequest request) {
+    return servicoFinanceiro.definirConciliacao(id, request);
+  }
+
+  @PostMapping("/reconcile-period")
+  @RequiresPermission("finance:manage")
+  public ConciliacaoDoPeriodoResponse conciliarPeriodo(
+      @Valid @RequestBody ConciliacaoDoPeriodoRequest request) {
+    return servicoFinanceiro.conciliarPeriodo(request.period);
+  }
+
+  /** O intervalo e a contagem que a conciliacao teria agora. Nada e alterado. */
+  @GetMapping("/reconcile-period/preview")
+  @RequiresPermission("finance:manage")
+  public ConciliacaoDoPeriodoResponse previaDoPeriodo(@RequestParam String period) {
+    return servicoFinanceiro.previaDoPeriodo(period);
+  }
+
+  /** As conciliacoes de dia e de mes finalizadas, da mais nova a mais antiga, em paginas. */
+  @GetMapping("/reconcile-period")
+  @RequiresPermission("finance:view")
+  public PagedResponse<ConciliacaoDoPeriodoResponse> conciliacoesDoPeriodo(
+      @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int limit) {
+    return servicoFinanceiro.conciliacoesFinalizadas(
+        Math.max(0, page), Math.min(Math.max(1, limit), 100));
+  }
+
+  /** Os lancamentos que uma conciliacao de dia ou de mes conciliou. */
+  @GetMapping("/reconcile-period/{id}/transactions")
+  @RequiresPermission("finance:view")
+  public List<TransacaoResponse> lancamentosDaConciliacao(@PathVariable UUID id) {
+    return servicoFinanceiro.lancamentosDaConciliacao(id);
+  }
+
+  /** Lancamentos que podem repetir este: so aviso, nada e alterado nem excluido. */
+  @GetMapping("/{id}/possible-duplicates")
+  @RequiresPermission("finance:view")
+  public List<TransacaoResponse> possiveisDuplicidades(@PathVariable UUID id) {
+    return servicoFinanceiro.possiveisDuplicidades(id);
   }
 
   @DeleteMapping("/{id}")
@@ -141,7 +197,9 @@ public class FinanceiroController {
       @RequestParam(required = false) String categoryId,
       @RequestParam(required = false) String paymentMethod,
       @RequestParam(required = false) String professionalId,
-      @RequestParam(required = false) String reconciled) {
+      @RequestParam(required = false) String reconciled,
+      @RequestParam(required = false) String q,
+      @RequestParam(required = false) String reconciliationStatus) {
     StreamingResponseBody stream =
         servicoFinanceiro.exportarCsv(
             parseFilterStartInstantNullable(from),
@@ -150,7 +208,9 @@ public class FinanceiroController {
             parseUuidNullable(categoryId),
             parseEnumNullable(paymentMethod, MetodoPagamento.class),
             parseUuidNullable(professionalId),
-            parseBooleanNullable(reconciled));
+            parseBooleanNullable(reconciled),
+            q,
+            parseEnumNullable(reconciliationStatus, StatusConciliacao.class));
 
     return ResponseEntity.ok()
         .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + buildCsvFilename(from, to) + "\"")

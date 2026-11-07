@@ -26,7 +26,8 @@ import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.NfseFiscalStatus;
  */
 class NfsePdfRenderServiceTest {
 
-  private final NfsePdfRenderService service = new NfsePdfRenderService();
+  private final NfsePdfRenderService service =
+      new NfsePdfRenderService(org.mockito.Mockito.mock(br.com.phdigitalcode.azzo.agenda.pro.security.EncryptionService.class), new DanfseRenderer());
 
   @Test
   void rendeUmPdfValidoComItens() {

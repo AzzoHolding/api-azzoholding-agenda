@@ -101,6 +101,15 @@ public class WhatsAppWebhookController {
   private final String metaAppSecret;
   /** Opcional (setter): os testes que montam o controller na mao seguem sem a checagem. */
   private br.com.phdigitalcode.azzo.agenda.pro.service.SaudeDoEnvioWhatsApp saudeDoEnvio;
+
+  /**
+   * SO PARA TESTE DE CARGA: com true, o assistente e chamado mesmo com o envio do WhatsApp marcado
+   * como indisponivel. Sem isto, depois da primeira falha da Meta o assistente ficava 10 minutos sem
+   * ser chamado e a carga pelo webhook nao media nada (25/10/2026). Nasce desligada; ligar so durante
+   * o teste (WHATSAPP_IGNORAR_SAUDE_DO_ENVIO no .env) e desligar no fim.
+   */
+  @org.springframework.beans.factory.annotation.Value("${app.whatsapp.ignorar-saude-do-envio:false}")
+  boolean ignorarSaudeDoEnvio;
   private final boolean debugEnabled;
   private final String activeProfile;
 
@@ -310,9 +319,14 @@ public class WhatsAppWebhookController {
           // Isolamos a falha por mensagem: registramos como failed e seguimos
           // para a proxima mensagem do mesmo payload.
           try {
+            // Resposta de botao ou de lista e texto para o assistente: tocar em "Confirmar" num lembrete
+            // com botoes ficava so registrado, sem resposta (teste de midia de 25/10/2026).
+            String textoDoBotao = textoDeBotao(messageNode, messageType);
             ProcessingResult result = "text".equals(messageType)
                 ? processInboundText(tenant, config, normalizePhone(from), body, contactName, providerInboundMessageId)
-                : processInboundNonText(tenant, normalizePhone(from), body, contactName, providerInboundMessageId, messageType);
+                : textoDoBotao != null
+                    ? processInboundText(tenant, config, normalizePhone(from), textoDoBotao, contactName, providerInboundMessageId)
+                    : processInboundNonText(tenant, config, normalizePhone(from), body, contactName, providerInboundMessageId, messageType);
             response.processed++;
             if (result.success) {
               response.success++;
@@ -368,8 +382,12 @@ public class WhatsAppWebhookController {
     return response;
   }
 
+  static final String RESPOSTA_A_MIDIA =
+      "Por aqui eu só consigo ler mensagens de texto. 😊 Pode me escrever o que você precisa?";
+
   private ProcessingResult processInboundNonText(
-      Tenant tenant, String fromPhone, String body, String contactName, String providerInboundMessageId, String messageType) {
+      Tenant tenant, TenantWhatsAppConfig config, String fromPhone, String body, String contactName,
+      String providerInboundMessageId, String messageType) {
     ChatService.InboundProcessingResult inbound = chatService.processInboundWhatsAppMessage(
         tenant.getId(), fromPhone, body, contactName, providerInboundMessageId);
     if (inbound.duplicateInboundMessage) {
@@ -381,7 +399,38 @@ public class WhatsAppWebhookController {
     LOG.info(
         "WhatsApp webhook inbound nao-texto registrado tenant={} wamid={} from={} type={}",
         tenant.getId(), providerInboundMessageId, maskPhone(fromPhone), safeType(messageType));
-    return ProcessingResult.success("mensagem " + safeType(messageType) + " registrada para " + maskPhone(fromPhone), null);
+    // Audio, foto, figurinha...: o cliente ficava sem resposta nenhuma (teste de midia de 25/10/2026).
+    // Em modo manual quem responde e a equipe; com o envio fora, a resposta nao chegaria.
+    if (inbound.manualModeEnabled) {
+      return ProcessingResult.success("mensagem " + safeType(messageType) + " registrada em modo manual para " + maskPhone(fromPhone), null);
+    }
+    if (saudeDoEnvio != null && !saudeDoEnvio.verificar(config).podeEnviar()) {
+      return ProcessingResult.success("mensagem " + safeType(messageType) + " registrada; envio indisponivel para " + maskPhone(fromPhone), null);
+    }
+    try {
+      String providerMessageId = whatsAppClient.sendMessage(config, fromPhone, RESPOSTA_A_MIDIA);
+      if (saudeDoEnvio != null) saudeDoEnvio.registrarEnvioOk(config);
+      chatService.registerOutboundAssistantMessage(
+          tenant.getId(), inbound.conversation.getId(), inbound.client.getId(), RESPOSTA_A_MIDIA, providerMessageId,
+          ChatMessageStatus.SENT, null, null);
+      return ProcessingResult.success("mensagem " + safeType(messageType) + " respondida para " + maskPhone(fromPhone), RESPOSTA_A_MIDIA);
+    } catch (RuntimeException e) {
+      if (saudeDoEnvio != null) saudeDoEnvio.registrarFalhaDeEnvio(config, e);
+      LOG.warn("whatsappWebhook.respostaAMidia.falhou tenant={} from={} motivo={}",
+          tenant.getId(), maskPhone(fromPhone), safeError(e.getMessage()));
+      // A mensagem do cliente ja ficou no chat: nao e falha do webhook.
+      return ProcessingResult.success("mensagem " + safeType(messageType) + " registrada; resposta nao enviada para " + maskPhone(fromPhone), null);
+    }
+  }
+
+  /** O texto do botao ou da opcao de lista que o cliente tocou; null para os demais tipos. */
+  private String textoDeBotao(JsonNode messageNode, String messageType) {
+    if ("button".equals(messageType)) return text(messageNode.path("button").path("text"));
+    if ("interactive".equals(messageType)) {
+      String titulo = text(messageNode.path("interactive").path("button_reply").path("title"));
+      return titulo != null ? titulo : text(messageNode.path("interactive").path("list_reply").path("title"));
+    }
+    return null;
   }
 
   private void processStatuses(JsonNode statuses, UUID tenantId, WebhookResponse response) {
@@ -459,7 +508,7 @@ public class WhatsAppWebhookController {
       // 17/10/2026: antes de gastar tokens de IA, o WhatsApp deste salao consegue responder? Se o
       // envio esta indisponivel (token vencido, numero desconectado...), a resposta nunca chegaria.
       // A mensagem do cliente ja ficou registrada no chat acima; o salao recebe o alerta.
-      if (saudeDoEnvio != null) {
+      if (saudeDoEnvio != null && !ignorarSaudeDoEnvio) {
         var situacao = saudeDoEnvio.verificar(config);
         if (!situacao.podeEnviar()) {
           LOG.warn(

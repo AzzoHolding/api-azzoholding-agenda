@@ -38,9 +38,13 @@ public class TenantBusinessHours {
   @Column(name = "day_of_week", nullable = false, length = 10)
   private String dayOfWeek;
 
+  // Grava o LocalTime direto pelo driver, sem o hibernate.jdbc.time_zone=UTC: o horario ia com +3h
+  // (09:00 virava 12:00; 'fecha 23:00' virava 02:00 e atravessava a meia-noite). V151 corrige os dados.
+  @org.hibernate.annotations.JdbcType(org.hibernate.type.descriptor.jdbc.LocalTimeJdbcType.class)
   @Column(name = "open_time")
   private LocalTime openTime;
 
+  @org.hibernate.annotations.JdbcType(org.hibernate.type.descriptor.jdbc.LocalTimeJdbcType.class)
   @Column(name = "close_time")
   private LocalTime closeTime;
 
@@ -49,9 +53,11 @@ public class TenantBusinessHours {
 
   // Pausa (break) — adicionados em V84
 
+  @org.hibernate.annotations.JdbcType(org.hibernate.type.descriptor.jdbc.LocalTimeJdbcType.class)
   @Column(name = "break_start")
   private LocalTime breakStart;
 
+  @org.hibernate.annotations.JdbcType(org.hibernate.type.descriptor.jdbc.LocalTimeJdbcType.class)
   @Column(name = "break_end")
   private LocalTime breakEnd;
 }

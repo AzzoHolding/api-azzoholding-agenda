@@ -19,6 +19,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
 import br.com.phdigitalcode.azzo.agenda.pro.dto.FiscalDtos;
+import br.com.phdigitalcode.azzo.agenda.pro.service.FiscalPersistenceService;
 import br.com.phdigitalcode.azzo.agenda.pro.service.FiscalProvider;
 import br.com.phdigitalcode.azzo.agenda.pro.util.DataUtil;
 
@@ -31,23 +32,40 @@ import br.com.phdigitalcode.azzo.agenda.pro.util.DataUtil;
  *
  * <p>Estado guardado em {@link ConcurrentHashMap} por processo: reinicia a cada deploy, nao e
  * compartilhado entre instancias. Fiel ao original, que tem a mesma limitacao.
+ *
+ * <p><b>Excecao: a config do emitente vai para o banco</b> ({@code fiscal_tax_configs}, via
+ * {@link FiscalPersistenceService}). So em memoria, "Configuracao salva" sumia no deploy seguinte
+ * e a emissao de NFS-e voltava a pedir CNPJ e razao social (teste de telas, 25/10/2026).
  */
 @Service
 @ConditionalOnProperty(name = "app.fiscal.provider", havingValue = "mock", matchIfMissing = true)
 public class MockFiscalProvider implements FiscalProvider {
 
   private final ConcurrentHashMap<UUID, FiscalDtos.TaxConfig> taxConfigByTenant = new ConcurrentHashMap<>();
+  /** {@code null} so nos testes de unidade: ai a config fica em memoria, como antes. */
+  private final FiscalPersistenceService persistencia;
   private final ConcurrentHashMap<UUID, Map<String, FiscalDtos.Invoice>> invoicesByTenant =
       new ConcurrentHashMap<>();
 
+  public MockFiscalProvider(FiscalPersistenceService persistencia) {
+    this.persistencia = persistencia;
+  }
+
   @Override
   public FiscalDtos.TaxConfig obterTaxConfig(UUID tenantId) {
+    FiscalDtos.TaxConfig gravada = persistencia != null ? persistencia.lerTaxConfig(tenantId) : null;
+    if (gravada != null) return gravada;
     return taxConfigByTenant.computeIfAbsent(tenantId, key -> defaultTaxConfig());
   }
 
   @Override
   public FiscalDtos.TaxConfig atualizarTaxConfig(UUID tenantId, FiscalDtos.TaxConfig request) {
-    taxConfigByTenant.put(tenantId, request == null ? defaultTaxConfig() : request);
+    FiscalDtos.TaxConfig nova = request == null ? defaultTaxConfig() : request;
+    if (persistencia != null) {
+      persistencia.upsertTaxConfig(tenantId, nova);
+      return obterTaxConfig(tenantId);
+    }
+    taxConfigByTenant.put(tenantId, nova);
     return obterTaxConfig(tenantId);
   }
 

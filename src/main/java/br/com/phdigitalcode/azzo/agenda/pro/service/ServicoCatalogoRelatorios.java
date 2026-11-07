@@ -117,11 +117,15 @@ public class ServicoCatalogoRelatorios {
         entityManager
             .createNativeQuery(definition.sql())
             .setParameter("tenantId", tenantId)
-            .setParameter("dataInicio", inicio)
             .setParameter("dataFim", fim)
             .setParameter("limit", pageSize)
             .setParameter("offset", pageIndex * pageSize);
 
+    // Clientes inativos so olha o fim do periodo; parametro que a consulta nao tem e erro do
+    // Hibernate, e o relatorio dava 500 na tela e na exportacao (02/11/2026).
+    if (definition.sql().contains(":dataInicio")) {
+      query.setParameter("dataInicio", inicio);
+    }
     if (definition.sql().contains(":inactiveDays")) {
       query.setParameter("inactiveDays", inactiveDays == null || inactiveDays < 1 ? 90 : inactiveDays);
     }
@@ -256,7 +260,7 @@ public class ServicoCatalogoRelatorios {
           LEFT JOIN visitas_clientes v ON v.client_id = c.id
           WHERE c.tenant_id = :tenantId
           GROUP BY c.id, c.name, c.phone
-          HAVING MAX(v.dia) IS NULL OR MAX(v.dia) <= (:dataFim - (:inactiveDays || ' days')::interval)::date
+          HAVING MAX(v.dia) IS NULL OR MAX(v.dia) <= CAST(:dataFim AS date) - CAST(:inactiveDays AS int)
           ORDER BY MAX(v.dia) NULLS FIRST, c.name
           LIMIT :limit OFFSET :offset
           """);

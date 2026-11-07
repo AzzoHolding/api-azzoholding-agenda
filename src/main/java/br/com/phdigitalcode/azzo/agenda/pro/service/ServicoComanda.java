@@ -67,6 +67,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.repository.TenantOperationalSettings
 import br.com.phdigitalcode.azzo.agenda.pro.repository.TransacaoRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.TransactionCategoryRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.security.AuthenticatedUser;
+import br.com.phdigitalcode.azzo.agenda.pro.security.PermissionService;
 import br.com.phdigitalcode.azzo.agenda.pro.security.ContextoTenant;
 import br.com.phdigitalcode.azzo.agenda.pro.util.NumericUtil;
 
@@ -121,6 +122,8 @@ public class ServicoComanda {
 
   private final AuditService auditService;
 
+  private final PermissionService permissionService;
+
   public ServicoComanda(
       ContextoTenant contextoTenant,
       AuthenticatedUser authenticatedUser,
@@ -149,7 +152,9 @@ public class ServicoComanda {
       AuditService auditService,
       TravaFinanceira travaFinanceira,
       ClientMembershipRepository clientMembershipRepository,
-      ClientMembershipBalanceRepository clientMembershipBalanceRepository) {
+      ClientMembershipBalanceRepository clientMembershipBalanceRepository,
+      PermissionService permissionService) {
+    this.permissionService = permissionService;
     this.contextoTenant = contextoTenant;
     this.authenticatedUser = authenticatedUser;
     this.comandaRepository = comandaRepository;
@@ -344,6 +349,8 @@ public class ServicoComanda {
         && profissionalRepository.findByIdAndTenantId(professionalId, tenantId).isEmpty()) {
       throw new IllegalArgumentException("Profissional não encontrado.");
     }
+    // O item que vem do agendamento nao e lancamento de quem conclui: a atendente conclui pelo colega.
+    if (!precoDoAgendamento) exigirQuePossaLancarPara(tenantId, professionalId);
 
     exigirConfirmacaoDeDuplicado(comanda, request, referenciaId);
 
@@ -874,6 +881,10 @@ public class ServicoComanda {
     exigirComandaDoProfissional(tenantId, comanda);
     exigirAberta(comanda);
 
+    if (profissionalDoUsuarioLogado(tenantId) != null
+        && !permissionService.possuiPermissao(LANCAR_PARA_OUTROS)) {
+      throw new IllegalArgumentException("Seu perfil de acesso não permite dar desconto.");
+    }
     if (request.percentual.compareTo(new BigDecimal("100")) > 0) {
       throw new IllegalArgumentException("Desconto não pode ser maior que 100%.");
     }
@@ -1495,11 +1506,38 @@ public class ServicoComanda {
       UUID id, ComandaDtos.CancelarComandaRequest request) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Comanda comanda = buscarOuFalhar(id, tenantId);
+    // Cancelar e da opcao de operar todas as comandas (decisao de 02/11/2026); estornar segue do dono.
+    if (authenticatedUser.temRole("PROFESSIONAL")
+        && !permissionService.possuiPermissao(COMANDAS_DE_TODOS)) {
+      throw new ApiClientErrorException("Seu perfil de acesso não permite cancelar comanda.", 403);
+    }
     exigirComandaDoProfissional(tenantId, comanda);
     exigirAberta(comanda);
 
     List<ComandaPagamento> pagamentos =
         comandaPagamentoRepository.findByComandaIdOrderByCreatedAt(comanda.getId());
+    // O sinal fica de fora: ele volta a valer para o agendamento, logo abaixo.
+    List<ComandaPagamento> recebidos =
+        pagamentos.stream()
+            .filter(
+                p ->
+                    ComandaPagamento.STATUS_CONFIRMADO.equals(p.getStatus())
+                        && !ComandaPagamento.MEIO_CREDITO_SINAL.equals(p.getMeio())
+                        && !NumericUtil.isZeroOrNegative(p.getValor()))
+            .toList();
+    if (!recebidos.isEmpty() && request.estornarPagamento == null) {
+      throw new IllegalArgumentException("Informe se o valor pago será devolvido ao cliente.");
+    }
+    if (!recebidos.isEmpty()) {
+      if (request.estornarPagamento) {
+        recebidos.forEach(p -> p.setStatus(ComandaPagamento.STATUS_ESTORNADO));
+      } else {
+        travaFinanceira.exigirDiaAberto(
+            tenantId, Instant.now(), "POS_COMANDA_CANCEL", "COMANDA", comanda.getId().toString(),
+            dadosDaComanda(comanda));
+        registrarValorRetido(tenantId, comanda, recebidos);
+      }
+    }
     for (ComandaPagamento pagamento : pagamentos) {
       if (ComandaPagamento.MEIO_PIX_ASAAS.equals(pagamento.getMeio())
           && ComandaPagamento.STATUS_PENDENTE.equals(pagamento.getStatus())
@@ -1521,11 +1559,47 @@ public class ServicoComanda {
     comanda.setCancelMotivo(request.motivo.trim());
     comanda.setClosedAt(Instant.now());
 
-    auditar(tenantId, "POS_COMANDA_CANCEL", comanda, null, dadosDaComanda(comanda));
+    Map<String, Object> depois = dadosDaComanda(comanda);
+    if (!recebidos.isEmpty()) depois.put("estornarPagamento", request.estornarPagamento);
+    auditar(tenantId, "POS_COMANDA_CANCEL", comanda, null, depois);
     return toResponse(
         comanda,
         comandaItemRepository.findByComandaIdOrderByCreatedAt(comanda.getId()),
         pagamentos);
+  }
+
+  /**
+   * O salao ficou com o que foi pago numa comanda cancelada: sem isto o dinheiro estaria na gaveta e
+   * fora do financeiro e do caixa. Uma transacao por pagamento, para o caixa conferir por meio. O que
+   * passou do total em dinheiro e troco, e nao receita.
+   */
+  private void registrarValorRetido(
+      UUID tenantId, Comanda comanda, List<ComandaPagamento> recebidos) {
+    UUID categoriaVendasId = resolveTransactionCategoryId(tenantId, "VENDAS");
+    BigDecimal recebido =
+        recebidos.stream().map(ComandaPagamento::getValor).reduce(BigDecimal.ZERO, NumericUtil::add);
+    BigDecimal troco =
+        recebido.subtract(NumericUtil.add(comanda.getTotal(), comanda.getGorjeta())).max(BigDecimal.ZERO);
+    for (ComandaPagamento pagamento : recebidos) {
+      BigDecimal valor = pagamento.getValor();
+      if (ComandaPagamento.MEIO_DINHEIRO.equals(pagamento.getMeio()) && troco.signum() > 0) {
+        BigDecimal abatido = valor.min(troco);
+        valor = valor.subtract(abatido);
+        troco = troco.subtract(abatido);
+      }
+      if (NumericUtil.isZeroOrNegative(valor)) continue;
+      Transacao transacao = new Transacao();
+      transacao.setTenantId(tenantId);
+      transacao.setComandaId(comanda.getId());
+      transacao.setAppointmentId(comanda.getAppointmentId());
+      transacao.setType(TipoTransacao.INCOME);
+      transacao.setCategoryId(categoriaVendasId);
+      transacao.setDescription("Valor retido de comanda cancelada");
+      transacao.setAmount(valor);
+      transacao.setPaymentMethod(mapearMetodoPagamento(pagamento.getMeio()));
+      transacao.setDate(Instant.now());
+      transacaoRepository.save(transacao);
+    }
   }
 
   /**
@@ -1773,8 +1847,26 @@ public class ServicoComanda {
    * cadastro de profissional: nesse caso nao existe "comanda dele" para delimitar, e o papel
    * sozinho ja foi conferido no controller.
    */
+  /** Opcoes do perfil de acesso, configuradas pelo dono (decisao de 02/11/2026). */
+  private static final String COMANDAS_DE_TODOS = "pos:others";
+
+  private static final String LANCAR_PARA_OUTROS = "pos:others-items";
+
+  /** Profissional lanca para si, a nao ser que o perfil de acesso lhe de a opcao. */
+  private void exigirQuePossaLancarPara(UUID tenantId, UUID professionalId) {
+    UUID euMesmo = profissionalDoUsuarioLogado(tenantId);
+    if (euMesmo == null || professionalId == null || euMesmo.equals(professionalId)) return;
+    if (permissionService.possuiPermissao(LANCAR_PARA_OUTROS)) return;
+    throw new IllegalArgumentException("Seu perfil de acesso só permite lançar serviços para você.");
+  }
+
+  /**
+   * O profissional a que o usuario logado fica restrito; {@code null} se nao ha restricao. Quem tem
+   * a opcao de operar todas as comandas (a atendente) trabalha como a recepcao.
+   */
   private UUID profissionalDoUsuarioLogado(UUID tenantId) {
     if (!authenticatedUser.temRole("PROFESSIONAL")) return null;
+    if (permissionService.possuiPermissao(COMANDAS_DE_TODOS)) return null;
     if (authenticatedUser.temRole("OWNER")
         || authenticatedUser.temRole("STAFF")
         || authenticatedUser.temRole("ADMIN")) {

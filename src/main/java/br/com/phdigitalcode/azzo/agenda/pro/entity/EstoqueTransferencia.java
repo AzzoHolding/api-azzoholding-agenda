@@ -23,8 +23,8 @@ import lombok.Setter;
  * <p>Os {@code @ManyToOne} para {@code Tenant} e {@code ItemEstoque} do original nao foram mapeados
  * (acesso sempre pelo id escalar); o {@code itemNome} do DTO entra por parametro no mapper.
  *
- * <p><b>A transferencia nao movimenta saldo</b> em nenhum dos tres endpoints do original — e um
- * registro de status puro. Preservado.
+ * <p>Desde a V154 o envio da baixa real no saldo e o recebimento devolve (decisao do dono,
+ * 02/11/2026). {@code baixaRealizada} separa as anteriores, que nunca tiraram nada do saldo.
  */
 @Entity
 @Table(name = "estoque_transferencia")
@@ -54,6 +54,9 @@ public class EstoqueTransferencia {
 
   @Column(name = "quantidade", nullable = false, precision = 19, scale = 4)
   private BigDecimal quantidade;
+
+  @Column(name = "baixa_realizada", nullable = false)
+  private boolean baixaRealizada = false;
 
   @Column(name = "observacao", length = 500)
   private String observacao;

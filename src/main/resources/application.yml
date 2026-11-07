@@ -129,7 +129,7 @@ app:
   meta:
     app-id: ${META_APP_ID:__unset__}
     app-secret: ${META_APP_SECRET:__unset__}
-    graph-api-version: ${META_GRAPH_API_VERSION:v18.0}
+    graph-api-version: ${META_GRAPH_API_VERSION:v25.0}
   # Espelha app.chat.* do application.properties do Quarkus. app.chat.manual-mode.duration-hours
   # nao existe no original (so o default "24" do @ConfigProperty) — mantido sem entry no yml de
   # proposito, mesmo comportamento.
@@ -195,6 +195,11 @@ app:
       enabled: ${NFSE_TEST_PROVIDERS_ENABLED:false}
     certificate-unlock:
       ttl-minutes: ${NFSE_CERTIFICATE_UNLOCK_TTL_MINUTES:15}
+    certificado:
+      # Segredo do servidor (Base64, >= 32 bytes) que entra na chave do certificado A1 junto com a
+      # senha do dono. Fica FORA do banco, com backup: sem ele nenhum certificado abre e o dono
+      # precisa enviar o .pfx de novo. Vazio: envio e uso de certificado recusados. Ver CofreDoCertificado.
+      pimenta: ${NFSE_CERTIFICADO_PIMENTA:}
     pdf:
       worker:
         batch-size: ${NFSE_PDF_WORKER_BATCH_SIZE:20}
@@ -217,24 +222,25 @@ app:
         base-url: ${NFSE_PROVIDER_SEFIN_NACIONAL_BASE_URL:https://sefin.nfse.gov.br/SefinNacional}
         base-url-homologacao: ${NFSE_PROVIDER_SEFIN_NACIONAL_BASE_URL_HOMOLOGACAO:https://sefin.producaorestrita.nfse.gov.br/SefinNacional}
         production-enabled: ${NFSE_PROVIDER_SEFIN_NACIONAL_PRODUCTION_ENABLED:false}
-        authorize-path: ${NFSE_PROVIDER_SEFIN_NACIONAL_AUTHORIZE_PATH:__unset__}
-        authorize-path-homologacao: ${NFSE_PROVIDER_SEFIN_NACIONAL_AUTHORIZE_PATH_HOMOLOGACAO:__unset__}
+        # Contrato da API do Emissor Nacional (ver SefinNacionalProviderAdapter). Todas as
+        # chamadas usam mTLS com o certificado do salao.
+        authorize-path: ${NFSE_PROVIDER_SEFIN_NACIONAL_AUTHORIZE_PATH:/nfse}
+        authorize-path-homologacao: ${NFSE_PROVIDER_SEFIN_NACIONAL_AUTHORIZE_PATH_HOMOLOGACAO:/nfse}
         cancel-path: ${NFSE_PROVIDER_SEFIN_NACIONAL_CANCEL_PATH:/nfse/{chaveAcesso}/eventos}
         cancel-path-homologacao: ${NFSE_PROVIDER_SEFIN_NACIONAL_CANCEL_PATH_HOMOLOGACAO:/nfse/{chaveAcesso}/eventos}
         query-path: ${NFSE_PROVIDER_SEFIN_NACIONAL_QUERY_PATH:/nfse/{chaveAcesso}}
         query-path-homologacao: ${NFSE_PROVIDER_SEFIN_NACIONAL_QUERY_PATH_HOMOLOGACAO:/nfse/{chaveAcesso}}
+        dps-path: ${NFSE_PROVIDER_SEFIN_NACIONAL_DPS_PATH:/dps/{idDps}}
+        dps-path-homologacao: ${NFSE_PROVIDER_SEFIN_NACIONAL_DPS_PATH_HOMOLOGACAO:/dps/{idDps}}
         cancel-reason-code-default: ${NFSE_PROVIDER_SEFIN_NACIONAL_CANCEL_REASON_CODE_DEFAULT:9}
-        query-http-method: ${NFSE_PROVIDER_SEFIN_NACIONAL_QUERY_HTTP_METHOD:GET}
-        query-access-key-param: ${NFSE_PROVIDER_SEFIN_NACIONAL_QUERY_ACCESS_KEY_PARAM:chNFSe}
-        query-protocol-param: ${NFSE_PROVIDER_SEFIN_NACIONAL_QUERY_PROTOCOL_PARAM:protocolo}
-        query-include-protocol: ${NFSE_PROVIDER_SEFIN_NACIONAL_QUERY_INCLUDE_PROTOCOL:true}
-        query-mtls-enabled: ${NFSE_PROVIDER_SEFIN_NACIONAL_QUERY_MTLS_ENABLED:false}
   checkout:
     # POST /checkout/intents + /confirm confirmam a compra com pagamento FALSO (stub) e liberam
     # licenca paga sem cobrar. So para desenvolvimento; o pagamento de verdade e o
     # POST /billing/subscriptions (Asaas). NUNCA ligar em producao.
     stub-enabled: ${CHECKOUT_STUB_ENABLED:false}
   whatsapp:
+    # So para teste de carga pelo webhook: chama o assistente mesmo com o envio marcado como fora.
+    ignorar-saude-do-envio: ${WHATSAPP_IGNORAR_SAUDE_DO_ENVIO:false}
     embedded-signup:
       enabled: ${WHATSAPP_EMBEDDED_SIGNUP_ENABLED:false}
     # O teste manda TEMPLATE, e nao texto livre: texto livre so e entregue dentro de 24h da

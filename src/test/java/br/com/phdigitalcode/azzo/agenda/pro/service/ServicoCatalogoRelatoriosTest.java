@@ -51,6 +51,24 @@ class ServicoCatalogoRelatoriosTest {
   }
 
   @Test
+  @DisplayName("clientes-inativos nao recebe dataInicio, que a consulta nao tem (o Hibernate recusa)")
+  void clientesInativosNaoRecebeParametroQueAConsultaNaoTem() {
+    EntityManager entityManager = mock(EntityManager.class);
+    Query query = mock(Query.class);
+    lenient().when(entityManager.createNativeQuery(anyString())).thenReturn(query);
+    lenient().when(query.setParameter(anyString(), org.mockito.ArgumentMatchers.any())).thenReturn(query);
+    lenient()
+        .when(query.setParameter(org.mockito.ArgumentMatchers.eq("dataInicio"), org.mockito.ArgumentMatchers.any()))
+        .thenThrow(new IllegalArgumentException("No parameter named ':dataInicio'"));
+    lenient().when(query.getResultList()).thenReturn(List.of());
+    ReflectionTestUtils.setField(service, "entityManager", entityManager);
+
+    org.assertj.core.api.Assertions.assertThatCode(
+            () -> service.gerar("clientes-inativos", "2026-10-01", "2026-11-30", null, 60, 0, 20))
+        .doesNotThrowAnyException();
+  }
+
+  @Test
   @DisplayName("rejeita chave de relatorio nao suportada")
   void rejeitaChaveNaoSuportada() {
     assertThatThrownBy(() -> service.gerar("relatorio-inexistente", null, null, null, null, null, null))

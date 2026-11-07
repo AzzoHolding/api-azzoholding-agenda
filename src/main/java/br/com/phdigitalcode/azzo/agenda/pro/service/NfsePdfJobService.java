@@ -2,10 +2,16 @@ package br.com.phdigitalcode.azzo.agenda.pro.service;
 
 import java.time.Instant;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+
+import jakarta.annotation.PreDestroy;
 
 import br.com.phdigitalcode.azzo.agenda.pro.dto.NfseDtos;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.NfseInvoiceEntity;
@@ -34,6 +40,11 @@ import br.com.phdigitalcode.azzo.agenda.pro.security.ContextoTenant;
  */
 @Service
 public class NfsePdfJobService {
+
+  private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger(NfsePdfJobService.class);
+
+  /** Gera o PDF logo apos o pedido; o agendador de 20 s fica so como reserva. */
+  private final ExecutorService geracaoImediata = Executors.newVirtualThreadPerTaskExecutor();
 
   private final ContextoTenant contextoTenant;
   private final AuthenticatedUser authenticatedUser;
@@ -67,8 +78,13 @@ public class NfsePdfJobService {
   public NfseDtos.PdfJobResponse solicitarGeracao(String invoiceId) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     NfseInvoiceEntity invoice = obterInvoiceOuFalhar(tenantId, invoiceId);
-    if (invoice.getFiscalStatus() != NfseFiscalStatus.AUTHORIZED
-        && invoice.getFiscalStatus() != NfseFiscalStatus.CANCELLED) {
+    // Com cancelamento pedido ou recusado, a nota continua valida na Receita: o PDF tambem sai.
+    if (!java.util.EnumSet.of(
+            NfseFiscalStatus.AUTHORIZED,
+            NfseFiscalStatus.CANCEL_PENDING,
+            NfseFiscalStatus.CANCEL_REJECTED,
+            NfseFiscalStatus.CANCELLED)
+        .contains(invoice.getFiscalStatus())) {
       throw new IllegalArgumentException("PDF da NFS-e só pode ser gerado para documento autorizado/cancelado.");
     }
 
@@ -83,7 +99,34 @@ public class NfsePdfJobService {
     nfsePdfJobRepository.save(job);
 
     invoice.setOperationalStatus(NfseOperationalStatus.PROCESSING_PDF);
+    gerarLogoAposGravar(job.getId());
     return toResponse(job);
+  }
+
+  /**
+   * Antes o PDF so saia na proxima rodada do {@code NfsePdfJobScheduler} (ate 20 s de espera).
+   * Agora o job roda assim que a transacao do pedido grava. Se falhar ou a aplicacao cair, o job
+   * continua QUEUED e o agendador o pega; o lock logico do worker impede gerar duas vezes.
+   */
+  private void gerarLogoAposGravar(UUID jobId) {
+    if (!TransactionSynchronizationManager.isSynchronizationActive()) return;
+    TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+      @Override
+      public void afterCommit() {
+        geracaoImediata.execute(() -> {
+          try {
+            nfsePdfJobWorker.processarJob(jobId);
+          } catch (RuntimeException ex) {
+            LOG.warn("nfse_pdf_geracao_imediata_falhou job_id={} (fica para o agendador)", jobId, ex);
+          }
+        });
+      }
+    });
+  }
+
+  @PreDestroy
+  void encerrar() {
+    geracaoImediata.shutdown();
   }
 
   @Transactional(readOnly = true)

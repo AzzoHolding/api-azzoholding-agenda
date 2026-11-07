@@ -67,6 +67,22 @@ class WhatsAppClientTest {
   }
 
   @Test
+  void coexistenciaPedeASincronizacaoDoAppPeloSmbAppData() {
+    TenantWhatsAppConfig config = configComToken();
+
+    server.expect(requestTo("https://graph.facebook.com/v18.0/1234567890/smb_app_data"))
+        .andExpect(method(HttpMethod.POST))
+        .andExpect(header("Authorization", "Bearer plain-token"))
+        .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath("$.sync_type").value("history"))
+        .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath("$.messaging_product").value("whatsapp"))
+        .andRespond(withSuccess("{\"messaging_product\":\"whatsapp\",\"request_id\":\"r1\"}", MediaType.APPLICATION_JSON));
+
+    client.sincronizarDadosDoApp(config, "history");
+
+    server.verify();
+  }
+
+  @Test
   void deveNormalizarDestinoRemovendoCaracteresNaoNumericos() {
     TenantWhatsAppConfig config = configComToken();
 

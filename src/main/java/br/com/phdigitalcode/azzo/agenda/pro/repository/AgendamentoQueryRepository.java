@@ -34,6 +34,7 @@ import jakarta.persistence.TypedQuery;
 public class AgendamentoQueryRepository {
 
   private static final String NO_SHOW_DB_STATUS = "Nao compareceu";
+  private static final String CANCELLED_DB_STATUS = "Cancelado";
 
   public record NoShowCursor(UUID id, LocalDate date, String startTime, Instant createdAt) {}
 
@@ -89,6 +90,7 @@ public class AgendamentoQueryRepository {
         .getSingleResult();
   }
 
+  /** Cancelado nao conta: a faixa da semana e o mes mostram "N atend." (achado do teste de telas, 25/10/2026). */
   @SuppressWarnings("unchecked")
   public List<Object[]> contarPorDiaNoMes(UUID tenantId, int mes, int ano) {
     return entityManager
@@ -100,12 +102,14 @@ public class AgendamentoQueryRepository {
               COUNT(*)::bigint AS quantidade
             FROM appointments a
             WHERE a.tenant_id = :tenantId
+              AND a.status <> :cancelledStatus
               AND EXTRACT(MONTH FROM a.date) = :mes
               AND EXTRACT(YEAR FROM a.date) = :ano
             GROUP BY dia, mes
             ORDER BY dia
             """)
         .setParameter("tenantId", tenantId)
+        .setParameter("cancelledStatus", CANCELLED_DB_STATUS)
         .setParameter("mes", mes)
         .setParameter("ano", ano)
         .getResultList();
@@ -124,6 +128,7 @@ public class AgendamentoQueryRepository {
             FROM appointments a
             WHERE a.tenant_id = :tenantId
               AND a.professional_id = :professionalId
+              AND a.status <> :cancelledStatus
               AND EXTRACT(MONTH FROM a.date) = :mes
               AND EXTRACT(YEAR FROM a.date) = :ano
             GROUP BY dia, mes
@@ -131,6 +136,7 @@ public class AgendamentoQueryRepository {
             """)
         .setParameter("tenantId", tenantId)
         .setParameter("professionalId", professionalId)
+        .setParameter("cancelledStatus", CANCELLED_DB_STATUS)
         .setParameter("mes", mes)
         .setParameter("ano", ano)
         .getResultList();

@@ -66,6 +66,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.repository.TenantOperationalSettings
 import br.com.phdigitalcode.azzo.agenda.pro.repository.TransacaoRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.TransactionCategoryRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.security.AuthenticatedUser;
+import br.com.phdigitalcode.azzo.agenda.pro.security.PermissionService;
 import br.com.phdigitalcode.azzo.agenda.pro.security.ContextoTenant;
 
 /**
@@ -88,6 +89,7 @@ class ServicoComandaTest {
   private EstoqueMovimentacaoService estoqueMovimentacaoService;
   private CommissionService commissionService;
   private TransacaoRepository transacaoRepository;
+  private PermissionService permissionService;
   private TransactionCategoryRepository transactionCategoryRepository;
   private ServicePackageRepository servicePackageRepository;
   private ServicePackageItemRepository servicePackageItemRepository;
@@ -128,6 +130,7 @@ class ServicoComandaTest {
     estoqueMovimentacaoService = mock(EstoqueMovimentacaoService.class);
     commissionService = mock(CommissionService.class);
     transacaoRepository = mock(TransacaoRepository.class);
+    permissionService = mock(PermissionService.class);
     transactionCategoryRepository = mock(TransactionCategoryRepository.class);
     servicePackageRepository = mock(ServicePackageRepository.class);
     servicePackageItemRepository = mock(ServicePackageItemRepository.class);
@@ -231,7 +234,8 @@ class ServicoComandaTest {
             auditService,
             travaFinanceira,
             clientMembershipRepository,
-            clientMembershipBalanceRepository);
+            clientMembershipBalanceRepository,
+            permissionService);
   }
 
   // ---------------------------------------------------------------- helpers
@@ -1033,6 +1037,7 @@ class ServicoComandaTest {
 
     ComandaDtos.CancelarComandaRequest req = new ComandaDtos.CancelarComandaRequest();
     req.motivo = "  cliente desistiu  ";
+    // So sinal e Pix pendente: nao ha dinheiro recebido, logo nao ha pergunta a responder.
 
     service.cancelar(comandaId, req);
 
@@ -1041,6 +1046,153 @@ class ServicoComandaTest {
     assertThat(comanda.getStatus()).isEqualTo(Comanda.STATUS_CANCELADA);
     assertThat(comanda.getCancelMotivo()).isEqualTo("cliente desistiu");
     assertThat(comanda.getClosedAt()).isNotNull();
+  }
+
+  @Test
+  void cancelarComPagamentoExigeDizerSeOValorVolta() {
+    Comanda comanda = comanda(Comanda.STATUS_ABERTA);
+    pagamentosDaComanda(
+        pagamento(ComandaPagamento.MEIO_DINHEIRO, "30.00", ComandaPagamento.STATUS_CONFIRMADO));
+    ComandaDtos.CancelarComandaRequest req = new ComandaDtos.CancelarComandaRequest();
+    req.motivo = "desistiu";
+
+    assertThatThrownBy(() -> service.cancelar(comandaId, req))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("devolvido ao cliente");
+    assertThat(comanda.getStatus()).isEqualTo(Comanda.STATUS_ABERTA);
+  }
+
+  @Test
+  void cancelarEstornandoMarcaOPagamentoENaoLancaReceita() {
+    Comanda comanda = comanda(Comanda.STATUS_ABERTA);
+    ComandaPagamento dinheiro =
+        pagamento(ComandaPagamento.MEIO_DINHEIRO, "30.00", ComandaPagamento.STATUS_CONFIRMADO);
+    pagamentosDaComanda(dinheiro);
+    ComandaDtos.CancelarComandaRequest req = new ComandaDtos.CancelarComandaRequest();
+    req.motivo = "desistiu";
+    req.estornarPagamento = true;
+
+    service.cancelar(comandaId, req);
+
+    assertThat(dinheiro.getStatus()).isEqualTo(ComandaPagamento.STATUS_ESTORNADO);
+    assertThat(comanda.getStatus()).isEqualTo(Comanda.STATUS_CANCELADA);
+    verify(transacaoRepository, never()).save(any(Transacao.class));
+  }
+
+  @Test
+  void cancelarSemEstornarLancaOValorRetidoPorMeioDePagamento() {
+    Comanda comanda = comanda(Comanda.STATUS_ABERTA);
+    comanda.setTotal(new BigDecimal("100.00"));
+    ComandaPagamento cartao =
+        pagamento(
+            ComandaPagamento.MEIO_CARTAO_DEBITO_EXTERNO, "30.00", ComandaPagamento.STATUS_CONFIRMADO);
+    pagamentosDaComanda(cartao);
+    ComandaDtos.CancelarComandaRequest req = new ComandaDtos.CancelarComandaRequest();
+    req.motivo = "desistiu";
+    req.estornarPagamento = false;
+
+    service.cancelar(comandaId, req);
+
+    ArgumentCaptor<Transacao> lancada = ArgumentCaptor.forClass(Transacao.class);
+    verify(transacaoRepository).save(lancada.capture());
+    assertThat(lancada.getValue().getAmount()).isEqualByComparingTo("30.00");
+    assertThat(lancada.getValue().getPaymentMethod()).isEqualTo(MetodoPagamento.DEBIT_CARD);
+    assertThat(lancada.getValue().getType()).isEqualTo(TipoTransacao.INCOME);
+    assertThat(cartao.getStatus()).isEqualTo(ComandaPagamento.STATUS_CONFIRMADO);
+  }
+
+  @Test
+  void cancelarSemEstornarNaoContaOTrocoComoReceita() {
+    Comanda comanda = comanda(Comanda.STATUS_ABERTA);
+    comanda.setTotal(new BigDecimal("70.00"));
+    pagamentosDaComanda(
+        pagamento(ComandaPagamento.MEIO_DINHEIRO, "100.00", ComandaPagamento.STATUS_CONFIRMADO));
+    ComandaDtos.CancelarComandaRequest req = new ComandaDtos.CancelarComandaRequest();
+    req.motivo = "desistiu";
+    req.estornarPagamento = false;
+
+    service.cancelar(comandaId, req);
+
+    ArgumentCaptor<Transacao> lancada = ArgumentCaptor.forClass(Transacao.class);
+    verify(transacaoRepository).save(lancada.capture());
+    assertThat(lancada.getValue().getAmount()).isEqualByComparingTo("70.00");
+  }
+
+  @Test
+  void profissionalSemAOpcaoNaoCancelaComanda() {
+    Comanda comanda = comanda(Comanda.STATUS_ABERTA);
+    when(authenticatedUser.temRole("PROFESSIONAL")).thenReturn(true);
+    ComandaDtos.CancelarComandaRequest req = new ComandaDtos.CancelarComandaRequest();
+    req.motivo = "desistiu";
+
+    assertThatThrownBy(() -> service.cancelar(comandaId, req))
+        .isInstanceOf(ApiClientErrorException.class)
+        .hasMessageContaining("não permite cancelar comanda");
+    assertThat(comanda.getStatus()).isEqualTo(Comanda.STATUS_ABERTA);
+  }
+
+  @Test
+  void quemTemAOpcaoDeOperarTodasCancelaComanda() {
+    Comanda comanda = comanda(Comanda.STATUS_ABERTA);
+    when(authenticatedUser.temRole("PROFESSIONAL")).thenReturn(true);
+    when(permissionService.possuiPermissao("pos:others")).thenReturn(true);
+    ComandaDtos.CancelarComandaRequest req = new ComandaDtos.CancelarComandaRequest();
+    req.motivo = "desistiu";
+
+    service.cancelar(comandaId, req);
+
+    assertThat(comanda.getStatus()).isEqualTo(Comanda.STATUS_CANCELADA);
+  }
+
+  private void logadoComoProfissionalDaComanda(Comanda comanda) {
+    Profissional eu = new Profissional();
+    eu.setId(UUID.randomUUID());
+    when(authenticatedUser.temRole("PROFESSIONAL")).thenReturn(true);
+    when(profissionalRepository.findByTenantIdAndUserId(tenantId, usuarioId))
+        .thenReturn(Optional.of(eu));
+    comanda.setAbertaPor(usuarioId);
+  }
+
+  private ComandaDtos.AplicarDescontoRequest desconto() {
+    ComandaDtos.AplicarDescontoRequest req = new ComandaDtos.AplicarDescontoRequest();
+    req.percentual = new BigDecimal("10");
+    req.motivo = "teste";
+    return req;
+  }
+
+  @Test
+  void profissionalSemAOpcaoNaoDaDesconto() {
+    logadoComoProfissionalDaComanda(comanda(Comanda.STATUS_ABERTA));
+
+    assertThatThrownBy(() -> service.aplicarDesconto(comandaId, desconto()))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("não permite dar desconto");
+  }
+
+  @Test
+  void profissionalSemAOpcaoNaoLancaParaOColega() {
+    logadoComoProfissionalDaComanda(comanda(Comanda.STATUS_ABERTA));
+    UUID colega = UUID.randomUUID();
+    when(profissionalRepository.findByIdAndTenantId(colega, tenantId))
+        .thenReturn(Optional.of(new Profissional()));
+    ComandaDtos.AdicionarItemRequest req = new ComandaDtos.AdicionarItemRequest();
+    req.tipo = ComandaItem.TIPO_SERVICO;
+    req.referenciaId = UUID.randomUUID().toString();
+    req.professionalId = colega.toString();
+
+    assertThatThrownBy(() -> service.adicionarItem(comandaId, req))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("só permite lançar serviços para você");
+  }
+
+  @Test
+  void quemTemAOpcaoDeOperarTodasNaoFicaRestrito() {
+    comanda(Comanda.STATUS_ABERTA);
+    when(authenticatedUser.temRole("PROFESSIONAL")).thenReturn(true);
+    when(permissionService.possuiPermissao("pos:others")).thenReturn(true);
+
+    assertThat(service.obter(comandaId).id).isEqualTo(comandaId.toString());
+    verify(profissionalRepository, never()).findByTenantIdAndUserId(any(), any());
   }
 
   // ---------------------------------------------------------------- estorno

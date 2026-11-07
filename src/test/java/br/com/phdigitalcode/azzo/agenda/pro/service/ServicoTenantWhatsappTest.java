@@ -335,6 +335,54 @@ class ServicoTenantWhatsappTest {
   }
 
   @Test
+  void coexistenciaNaoRegistraDeNovoEPedeContatosEHistorico() {
+    when(repository.findByTenantIdOrCreate(tenantId)).thenReturn(configVazia());
+    when(metaEmbeddedSignupClient.exchangeCodeForAccessToken("code-123")).thenReturn("token-embedded");
+    MetaEmbeddedSignupClient.PhoneNumberDetails phoneDetails = new MetaEmbeddedSignupClient.PhoneNumberDetails();
+    phoneDetails.id = "1234567890";
+    when(metaEmbeddedSignupClient.fetchPhoneNumberDetails("token-embedded", "1234567890")).thenReturn(phoneDetails);
+
+    TenantWhatsAppDtos.EmbeddedSignupCompleteRequest request = new TenantWhatsAppDtos.EmbeddedSignupCompleteRequest();
+    request.code = "code-123";
+    request.setupInfo = new TenantWhatsAppDtos.SetupInfo();
+    request.setupInfo.wabaId = "waba-1";
+    request.setupInfo.phoneNumberId = "1234567890";
+    request.setupInfo.coexistencia = true;
+
+    TenantWhatsAppDtos.EmbeddedSignupStatusResponse response = serviceEmbeddedHabilitado.concluirEmbeddedSignup(request);
+
+    assertThat(response.connected).isTrue();
+    assertThat(response.whatsappEnabled).isTrue();
+    verify(whatsAppClient, never()).registrarNumero(any(TenantWhatsAppConfig.class), any());
+    verify(whatsAppClient).inscreverNoWebhook(any(TenantWhatsAppConfig.class));
+    verify(whatsAppClient).sincronizarDadosDoApp(any(TenantWhatsAppConfig.class), org.mockito.ArgumentMatchers.eq("smb_app_state_sync"));
+    verify(whatsAppClient).sincronizarDadosDoApp(any(TenantWhatsAppConfig.class), org.mockito.ArgumentMatchers.eq("history"));
+  }
+
+  @Test
+  void coexistenciaComFalhaNaSincronizacaoNaoDerrubaAConexao() {
+    when(repository.findByTenantIdOrCreate(tenantId)).thenReturn(configVazia());
+    when(metaEmbeddedSignupClient.exchangeCodeForAccessToken("code-123")).thenReturn("token-embedded");
+    MetaEmbeddedSignupClient.PhoneNumberDetails phoneDetails = new MetaEmbeddedSignupClient.PhoneNumberDetails();
+    phoneDetails.id = "1234567890";
+    when(metaEmbeddedSignupClient.fetchPhoneNumberDetails("token-embedded", "1234567890")).thenReturn(phoneDetails);
+    org.mockito.Mockito.doThrow(new IllegalStateException("sync recusado"))
+        .when(whatsAppClient).sincronizarDadosDoApp(any(TenantWhatsAppConfig.class), any());
+
+    TenantWhatsAppDtos.EmbeddedSignupCompleteRequest request = new TenantWhatsAppDtos.EmbeddedSignupCompleteRequest();
+    request.code = "code-123";
+    request.setupInfo = new TenantWhatsAppDtos.SetupInfo();
+    request.setupInfo.wabaId = "waba-1";
+    request.setupInfo.phoneNumberId = "1234567890";
+    request.setupInfo.coexistencia = true;
+
+    TenantWhatsAppDtos.EmbeddedSignupStatusResponse response = serviceEmbeddedHabilitado.concluirEmbeddedSignup(request);
+
+    assertThat(response.connected).isTrue();
+    assertThat(response.whatsappEnabled).isTrue();
+  }
+
+  @Test
   void seg014CadastroEmbutidoGuardaQuemAutorizouNaMeta() {
     TenantWhatsAppConfig config = configVazia();
     when(repository.findByTenantIdOrCreate(tenantId)).thenReturn(config);

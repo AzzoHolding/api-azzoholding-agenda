@@ -7,4 +7,18 @@ public class ResumoFinanceiroResponse {
   public BigDecimal totalIncome;
   public BigDecimal totalExpenses;
   public BigDecimal balance;
+
+  /**
+   * Quantos lancamentos estao pendentes e quantos conciliados (29/10/2026). Seguem todos os filtros
+   * menos o de conciliacao: sao os numeros das abas, e o filtro da aba zeraria as outras.
+   */
+  public long pendingCount;
+  public long reconciledCount;
+  public long divergentCount;
+
+  /** Quem pede tem {@code finance:manage}? A tela usa para nao oferecer o que terminaria em 403. */
+  public boolean canManage;
+
+  /** {@code INDIVIDUAL}, {@code DAILY} ou {@code MONTHLY} (V158). */
+  public String reconciliationMode;
 }

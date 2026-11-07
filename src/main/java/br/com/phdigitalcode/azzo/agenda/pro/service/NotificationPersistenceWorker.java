@@ -48,6 +48,21 @@ public class NotificationPersistenceWorker {
       return;
     }
 
+    // O banco tem indice unico (appointment, channel, destination) SEM janela de tempo: o job que
+    // roda de novo na subida da API tentava gravar a mesma e saia ERROR no log (10 por subida,
+    // teste de telas de 25/10/2026). Ja gravada e o resultado esperado, nao erro.
+    if (event.appointmentId() != null
+        && notificationRepository.existsByAppointmentIdAndChannelAndDestination(
+            event.appointmentId(), event.channel().trim(), event.destination().trim())) {
+      LOG.info(
+          "notificationPersistence.alreadyStored {}",
+          CorrelatedLogging.context(
+              "tenantId", event.tenantId(),
+              "appointmentId", event.appointmentId(),
+              "channel", event.channel()));
+      return;
+    }
+
     Notification notification = new Notification();
     notification.setTenantId(event.tenantId());
     notification.setAppointmentId(event.appointmentId());

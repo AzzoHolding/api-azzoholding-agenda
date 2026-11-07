@@ -5,6 +5,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.MetodoPagamento;
+import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.StatusConciliacao;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.TipoTransacao;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -100,6 +101,25 @@ public class Transacao {
 
   @Column(name = "reconciled_at")
   private Instant reconciledAt;
+
+  /** Fonte da verdade da conciliacao. {@code reconciled} e true so em RECONCILED. */
+  @Enumerated(EnumType.STRING)
+  @Column(name = "reconciliation_status", nullable = false)
+  private StatusConciliacao reconciliationStatus = StatusConciliacao.PENDING;
+
+  @Column(name = "reconciled_by")
+  private UUID reconciledBy;
+
+  @Column(name = "reconciliation_note")
+  private String reconciliationNote;
+
+  /** A conciliacao de dia ou de mes que conciliou este lancamento (V159); nula na individual. */
+  @Column(name = "reconciliation_period_id")
+  private UUID reconciliationPeriodId;
+
+  /** O que aparece no extrato, quando diverge. Informativo: nunca entra em saldo. */
+  @Column(name = "statement_amount")
+  private BigDecimal statementAmount;
 
   @Column(name = "deleted_at")
   private Instant deletedAt;

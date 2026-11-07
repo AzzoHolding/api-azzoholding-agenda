@@ -308,6 +308,25 @@ class TenantOperationalSettingsServiceTest {
   }
 
   @Test
+  @DisplayName("getBusinessHoursDaTabela: a tabela que a tela grava, no formato antigo, de segunda a domingo")
+  void getBusinessHoursDaTabelaUsaATabelaNoFormatoAntigo() {
+    // Teste do "hoje" de 25/10/2026: o dono abriu o domingo na tela e o assistente seguia com o JSON antigo.
+    when(businessHoursRepository.findByTenantIdOrderByDayOfWeekAsc(tenantId)).thenReturn(List.of(
+        businessHours("FRIDAY", "09:00", "19:00", true),
+        businessHours("MONDAY", "09:00", "19:00", true),
+        businessHours("SUNDAY", "00:30", "20:00", true)));
+
+    List<SalonDtos.BusinessHour> horas = service.getBusinessHoursDaTabela(tenantId);
+
+    assertThat(horas).extracting(h -> h.day).containsExactly("Segunda-feira", "Sexta-feira", "Domingo");
+    assertThat(horas.get(2).enabled).isTrue();
+    assertThat(horas.get(2).open).isEqualTo("00:30");
+    assertThat(horas.get(2).close).isEqualTo("20:00");
+    // Nao le o JSON antigo (a configuracao operacional).
+    org.mockito.Mockito.verifyNoInteractions(repository);
+  }
+
+  @Test
   @DisplayName("isBusinessOpenAt respeita a pausa configurada na tabela relacional")
   void isBusinessOpenAtRespeitaPausa() {
     LocalDate segunda = LocalDate.of(2026, 8, 3);

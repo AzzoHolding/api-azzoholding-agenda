@@ -174,6 +174,19 @@ public class ServicoSettings {
     return tenantOperationalSettingsService.updateDiscountPolicy(tenantId, request);
   }
 
+  // Modo de conciliacao — V158
+
+  public SettingsDtos.ReconciliationModeResponse obterReconciliationMode() {
+    UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    return tenantOperationalSettingsService.getReconciliationMode(tenantId);
+  }
+
+  public SettingsDtos.ReconciliationModeResponse atualizarReconciliationMode(
+      SettingsDtos.ReconciliationModeRequest request) {
+    UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    return tenantOperationalSettingsService.updateReconciliationMode(tenantId, request);
+  }
+
   // Regua de lembretes — F03
 
   public SettingsDtos.ReminderSettingsResponse obterReminderSettings() {

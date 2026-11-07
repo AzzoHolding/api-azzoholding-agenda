@@ -200,7 +200,7 @@ class NfseConfigServiceTest {
     semItemLista.itemListaServicoPadrao = null;
     assertThatThrownBy(() -> service.salvarConfig(semItemLista))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("NFSE_CONFIG_MISSING_ITEM_LISTA_SERVIÇO");
+        .hasMessage("NFSE_CONFIG_MISSING_ITEM_LISTA_SERVICO");
   }
 
   /**
@@ -313,6 +313,67 @@ class NfseConfigServiceTest {
     entity.setEmitForCpfMode(NfseCpfPolicyMode.ASK);
     entity.setAutoIssueOnAppointmentClose(false);
     return entity;
+  }
+
+  /** NT 009: os codigos do IBS/CBS vao juntos ou nenhum, e o cClassTrib comeca pelo CST. */
+  @Test
+  void salvarConfigValidaOsCodigosDoIbsCbs() {
+    NfseDtos.Config incompleto = requestValido();
+    incompleto.ibsCbsCst = "000";
+    assertThatThrownBy(() -> service.salvarConfig(incompleto))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("NFSE_CONFIG_IBS_CBS_INCOMPLETO");
+
+    NfseDtos.Config formato = requestValido();
+    formato.ibsCbsCst = "00";
+    formato.ibsCbsClassTrib = "000001";
+    formato.ibsCbsIndOp = "100301";
+    assertThatThrownBy(() -> service.salvarConfig(formato))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("NFSE_CONFIG_IBS_CBS_FORMATO");
+
+    NfseDtos.Config divergente = requestValido();
+    divergente.ibsCbsCst = "200";
+    divergente.ibsCbsClassTrib = "000001";
+    divergente.ibsCbsIndOp = "100301";
+    assertThatThrownBy(() -> service.salvarConfig(divergente))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("NFSE_CONFIG_IBS_CBS_CLASS_TRIB_DIFERENTE_DO_CST");
+  }
+
+  @Test
+  void salvarConfigGuardaOsCamposDaNt009() {
+    when(nfseConfigRepository.findByTenantAndAmbiente(tenantId, NfseAmbiente.HOMOLOGACAO))
+        .thenReturn(Optional.empty());
+    lenient()
+        .when(nfseConfigRepository.save(any(NfseConfigEntity.class)))
+        .thenAnswer(invocation -> invocation.getArgument(0));
+    NfseDtos.Config request = requestValido();
+    request.provedor = "ABRASF";
+    request.ibsCbsCst = "000";
+    request.ibsCbsClassTrib = "000001";
+    request.ibsCbsIndOp = "100301";
+    request.percentualTributosSn = new BigDecimal("6.00");
+
+    NfseDtos.Config resultado = service.salvarConfig(request);
+
+    assertThat(resultado.ibsCbsClassTrib).isEqualTo("000001");
+    assertThat(resultado.ibsCbsIndOp).isEqualTo("100301");
+    assertThat(resultado.percentualTributosSn).isEqualByComparingTo("6.00");
+  }
+
+  /** O campo era texto livre: o salao teste ficou com "MOCK" e nenhuma nota sairia. */
+  @Test
+  void salvarConfigRecusaProvedorDesconhecidoENormalizaOConhecido() {
+    NfseDtos.Config mock = requestValido();
+    mock.provedor = "MOCK";
+    assertThatThrownBy(() -> service.salvarConfig(mock))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("NFSE_CONFIG_PROVEDOR_DESCONHECIDO");
+
+    assertThat(NfseConfigService.provedorConhecidoOuNulo(" abrasf ")).isEqualTo("ABRASF");
+    assertThat(NfseConfigService.provedorConhecidoOuNulo("sefin_nacional")).isEqualTo("SEFIN_NACIONAL");
+    assertThat(NfseConfigService.provedorConhecidoOuNulo("")).isNull();
   }
 
   private NfseDtos.Config requestValido() {

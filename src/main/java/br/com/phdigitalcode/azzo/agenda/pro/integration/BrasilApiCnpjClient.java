@@ -45,5 +45,9 @@ public class BrasilApiCnpjClient {
     public String municipio;
     public String uf;
     public String cep;
+    /** Usados pelo assistente da NFS-e para preencher o municipio e a situacao no Simples. */
+    public Integer codigo_municipio_ibge;
+    public Boolean opcao_pelo_simples;
+    public Boolean opcao_pelo_mei;
   }
 }

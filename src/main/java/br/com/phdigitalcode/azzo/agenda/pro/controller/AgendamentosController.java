@@ -152,8 +152,9 @@ public class AgendamentosController {
         .body(stream);
   }
 
+  // Quem atende, qualquer papel: o dono que tambem e profissional via 403 e a tela dizia "nao ligado"
+  // (teste de telas, 25/10/2026). Sem profissional ligado ao usuario continua 403, logo abaixo.
   @GetMapping("/my-history")
-  @PreAuthorize("hasRole('PROFESSIONAL')")
   @RequiresPermission("appointment:read")
   public AppointmentManagementReportResponse meuHistoricoProducao(
       @RequestParam(name = "from", required = false) String from,
@@ -261,7 +262,8 @@ public class AgendamentosController {
       @RequestParam(name = "date", required = false) String date,
       @RequestParam(name = "serviceIds", required = false) String serviceIds,
       @RequestParam(name = "serviceDurationMinutes", defaultValue = "0") int serviceDurationMinutes,
-      @RequestParam(name = "bufferMinutes", required = false) Integer bufferMinutes) {
+      @RequestParam(name = "bufferMinutes", required = false) Integer bufferMinutes,
+      @RequestParam(name = "excludeAppointmentId", required = false) String excludeAppointmentId) {
     try {
       UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
       UUID professionalUuid = UUID.fromString(professionalId);
@@ -269,7 +271,8 @@ public class AgendamentosController {
       int effectiveDuration = resolveDuration(tenantId, serviceIds, serviceDurationMinutes);
       int safeBuffer = bufferMinutes == null ? 0 : bufferMinutes;
       return appointmentService.findAvailableSlots(
-          tenantId, professionalUuid, parsedDate, effectiveDuration, safeBuffer);
+          tenantId, professionalUuid, parsedDate, effectiveDuration, safeBuffer,
+          uuidOuNulo(excludeAppointmentId));
     } catch (IllegalArgumentException | DateTimeParseException | NullPointerException e) {
       throw new ApiClientErrorException(e.getMessage(), HttpStatus.BAD_REQUEST.value());
     }
@@ -282,7 +285,8 @@ public class AgendamentosController {
       @RequestParam(name = "date", required = false) String date,
       @RequestParam(name = "serviceIds", required = false) String serviceIds,
       @RequestParam(name = "serviceDurationMinutes", defaultValue = "0") int serviceDurationMinutes,
-      @RequestParam(name = "bufferMinutes", required = false) Integer bufferMinutes) {
+      @RequestParam(name = "bufferMinutes", required = false) Integer bufferMinutes,
+      @RequestParam(name = "excludeAppointmentId", required = false) String excludeAppointmentId) {
     try {
       UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
       UUID professionalUuid = UUID.fromString(professionalId);
@@ -292,7 +296,8 @@ public class AgendamentosController {
       boolean includeConflictSlots =
           appointmentSettingsService.allowsManualConflictByTenantId(tenantId);
       return appointmentService.findManualSlots(
-          tenantId, professionalUuid, parsedDate, effectiveDuration, safeBuffer, includeConflictSlots);
+          tenantId, professionalUuid, parsedDate, effectiveDuration, safeBuffer, includeConflictSlots,
+          uuidOuNulo(excludeAppointmentId));
     } catch (IllegalArgumentException | DateTimeParseException | NullPointerException e) {
       throw new ApiClientErrorException(e.getMessage(), HttpStatus.BAD_REQUEST.value());
     }
@@ -387,6 +392,10 @@ public class AgendamentosController {
   }
 
   // ─── HELPERS ──────────────────────────────────────────────────────────────
+
+  private static UUID uuidOuNulo(String valor) {
+    return valor == null || valor.isBlank() ? null : UUID.fromString(valor.trim());
+  }
 
   private int resolveDuration(UUID tenantId, String serviceIds, int fallbackDuration) {
     if (serviceIds == null || serviceIds.isBlank()) {

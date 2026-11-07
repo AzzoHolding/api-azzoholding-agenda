@@ -81,9 +81,9 @@ class NfseProviderCapabilitiesServiceTest {
 
   @Test
   void salvarProviderCapabilitiesCriaNovaEntidadeQuandoNaoExisteENormalizaCampos() {
-    // findByMunicipioProvedor recebe o request cru (sem trim) — o service so normaliza os
-    // campos gravados na entidade depois de resolver a linha existente.
-    when(nfseProviderCapabilitiesRepository.findByMunicipioProvedor("  3550308  ", "  ABRASF  "))
+    // O provedor e normalizado ANTES da busca (06/11/2026: lista de provedores conhecidos), para
+    // "  abrasf  " e "ABRASF" acharem a mesma linha. O municipio segue cru na busca.
+    when(nfseProviderCapabilitiesRepository.findByMunicipioProvedor("  3550308  ", "ABRASF"))
         .thenReturn(Optional.empty());
     when(nfseProviderCapabilitiesRepository.save(any(NfseProviderCapabilitiesEntity.class)))
         .thenAnswer(invocation -> invocation.getArgument(0));
@@ -221,5 +221,19 @@ class NfseProviderCapabilitiesServiceTest {
 
   private void verifySavedOnce(ArgumentCaptor<NfseProviderCapabilitiesEntity> captor) {
     org.mockito.Mockito.verify(nfseProviderCapabilitiesRepository).save(captor.capture());
+  }
+
+  /** Emissor Nacional sem regra cadastrada no municipio: cancela, sem prazo nosso (a Receita confere). */
+  @Test
+  void emissorNacionalSemCadastroCancelaPorPadrao() {
+    var padrao = NfseProviderCapabilitiesService.padraoDoEmissorNacional("3304557", "sefin_nacional");
+
+    org.assertj.core.api.Assertions.assertThat(padrao).isNotNull();
+    org.assertj.core.api.Assertions.assertThat(padrao.cancelSupported).isTrue();
+    org.assertj.core.api.Assertions.assertThat(padrao.cancelWindowHours).isNull();
+    org.assertj.core.api.Assertions.assertThat(padrao.provedor).isEqualTo("SEFIN_NACIONAL");
+    // Outros provedores seguem sem padrao: a regra e de cada prefeitura.
+    org.assertj.core.api.Assertions.assertThat(NfseProviderCapabilitiesService.padraoDoEmissorNacional("3304557", "ABRASF")).isNull();
+    org.assertj.core.api.Assertions.assertThat(NfseProviderCapabilitiesService.padraoDoEmissorNacional(null, "SEFIN_NACIONAL")).isNull();
   }
 }

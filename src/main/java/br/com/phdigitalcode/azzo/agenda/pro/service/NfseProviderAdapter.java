@@ -24,13 +24,44 @@ public interface NfseProviderAdapter {
     return Optional.empty();
   }
 
+  /**
+   * O provedor sabe dizer se um envio sem resposta gerou nota? Se sim, a nota sem resposta fica
+   * {@code PENDING} e o proximo "Emitir" consulta antes de reenviar ({@link #consultarEmissao}).
+   * Se nao, nao ha como saber pelo sistema: a nota volta para {@code REJECTED} com o aviso de
+   * conferir no portal da prefeitura antes de emitir de novo.
+   */
+  default boolean consultaEmissaoAposFalha() {
+    return false;
+  }
+
+  /**
+   * Procura no provedor a nota gerada pelo envio ja assinado da {@code invoice}. Vazio quando o
+   * provedor nao recebeu o envio (e entao reenviar e seguro).
+   */
+  default Optional<AuthorizationResult> consultarEmissao(NfseInvoiceEntity invoice, String certificatePassword) {
+    return Optional.empty();
+  }
+
   record AuthorizationResult(
       String providerStatusCode,
       String providerStatusMessage,
       String numeroNfse,
       String protocolo,
       String codigoVerificacao,
-      String chaveAcessoNfse) {}
+      String chaveAcessoNfse,
+      String xmlNfse) {
+
+    /** Provedores que nao devolvem o XML da NFS-e (ABRASF, teste). */
+    AuthorizationResult(
+        String providerStatusCode,
+        String providerStatusMessage,
+        String numeroNfse,
+        String protocolo,
+        String codigoVerificacao,
+        String chaveAcessoNfse) {
+      this(providerStatusCode, providerStatusMessage, numeroNfse, protocolo, codigoVerificacao, chaveAcessoNfse, null);
+    }
+  }
 
   record CancellationResult(String providerStatusCode, String providerStatusMessage) {}
 

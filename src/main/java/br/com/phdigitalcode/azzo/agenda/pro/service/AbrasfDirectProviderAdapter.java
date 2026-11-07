@@ -282,7 +282,9 @@ public class AbrasfDirectProviderAdapter implements NfseProviderAdapter {
   }
 
   RestClient buildRestClient(int connectTimeoutMs, int readTimeoutMs) {
+    // HTTP/1.1 fixo, como no Emissor Nacional: servidores SOAP de prefeitura costumam recusar HTTP/2.
     HttpClient httpClient = HttpClient.newBuilder()
+        .version(HttpClient.Version.HTTP_1_1)
         .connectTimeout(Duration.ofMillis(Math.max(connectTimeoutMs, 1000)))
         .build();
     JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
@@ -372,7 +374,7 @@ public class AbrasfDirectProviderAdapter implements NfseProviderAdapter {
     String cnpj = digitsOnly(tax != null ? tax.getIssuerCnpj() : null);
     String im = digitsOnly(tax != null ? tax.getIssuerIm() : null);
     if (cnpj.length() != 14) {
-      throw new IllegalArgumentException("NFSE_XML_PRESTADOR_CNPJ_INVÁLIDO");
+      throw new IllegalArgumentException("NFSE_XML_PRESTADOR_CNPJ_INVALIDO");
     }
     if (im.isBlank()) {
       throw new IllegalArgumentException("NFSE_XML_PRESTADOR_IM_AUSENTE");

@@ -551,6 +551,34 @@ public class WhatsAppClient {
   }
 
   /**
+   * Pede a Meta para enviar os dados do app WhatsApp Business de um numero em coexistencia:
+   * {@code smb_app_state_sync} (contatos) ou {@code history} (conversas dos ultimos 6 meses). O
+   * conteudo chega depois, pelos webhooks {@code smb_app_state_sync} e {@code history}.
+   *
+   * <p>A Meta aceita cada sincronizacao UMA vez, e so nas 24 horas seguintes a conexao; depois
+   * disso o salao teria de desconectar e refazer o fluxo.
+   */
+  public void sincronizarDadosDoApp(TenantWhatsAppConfig config, String tipo) {
+    String token = getTenantTokenOrFail(config);
+    String phoneNumberId = getPhoneNumberIdOrFail(config);
+    try {
+      restClient.post()
+          .uri(graphApiBase() + phoneNumberId + "/smb_app_data")
+          .header("Authorization", "Bearer " + token)
+          .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+          .body(Map.of("messaging_product", "whatsapp", "sync_type", tipo))
+          .retrieve()
+          .body(String.class);
+      LOG.info(
+          "whatsappClient.smbAppData.requested {}",
+          CorrelatedLogging.context("tenantId", config.getTenantId(), "phoneNumberId", phoneNumberId, "tipo", tipo));
+    } catch (RestClientResponseException e) {
+      throw new IllegalStateException(
+          extractErrorMessage(e.getResponseBodyAsString(), "Falha ao pedir a sincronizacao do app WhatsApp Business"), e);
+    }
+  }
+
+  /**
    * "Ja estava registrado" nao e falha.
    *
    * <p>A Meta sinaliza isso de mais de uma forma dependendo do estado do numero, e nenhuma delas

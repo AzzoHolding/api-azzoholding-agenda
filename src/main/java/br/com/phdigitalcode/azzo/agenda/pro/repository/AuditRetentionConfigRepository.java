@@ -19,11 +19,18 @@ public class AuditRetentionConfigRepository {
   @PersistenceContext
   private EntityManager entityManager;
 
+  /**
+   * {@code getResultList}, e nao {@code getResultStream}: o job das 03:30 chama isto sem transacao,
+   * e ai o {@code EntityManager} compartilhado fecha logo apos a chamada e o stream lia um
+   * ResultSet ja fechado ("This ResultSet is closed", producao, 26/10/2026). Linha unica: a lista
+   * nao custa nada.
+   */
   public Optional<Integer> findRetentionPeriodDays() {
     Object value =
         entityManager
             .createNativeQuery("SELECT retention_period_days FROM audit_retention_config WHERE id = 1")
-            .getResultStream()
+            .getResultList()
+            .stream()
             .findFirst()
             .orElse(null);
     if (value == null) return Optional.empty();

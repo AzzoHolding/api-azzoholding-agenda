@@ -19,6 +19,9 @@ import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 
 import br.com.phdigitalcode.azzo.agenda.pro.repository.AuditEventRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.AuditRetentionConfigRepository;
@@ -30,13 +33,17 @@ class AuditRetentionPurgeServiceTest {
   private RetentionService retentionService;
   private AuditRetentionConfigRepository auditRetentionConfigRepository;
   private AuditRetentionPurgeService service;
+  private PlatformTransactionManager transactionManager;
 
   @BeforeEach
   void setUp() throws Exception {
     auditEventRepository = mock(AuditEventRepository.class);
     retentionService = mock(RetentionService.class);
     auditRetentionConfigRepository = mock(AuditRetentionConfigRepository.class);
-    service = new AuditRetentionPurgeService(auditEventRepository, retentionService, auditRetentionConfigRepository);
+    transactionManager = mock(PlatformTransactionManager.class);
+    service =
+        new AuditRetentionPurgeService(
+            auditEventRepository, retentionService, auditRetentionConfigRepository, transactionManager);
     setPrivateField("fallbackRetentionDays", 365);
     setPrivateField("policyVersion", "v1");
     setPrivateField("maxTenantsPerRun", 500);
@@ -77,6 +84,26 @@ class AuditRetentionPurgeServiceTest {
         eq(tenant1), eq("v1"), eq(90), any(), any(), eq(10L), eq("SCHEDULER"), any(), any());
     // tenant2 nao purgou nada (purged <= 0): nao registra evidencia para ele.
     verify(retentionService, times(1)).registerPurgeEvent(any(), any(), anyInt(), any(), any(), anyLong(), any(), any(), any());
+  }
+
+  /**
+   * O gatilho deny_audit_events_mutation so deixa o DELETE passar com a flag ligada NA MESMA
+   * transacao: cada tenant precisa da sua, aberta de verdade (26/10/2026).
+   */
+  @Test
+  void cadaTenantRodaNumaTransacaoPropria() {
+    UUID tenant1 = UUID.randomUUID();
+    UUID tenant2 = UUID.randomUUID();
+    when(auditRetentionConfigRepository.findRetentionPeriodDays()).thenReturn(Optional.of(90));
+    when(auditEventRepository.findTenantIdsWithEventsBefore(any(), eq(500))).thenReturn(List.of(tenant1, tenant2));
+    when(auditEventRepository.findOldestCreatedAtBefore(any(), any())).thenReturn(Optional.empty());
+
+    service.purgeExpiredAuditEvents();
+
+    ArgumentCaptor<TransactionDefinition> definicoes = ArgumentCaptor.forClass(TransactionDefinition.class);
+    verify(transactionManager, times(2)).getTransaction(definicoes.capture());
+    assertThat(definicoes.getAllValues())
+        .allMatch(d -> d.getPropagationBehavior() == TransactionDefinition.PROPAGATION_REQUIRES_NEW);
   }
 
   @Test

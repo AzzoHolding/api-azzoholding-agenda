@@ -42,6 +42,18 @@ class GlobalExceptionHandlerTest {
   }
 
   @Test
+  void corpoAusenteOuMalformadoResponde400() {
+    ResponseEntity<ErrorResponse> response =
+        handler.handleHttpMessageNotReadable(
+            new org.springframework.http.converter.HttpMessageNotReadableException(
+                "Required request body is missing",
+                new org.springframework.mock.http.MockHttpInputMessage(new byte[0])));
+
+    assertThat(response.getStatusCode().value()).isEqualTo(400);
+    assertThat(response.getBody().code).isEqualTo("INVALID_REQUEST_BODY");
+  }
+
+  @Test
   void asaasExceptionUsaStatusCodeDaExcecaoEMensagemGenerica() {
     AsaasException ex = new AsaasException("Falha ao criar cliente Asaas: cartao invalido", 422);
     ResponseEntity<ErrorResponse> response = handler.handleAsaas(ex);
@@ -120,6 +132,17 @@ class GlobalExceptionHandlerTest {
     ResponseEntity<ErrorResponse> response = handler.handleGeneric(ex);
 
     assertThat(response.getBody().message).isEqualTo("Erro na requisicao");
+  }
+
+  @Test
+  void palavraSenhaSemValorNaoEscondeAMensagem() {
+    ApiClientErrorException semValor =
+        new ApiClientErrorException("Senha inválida. Requisitos: mínimo de 8 caracteres.", 400);
+    assertThat(handler.handleApiClientError(semValor).getBody().message)
+        .isEqualTo("Senha inválida. Requisitos: mínimo de 8 caracteres.");
+
+    ApiClientErrorException comValor = new ApiClientErrorException("falhou com token=abc123", 400);
+    assertThat(handler.handleApiClientError(comValor).getBody().message).isEqualTo("Erro na requisicao");
   }
 
   @Test

@@ -9,6 +9,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -73,6 +74,19 @@ public class GlobalExceptionHandler {
       Map.entry("NFSE_CERTIFICATE_PASSWORD_REQUIRED", "Informe a senha do certificado para continuar."),
       Map.entry("NFSE_CERTIFICATE_ACTIVE_MISSING", "Nenhum certificado fiscal ativo esta configurado."),
       Map.entry("NFSE_CERTIFICATE_PASSWORD_INVALID", "Nao foi possivel validar o certificado com os dados informados."),
+      Map.entry("NFSE_PROVIDER_SEFIN_NACIONAL_SERIE_INVALIDA", "A serie da NFS-e nacional deve ter so numeros (de 1 a 5 digitos). Ajuste a serie na configuracao da NFS-e."),
+      Map.entry("NFSE_PROVIDER_SEFIN_NACIONAL_REG_AP_TRIB_SN_REQUIRED", "Informe o regime de apuracao do Simples Nacional na configuracao da NFS-e."),
+      Map.entry("NFSE_PROVIDER_SEFIN_NACIONAL_PERCENTUAL_TRIBUTOS_SN_REQUIRED", "Informe o percentual aproximado de tributos do Simples Nacional na configuracao da NFS-e (Lei da Transparencia)."),
+      Map.entry("NFSE_PROVIDER_SEFIN_NACIONAL_PERCENTUAL_TRIBUTOS_REQUIRED", "Informe os percentuais aproximados de tributos federais, estaduais e municipais na configuracao da NFS-e (Lei da Transparencia)."),
+      Map.entry("NFSE_PROVIDER_SEFIN_NACIONAL_DEDUCAO_NAO_SUPORTADA", "Deducao na base de calculo ainda nao e suportada na NFS-e nacional. Emita sem deducao."),
+      Map.entry("NFSE_PROVIDER_SEFIN_NACIONAL_NBS_REQUIRED_IBS_CBS", "Com IBS/CBS configurado, o codigo NBS do servico e obrigatorio."),
+      Map.entry("NFSE_PROVIDER_SEFIN_NACIONAL_CANCEL_REASON_TOO_SHORT", "O motivo do cancelamento precisa ter pelo menos 15 caracteres."),
+      Map.entry("NFSE_CONFIG_IBS_CBS_INCOMPLETO", "Para IBS/CBS, informe juntos o CST, a classificacao tributaria (cClassTrib) e o indicador da operacao (cIndOp), ou deixe os tres vazios."),
+      Map.entry("NFSE_CONFIG_IBS_CBS_FORMATO", "IBS/CBS: o CST tem 3 digitos, a classificacao tributaria tem 6 e o indicador da operacao tem 6."),
+      Map.entry("NFSE_CONFIG_IBS_CBS_CLASS_TRIB_DIFERENTE_DO_CST", "IBS/CBS: a classificacao tributaria (cClassTrib) deve comecar pelos 3 digitos do CST."),
+      Map.entry("NFSE_CERTIFICADO_PIMENTA_AUSENTE", "O servidor ainda nao esta preparado para guardar certificados digitais. Fale com o suporte."),
+      Map.entry("NFSE_CONFIG_PROVEDOR_DESCONHECIDO", "Provedor de NFS-e desconhecido. Escolha Emissor Nacional (SEFIN_NACIONAL) ou Prefeitura direta (ABRASF)."),
+      Map.entry("NFSE_CERTIFICATE_EXPIRED", "O certificado digital esta vencido. Envie um certificado valido em Configuracoes > Certificados."),
       Map.entry("NFSE_PROVIDER_ABRASF_WS_URL_MISSING", "URL do webservice ABRASF nao configurada para o ambiente da nota."),
       Map.entry("NFSE_PROVIDER_SEFIN_NACIONAL_AUTHORIZE_URL_MISSING", "URL de autorizacao da Receita Nacional nao configurada para o ambiente da nota."),
       Map.entry("NFSE_PROVIDER_SEFIN_NACIONAL_CANCEL_URL_MISSING", "URL de cancelamento da Receita Nacional nao configurada para o ambiente da nota."),
@@ -118,6 +132,14 @@ public class GlobalExceptionHandler {
         .map(fieldError -> fieldError.getField() + ": " + safeMessage(fieldError.getDefaultMessage(), "invalido"))
         .toList();
     ErrorResponse payload = new ErrorResponse("VALIDATION_ERROR", "Falha de validacao", details, resolvePath());
+    return buildErrorResponse(HttpStatus.BAD_REQUEST.value(), payload, ex);
+  }
+
+  /** Corpo ausente ou JSON malformado e erro de quem pediu: caia no generico e virava 500. */
+  @ExceptionHandler(HttpMessageNotReadableException.class)
+  public ResponseEntity<ErrorResponse> handleHttpMessageNotReadable(HttpMessageNotReadableException ex) {
+    ErrorResponse payload =
+        new ErrorResponse("INVALID_REQUEST_BODY", "Corpo da requisicao invalido", List.of(), resolvePath());
     return buildErrorResponse(HttpStatus.BAD_REQUEST.value(), payload, ex);
   }
 
@@ -284,15 +306,22 @@ public class GlobalExceptionHandler {
         || lower.contains("<?xml")
         || lower.contains("certificate")
         || lower.contains("certificado")
-        || lower.contains("senha")
-        || lower.contains("password")
         || lower.contains("authorization")
         || lower.contains("bearer ")
-        || lower.contains("token")) {
+        || VALOR_SENSIVEL.matcher(lower).find()) {
       return "Erro na requisicao";
     }
     return input;
   }
+
+  /**
+   * "senha"/"password"/"token" so escondem a mensagem quando trazem um VALOR ("token=abc",
+   * "senha: 123"). A palavra sozinha escondia ate a politica de senha ("Senha invalida. Requisitos:
+   * ...") e "a atual nao confere": a pessoa via "Erro na requisicao" sem saber o que errou (teste de
+   * telas, 25/10/2026).
+   */
+  private static final java.util.regex.Pattern VALOR_SENSIVEL =
+      java.util.regex.Pattern.compile("(senha|password|token|secret)\\s*[:=]");
 
   private boolean looksLikeFunctionalCode(String value) {
     if (value == null || value.isBlank()) return false;
@@ -303,6 +332,14 @@ public class GlobalExceptionHandler {
     if (value == null || value.isBlank()) return false;
     String normalized = value.trim().toUpperCase(Locale.ROOT);
     return normalized.matches("[A-Z0-9_]{6,}") && FUNCTIONAL_CODE_MESSAGES.containsKey(normalized);
+  }
+
+  /**
+   * A mensagem em portugues de um codigo funcional (ex.: NFSE_CONFIG_IBS_CBS_INCOMPLETO), ou nulo se
+   * o codigo nao for conhecido. Usada fora do fluxo de excecao (assistente de configuracao da NFS-e).
+   */
+  public static String mensagemDoCodigo(String codigo) {
+    return codigo == null ? null : FUNCTIONAL_CODE_MESSAGES.get(codigo.trim());
   }
 
   private String resolveFunctionalMessage(String functionalCode) {

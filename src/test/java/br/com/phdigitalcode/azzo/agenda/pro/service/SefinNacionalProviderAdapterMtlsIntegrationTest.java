@@ -153,17 +153,14 @@ class SefinNacionalProviderAdapterMtlsIntegrationTest {
             capturedPeerCertificate = x509;
           }
         }
-        String responseXml = """
-            <retorno xmlns="http://www.sped.fazenda.gov.br/nfse">
-              <cStat>100</cStat>
-              <xMotivo>Autorizado</xMotivo>
-              <nNFSe>987654</nNFSe>
-              <nProt>PROT-MTLS-1</nProt>
-            </retorno>
-            """;
-        byte[] responseBytes = responseXml.getBytes(StandardCharsets.UTF_8);
-        exchange.getResponseHeaders().add("Content-Type", "application/xml");
-        exchange.sendResponseHeaders(200, responseBytes.length);
+        // Formato da API do Emissor Nacional: JSON com a NFS-e em GZip + Base64.
+        String nfse = "<NFSe xmlns=\"http://www.sped.fazenda.gov.br/nfse\"><infNFSe Id=\"NFS"
+            + "1".repeat(50) + "\"><nNFSe>987654</nNFSe></infNFSe></NFSe>";
+        String responseJson = "{\"idDps\":\"PROT-MTLS-1\",\"chaveAcesso\":\"" + "1".repeat(50)
+            + "\",\"nfseXmlGZipB64\":\"" + SefinNacionalProviderAdapter.compactar(nfse) + "\"}";
+        byte[] responseBytes = responseJson.getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().add("Content-Type", "application/json");
+        exchange.sendResponseHeaders(201, responseBytes.length);
         try (OutputStream os = exchange.getResponseBody()) {
           os.write(responseBytes);
         }
@@ -228,7 +225,7 @@ class SefinNacionalProviderAdapterMtlsIntegrationTest {
         .build();
     HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
 
-    assertThat(response.statusCode()).isEqualTo(200);
+    assertThat(response.statusCode()).isEqualTo(201);
     assertThat(capturedPeerCertificate).isNotNull();
     assertThat(capturedPeerCertificate.getEncoded()).isEqualTo(clientKeyMaterial.certificate().getEncoded());
   }
@@ -259,8 +256,11 @@ class SefinNacionalProviderAdapterMtlsIntegrationTest {
     assertThat(result.providerStatusCode()).isEqualTo("100");
     assertThat(result.numeroNfse()).isEqualTo("987654");
     assertThat(result.protocolo()).isEqualTo("PROT-MTLS-1");
+    assertThat(result.chaveAcessoNfse()).isEqualTo("1".repeat(50));
     assertThat(capturedRequestMethod).isEqualTo("POST");
-    assertThat(capturedRequestBody).isEqualTo("<InfDeclaracaoPrestacaoServico/>");
+    var corpo = new com.fasterxml.jackson.databind.ObjectMapper().readTree(capturedRequestBody);
+    assertThat(SefinNacionalProviderAdapter.descompactar(corpo.get("dpsXmlGZipB64").asText()))
+        .isEqualTo("<?xml version=\"1.0\" encoding=\"UTF-8\"?><InfDeclaracaoPrestacaoServico/>");
     assertThat(capturedPeerCertificate.getEncoded()).isEqualTo(clientKeyMaterial.certificate().getEncoded());
   }
 

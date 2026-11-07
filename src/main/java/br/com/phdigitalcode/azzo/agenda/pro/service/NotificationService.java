@@ -136,6 +136,12 @@ public class NotificationService {
     UUID professionalScopeId = null;
     if (isProfessionalRole()) {
       professionalScopeId = resolverProfissionalDoUsuarioLogado(tenantId);
+      // Sem cadastro de profissional nao ha escopo: sem isto, ele veria tudo do salao.
+      if (professionalScopeId == null) {
+        NotificationListResponse vazia = new NotificationListResponse();
+        vazia.items = List.of();
+        return vazia;
+      }
     }
 
     Specification<Notification> spec =
@@ -166,6 +172,12 @@ public class NotificationService {
       boolean unreadOnly, int limit, Instant cursorCreatedAt, UUID cursorId) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     UUID professionalId = resolverProfissionalDoUsuarioLogado(tenantId);
+    // Sem cadastro de profissional nao ha o que mostrar: sem isto, a consulta iria sem filtro.
+    if (professionalId == null) {
+      NotificationListResponse vazia = new NotificationListResponse();
+      vazia.items = List.of();
+      return vazia;
+    }
 
     Specification<Notification> spec =
         NotificationSpecifications.meusAgendamentos(

@@ -165,7 +165,8 @@ public class AssistantInternalController {
   @GetMapping("/tenant/business-hours")
   public List<SalonDtos.BusinessHour> obterHorariosFuncionamento(@RequestParam("tenantId") String tenantId) {
     UUID tid = UUID.fromString(tenantId);
-    return tenantOperationalSettingsService.getBusinessHours(tid);
+    // A tabela que a tela de Horarios grava, e nao o JSON antigo (25/10/2026).
+    return tenantOperationalSettingsService.getBusinessHoursDaTabela(tid);
   }
 
   // ─── Servicos ─────────────────────────────────────────────────────────────

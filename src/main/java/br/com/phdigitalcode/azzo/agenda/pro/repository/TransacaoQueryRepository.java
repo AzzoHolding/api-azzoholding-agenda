@@ -5,6 +5,7 @@ import java.time.Instant;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 
@@ -12,6 +13,7 @@ import org.springframework.stereotype.Repository;
 
 import br.com.phdigitalcode.azzo.agenda.pro.entity.Transacao;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.MetodoPagamento;
+import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.StatusConciliacao;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.TipoTransacao;
 import br.com.phdigitalcode.azzo.agenda.pro.util.NumericUtil;
 import jakarta.persistence.EntityManager;
@@ -32,6 +34,9 @@ import jakarta.persistence.TypedQuery;
 public class TransacaoQueryRepository {
 
   public record SummaryTotals(BigDecimal totalIncome, BigDecimal totalExpenses) {}
+
+  /** Quantos lancamentos ha em cada situacao da conciliacao, sob o mesmo filtro. */
+  public record ReconciliationCounts(long pending, long reconciled, long divergent) {}
 
   @PersistenceContext
   private EntityManager entityManager;
@@ -80,6 +85,66 @@ public class TransacaoQueryRepository {
 
     Object[] row = query.getSingleResult();
     return new SummaryTotals(toDecimal(row[0]), toDecimal(row[1]));
+  }
+
+  /**
+   * Contagem por situacao da conciliacao (29/10/2026). Ignora o filtro {@code reconciled} de
+   * proposito: e o numero de cada aba da tela, e aplicar o filtro da aba zeraria as outras.
+   */
+  public ReconciliationCounts countByReconciliationStatus(TransacaoFilter filter) {
+    FilterQueryParts parts = buildFilterQueryParts(filter.semConciliacao());
+    TypedQuery<Object[]> query =
+        entityManager.createQuery(
+            "select t.reconciliationStatus, count(t) from Transacao t where "
+                + parts.whereClause()
+                + " group by t.reconciliationStatus",
+            Object[].class);
+    parts.params().forEach(query::setParameter);
+    Map<StatusConciliacao, Long> totais = new HashMap<>();
+    for (Object[] row : query.getResultList()) {
+      totais.put(
+          (StatusConciliacao) row[0], row[1] instanceof Number number ? number.longValue() : 0L);
+    }
+    return new ReconciliationCounts(
+        totais.getOrDefault(StatusConciliacao.PENDING, 0L),
+        totais.getOrDefault(StatusConciliacao.RECONCILED, 0L),
+        totais.getOrDefault(StatusConciliacao.DIVERGENT, 0L));
+  }
+
+  /**
+   * Lancamentos que podem repetir {@code base}: mesmo tipo, valor e forma, entre {@code from} e
+   * {@code to}. Com {@code soManuais}, so os digitados a mao: entre duas vendas do PDV, valor igual
+   * no mesmo dia e rotina, e nao duplicidade.
+   */
+  public List<Transacao> listPossibleDuplicates(
+      Transacao base, Instant from, Instant to, boolean soManuais, int limit) {
+    String jpql =
+        """
+        select t from Transacao t
+        where t.tenantId = :tenantId
+          and t.deletedAt is null
+          and t.id <> :id
+          and t.type = :type
+          and t.amount = :amount
+          and t.paymentMethod = :paymentMethod
+          and t.date >= :from
+          and t.date <= :to
+        """
+            + (soManuais
+                ? " and t.comandaId is null and t.appointmentId is null and t.recurringId is null"
+                : "")
+            + " order by t.date desc, t.id desc";
+    return entityManager
+        .createQuery(jpql, Transacao.class)
+        .setParameter("tenantId", base.getTenantId())
+        .setParameter("id", base.getId())
+        .setParameter("type", base.getType())
+        .setParameter("amount", base.getAmount())
+        .setParameter("paymentMethod", base.getPaymentMethod())
+        .setParameter("from", from)
+        .setParameter("to", to)
+        .setMaxResults(limit)
+        .getResultList();
   }
 
   /**
@@ -169,8 +234,23 @@ public class TransacaoQueryRepository {
       sb.append(" and t.reconciled = :reconciled");
       params.put("reconciled", filter.reconciled());
     }
+    if (filter.reconciliationStatus() != null) {
+      sb.append(" and t.reconciliationStatus = :reconciliationStatus");
+      params.put("reconciliationStatus", filter.reconciliationStatus());
+    }
+    String busca = filter.q() != null ? filter.q().trim() : "";
+    if (!busca.isEmpty()) {
+      // % e _ digitados sao texto, e nao curinga: "50%" procura "50%".
+      sb.append(" and lower(t.description) like :q escape '\\'");
+      params.put("q", "%" + escaparLike(busca.toLowerCase(Locale.ROOT)) + "%");
+    }
 
     return new FilterQueryParts(sb.toString(), params);
+  }
+
+  /** Escapa os curingas do {@code like} com a barra invertida declarada no {@code escape}. */
+  static String escaparLike(String texto) {
+    return texto.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
   }
 
   /** Conjunto de filtros do endpoint {@code GET /api/v1/finance/transactions}. */
@@ -182,7 +262,30 @@ public class TransacaoQueryRepository {
       UUID categoryId,
       MetodoPagamento paymentMethod,
       UUID professionalId,
-      Boolean reconciled) {}
+      Boolean reconciled,
+      /** Trecho da descricao, sem diferenciar maiusculas (29/10/2026). */
+      String q,
+      StatusConciliacao reconciliationStatus) {
+
+    /** Sem busca por descricao — o que relatorios e o caixa usam. */
+    public TransacaoFilter(
+        UUID tenantId,
+        Instant from,
+        Instant to,
+        TipoTransacao type,
+        UUID categoryId,
+        MetodoPagamento paymentMethod,
+        UUID professionalId,
+        Boolean reconciled) {
+      this(
+          tenantId, from, to, type, categoryId, paymentMethod, professionalId, reconciled, null, null);
+    }
+
+    TransacaoFilter semConciliacao() {
+      return new TransacaoFilter(
+          tenantId, from, to, type, categoryId, paymentMethod, professionalId, null, q, null);
+    }
+  }
 
   private record FilterQueryParts(String whereClause, Map<String, Object> params) {}
 }

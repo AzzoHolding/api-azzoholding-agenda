@@ -12,6 +12,7 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import br.com.phdigitalcode.azzo.agenda.pro.entity.Transacao;
+import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.StatusConciliacao;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.TipoTransacao;
 
 /**
@@ -27,6 +28,23 @@ public interface TransacaoRepository extends JpaRepository<Transacao, UUID> {
 
   @Query("select t from Transacao t where t.id = :id and t.tenantId = :tenantId and t.deletedAt is null")
   Optional<Transacao> findAtivaByIdAndTenant(@Param("id") UUID id, @Param("tenantId") UUID tenantId);
+
+  /** Os lancamentos ativos que uma conciliacao de dia ou de mes conciliou. */
+  @Query(
+      "select t from Transacao t where t.tenantId = :tenantId and t.deletedAt is null"
+          + " and t.reconciliationPeriodId = :periodoId order by t.date asc")
+  List<Transacao> listarDaConciliacao(
+      @Param("tenantId") UUID tenantId, @Param("periodoId") UUID periodoId);
+
+  /** Lancamentos ativos de um periodo, numa situacao: o fim e exclusivo. */
+  @Query(
+      "select t from Transacao t where t.tenantId = :tenantId and t.deletedAt is null"
+          + " and t.reconciliationStatus = :status and t.date >= :de and t.date < :ate")
+  List<Transacao> listarDoPeriodoPorConciliacao(
+      @Param("tenantId") UUID tenantId,
+      @Param("status") StatusConciliacao status,
+      @Param("de") Instant de,
+      @Param("ate") Instant ate);
 
   @Query("select t from Transacao t where t.tenantId = :tenantId and t.comandaId = :comandaId and t.deletedAt is null")
   List<Transacao> listarAtivasPorComanda(@Param("tenantId") UUID tenantId, @Param("comandaId") UUID comandaId);

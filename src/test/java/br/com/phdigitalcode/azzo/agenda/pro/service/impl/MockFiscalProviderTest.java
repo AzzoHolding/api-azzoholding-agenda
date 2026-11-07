@@ -23,7 +23,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.dto.FiscalDtos;
  */
 class MockFiscalProviderTest {
 
-  private final MockFiscalProvider provider = new MockFiscalProvider();
+  private final MockFiscalProvider provider = new MockFiscalProvider(null);
   private UUID tenantId;
 
   @BeforeEach

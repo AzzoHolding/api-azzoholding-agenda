@@ -247,7 +247,7 @@ public class ServicoSalonProfile {
     dto.salonPhone = tenant.getPhone();
     dto.salonWhatsapp = tenant.getWhatsapp();
     dto.publicBookingUrl = publicBookingUrlService.buildPublicBookingUrl(tenant.getSlug());
-    dto.businessHours = tenantOperationalSettingsService.getBusinessHours(tenant.getId());
+    dto.businessHours = tenantOperationalSettingsService.getBusinessHoursDaTabela(tenant.getId());
     dto.logo = tenant.getLogo();
     dto.logoUrl = resolveLogoUrl(tenant.getId(), tenant.getLogo());
     return dto;
@@ -275,7 +275,7 @@ public class ServicoSalonProfile {
     dto.city = address != null ? address.getCity() : null;
     dto.state = address != null ? address.getState() : null;
     dto.zipCode = address != null ? address.getZipCode() : null;
-    dto.businessHours = tenantOperationalSettingsService.getBusinessHours(tenant.getId());
+    dto.businessHours = tenantOperationalSettingsService.getBusinessHoursDaTabela(tenant.getId());
     dto.specialClosureDates = tenantOperationalSettingsService.getSpecialClosureDates(tenant.getId());
     dto.documentChangesRemaining = trocasRestantes(tenant);
     dto.documentChangeLimit = LIMITE_DE_TROCAS_DO_DOCUMENTO;

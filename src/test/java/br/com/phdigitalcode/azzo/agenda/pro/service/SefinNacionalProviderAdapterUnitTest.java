@@ -19,6 +19,8 @@ import br.com.phdigitalcode.azzo.agenda.pro.entity.FiscalTaxConfigEntity;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.NfseConfigEntity;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.NfseInvoiceEntity;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.NfseAmbiente;
+import br.com.phdigitalcode.azzo.agenda.pro.exception.NfseProvedorRecusouException;
+import br.com.phdigitalcode.azzo.agenda.pro.exception.NfseProvedorSemRespostaException;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.FiscalTaxConfigRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.NfseConfigRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.security.EncryptionService;
@@ -71,11 +73,6 @@ class SefinNacionalProviderAdapterUnitTest {
     environment.setProperty("app.nfse.provider.sefin-nacional.query-path", "/nfse/{chaveAcesso}");
     environment.setProperty("app.nfse.provider.sefin-nacional.query-path-homologacao", "/nfse/{chaveAcesso}");
     environment.setProperty("app.nfse.provider.sefin-nacional.cancel-reason-code-default", "9");
-    environment.setProperty("app.nfse.provider.sefin-nacional.query-http-method", "GET");
-    environment.setProperty("app.nfse.provider.sefin-nacional.query-access-key-param", "chNFSe");
-    environment.setProperty("app.nfse.provider.sefin-nacional.query-protocol-param", "protocolo");
-    environment.setProperty("app.nfse.provider.sefin-nacional.query-include-protocol", "true");
-    environment.setProperty("app.nfse.provider.sefin-nacional.query-mtls-enabled", "false");
 
     adapter = new SefinNacionalProviderAdapter(
         encryptionService,
@@ -133,96 +130,111 @@ class SefinNacionalProviderAdapterUnitTest {
         .hasMessage("NFSE_PROVIDER_SEFIN_NACIONAL_PRODUCTION_DISABLED");
   }
 
+  private static final String CHAVE = "12345678901234567890123456789012345678901234567890";
+
+  private SefinNacionalProviderAdapter.RespostaHttp resposta(int status, String body) {
+    return new SefinNacionalProviderAdapter.RespostaHttp(status, body);
+  }
+
+  @Test
+  void enviaADpsCompactadaEmGzipBase64NoCampoDaApi() throws Exception {
+    String json = adapter.jsonComXmlCompactado("dpsXmlGZipB64", "<DPS>teste</DPS>");
+
+    var lido = new com.fasterxml.jackson.databind.ObjectMapper().readTree(json);
+    assertThat(lido.fieldNames()).toIterable().containsExactly("dpsXmlGZipB64");
+    // E1229 (homologacao, 06/11/2026): a Sefin exige a declaracao UTF-8 no inicio.
+    assertThat(SefinNacionalProviderAdapter.descompactar(lido.get("dpsXmlGZipB64").asText()))
+        .isEqualTo("<?xml version=\"1.0\" encoding=\"UTF-8\"?><DPS>teste</DPS>");
+  }
+
   @Test
   void deveInterpretarRetornoAutorizadoDaReceitaNacional() {
-    NfseInvoiceEntity invoice = invoice(NfseAmbiente.HOMOLOGACAO);
-    String response = """
-        <retorno xmlns="http://www.sped.fazenda.gov.br/nfse">
-          <cStat>100</cStat>
-          <xMotivo>Autorizado</xMotivo>
-          <chNFSe>12345678901234567890123456789012345678901234567890</chNFSe>
-          <nNFSe>123456</nNFSe>
-          <nProt>ABC123</nProt>
-          <cVerif>XYZ789</cVerif>
-        </retorno>
-        """;
-
-    var result = adapter.parseAuthorizationResponse(invoice, response);
-
-    assertThat(result).isNotNull();
-    assertThat(result.providerStatusCode()).isEqualTo("100");
-    assertThat(result.providerStatusMessage()).isEqualTo("Autorizado");
-    assertThat(result.numeroNfse()).isEqualTo("123456");
-    assertThat(result.protocolo()).isEqualTo("ABC123");
-    assertThat(result.codigoVerificacao()).isEqualTo("XYZ789");
-    assertThat(result.chaveAcessoNfse()).isEqualTo("12345678901234567890123456789012345678901234567890");
-  }
-
-  @Test
-  void deveInterpretarRetornoDeConsultaDaReceitaNacional() {
-    NfseInvoiceEntity invoice = invoice(NfseAmbiente.HOMOLOGACAO);
-    invoice.setProtocolo("PROTO-1");
-    String response = """
+    String nfse = """
         <NFSe xmlns="http://www.sped.fazenda.gov.br/nfse" versao="1.00">
-          <infNFSe Id="NFS12345678901234567890123456789012345678901234567890">
-            <nNFSe>123456</nNFSe>
-            <cStat>100</cStat>
-            <xMotivo>Autorizado</xMotivo>
-          </infNFSe>
+          <infNFSe Id="NFS%s"><nNFSe>123456</nNFSe></infNFSe>
         </NFSe>
-        """;
+        """.formatted(CHAVE);
+    String body = """
+        {"tipoAmbiente":2,"idDps":"DPS355030821234567800019900001000000000000001",
+         "chaveAcesso":"%s","nfseXmlGZipB64":"%s"}
+        """.formatted(CHAVE, SefinNacionalProviderAdapter.compactar(nfse));
 
-    var result = adapter.parseQueryResponse(invoice, response);
+    var result = adapter.parseAuthorizationResponse(resposta(201, body));
 
-    assertThat(result).isNotNull();
-    assertThat(result.authorized()).isTrue();
+    assertThat(result.providerStatusCode()).isEqualTo("100");
     assertThat(result.numeroNfse()).isEqualTo("123456");
-    assertThat(result.chaveAcessoNfse()).isEqualTo("12345678901234567890123456789012345678901234567890");
-    assertThat(result.protocolo()).isEqualTo("PROTO-1");
+    assertThat(result.chaveAcessoNfse()).isEqualTo(CHAVE);
+    assertThat(result.protocolo()).isEqualTo("DPS355030821234567800019900001000000000000001");
   }
 
-  // ─── casos novos (assimetrias/riscos documentados na Etapa 25) ────────────
+  @Test
+  void respostaDeSucessoSemChaveNaoEhTratadaComoAutorizada() {
+    // Antes, qualquer texto com "numero" virava nota autorizada. Sem chave, o resultado e incerto.
+    assertThatThrownBy(() -> adapter.parseAuthorizationResponse(resposta(200, "{\"numero\":\"1\"}")))
+        .isInstanceOf(NfseProvedorSemRespostaException.class);
+  }
 
   @Test
-  void deveInterpretarRetornoRejeitadoLancandoIllegalState() {
-    NfseInvoiceEntity invoice = invoice(NfseAmbiente.HOMOLOGACAO);
-    String response = """
-        <retorno xmlns="http://www.sped.fazenda.gov.br/nfse">
-          <cStat>204</cStat>
-          <xMotivo>Rejeitado por erro de schema</xMotivo>
-        </retorno>
+  void recusaDaReceitaTrazOCodigoEOMotivo() {
+    String body = """
+        {"tipoAmbiente":2,"erros":[
+          {"Codigo":"E0312","Descricao":"CNPJ do prestador nao encontrado","Complemento":"cadastro"},
+          {"Codigo":"E0100","Descricao":"Data de competencia invalida"}]}
         """;
 
-    assertThatThrownBy(() -> adapter.parseAuthorizationResponse(invoice, response))
-        .isInstanceOf(IllegalStateException.class)
-        .hasMessageStartingWith("NFSE_PROVIDER_SEFIN_NACIONAL_REJECTED:");
+    assertThatThrownBy(() -> adapter.parseAuthorizationResponse(resposta(400, body)))
+        .isInstanceOfSatisfying(NfseProvedorRecusouException.class, ex -> {
+          assertThat(ex.getCodigo()).isEqualTo("E0312");
+          assertThat(ex.getMotivo())
+              .isEqualTo("E0312 - CNPJ do prestador nao encontrado (cadastro); E0100 - Data de competencia invalida");
+        });
+  }
+
+  @Test
+  void recusaSemJsonGuardaOCorpoDaResposta() {
+    assertThatThrownBy(() -> adapter.parseAuthorizationResponse(resposta(422, "schema invalido")))
+        .isInstanceOfSatisfying(NfseProvedorRecusouException.class, ex -> {
+          assertThat(ex.getCodigo()).isEqualTo("422");
+          assertThat(ex.getMotivo()).isEqualTo("HTTP 422: schema invalido");
+        });
+  }
+
+  @Test
+  void erroDoServidorDaReceitaEhSemRespostaENaoRecusa() {
+    assertThatThrownBy(() -> adapter.parseAuthorizationResponse(resposta(503, "")))
+        .isInstanceOfSatisfying(NfseProvedorSemRespostaException.class,
+            ex -> assertThat(ex.getCodigo()).isEqualTo("503"));
+    assertThatThrownBy(() -> adapter.parseAuthorizationResponse(resposta(429, "")))
+        .isInstanceOf(NfseProvedorSemRespostaException.class);
+  }
+
+  @Test
+  void certificadoRecusadoPelaReceitaTemMensagemPropria() {
+    assertThatThrownBy(() -> adapter.parseAuthorizationResponse(resposta(403, "")))
+        .isInstanceOfSatisfying(NfseProvedorRecusouException.class,
+            ex -> assertThat(ex.getMotivo()).contains("certificado digital"));
   }
 
   @Test
   void deveInterpretarCancelamentoRejeitado() {
-    String response = """
-        <retorno><cStat>301</cStat><xMotivo>Erro no cancelamento</xMotivo></retorno>
-        """;
+    String body = "{\"erros\":[{\"codigo\":\"E1235\",\"descricao\":\"Prazo expirado\"}]}";
 
-    assertThatThrownBy(() -> adapter.parseCancellationResponse(response))
-        .isInstanceOf(IllegalStateException.class)
-        .hasMessageStartingWith("NFSE_PROVIDER_SEFIN_NACIONAL_CANCEL_REJECTED:");
+    assertThatThrownBy(() -> adapter.parseCancellationResponse(resposta(400, body)))
+        .isInstanceOfSatisfying(NfseProvedorRecusouException.class,
+            ex -> assertThat(ex.getMotivo()).isEqualTo("E1235 - Prazo expirado"));
   }
 
   @Test
-  void deveBloquearMetodoDeConsultaDiferenteDeGet() {
-    environment.setProperty("app.nfse.provider.sefin-nacional.query-http-method", "POST");
-    NfseInvoiceEntity invoice = invoice(NfseAmbiente.HOMOLOGACAO);
-    invoice.setChaveAcessoNfse("12345678901234567890123456789012345678901234567890");
-
-    assertThatThrownBy(() -> adapter.queryStatus(invoice))
-        .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("NFSE_PROVIDER_SEFIN_NACIONAL_QUERY_METHOD_NOT_SUPPORTED");
+  void cancelamentoAceito() {
+    assertThat(adapter.parseCancellationResponse(resposta(201, "{}")).providerStatusMessage())
+        .isEqualTo("Cancelamento registrado pela Receita Nacional");
   }
 
   @Test
   void queryStatusVazioQuandoInvoiceSemChaveNemProtocolo() {
+    // Sem consulta em segundo plano: toda chamada a Receita exige o certificado (mTLS).
     NfseInvoiceEntity invoice = invoice(NfseAmbiente.HOMOLOGACAO);
+    invoice.setChaveAcessoNfse(CHAVE);
 
     Optional<?> result = adapter.queryStatus(invoice);
 
@@ -287,5 +299,35 @@ class SefinNacionalProviderAdapterUnitTest {
     assertThat(xml).contains("<CNPJAutor>12345678000199</CNPJAutor>");
     assertThat(xml).contains("<chNFSe>" + "1".repeat(50) + "</chNFSe>");
     assertThat(xml).contains("<cMotivo>1</cMotivo>");
+    // Leiaute 1.01: Id = PRE + chave + evento, sem nPedRegEvento (o XML ja passou no XSD oficial).
+    assertThat(xml).contains("<infPedReg Id=\"PRE" + "1".repeat(50) + "101101\">");
+    assertThat(xml).doesNotContain("nPedRegEvento");
+    assertThat(xml).containsPattern("<dhEvento>20\\d\\d-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d-03:00</dhEvento>");
+
+    // xMotivo tem no minimo 15 caracteres no esquema.
+    assertThatThrownBy(() -> {
+          try {
+            method.invoke(adapter, invoice, "Erro");
+          } catch (java.lang.reflect.InvocationTargetException ex) {
+            throw ex.getCause();
+          }
+        })
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("NFSE_PROVIDER_SEFIN_NACIONAL_CANCEL_REASON_TOO_SHORT");
+  }
+
+  /** Teste em homologacao de 06/11/2026: a Sefin corta HTTP/2 com "Use HTTP/1.1 for request". */
+  @Test
+  void falaComAReceitaEmHttp11() throws Exception {
+    assertThat(adapter.buildHttpClient(1000, null, false).version())
+        .isEqualTo(java.net.http.HttpClient.Version.HTTP_1_1);
+  }
+
+  @Test
+  void declaracaoUtf8NaoDuplicaETrocaOutraCodificacao() {
+    assertThat(SefinNacionalProviderAdapter.comDeclaracaoUtf8("<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?>\n<a/>"))
+        .isEqualTo("<?xml version=\"1.0\" encoding=\"UTF-8\"?><a/>");
+    assertThat(SefinNacionalProviderAdapter.comDeclaracaoUtf8("\uFEFF<a/>"))
+        .isEqualTo("<?xml version=\"1.0\" encoding=\"UTF-8\"?><a/>");
   }
 }

@@ -441,7 +441,9 @@ public class AuditQueryService {
   private Object parseJson(String json) {
     if (json == null || json.isBlank()) return null;
     try {
-      return objectMapper.readTree(json);
+      // Map e List, e nao JsonNode: este ObjectMapper e Jackson 2, e a resposta sai em Jackson 3, que
+      // serializa o JsonNode como bean ("textual":false...) em vez dos dados.
+      return objectMapper.readValue(json, Object.class);
     } catch (Exception ignored) {
       return json;
     }
