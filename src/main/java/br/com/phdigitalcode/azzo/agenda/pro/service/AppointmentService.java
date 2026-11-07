@@ -96,6 +96,11 @@ public class AppointmentService {
       int serviceDurationMinutes,
       int bufferMinutes,
       UUID ignorarAgendamentoId) {
+    // Dia que ja passou nao tem horario livre: a agenda oferecia a grade inteira de ontem como se
+    // estivesse vaga (teste de 07/11/2026). Lancar um atendimento retroativo continua possivel pelo
+    // horario digitado (manual-slots), que e o caminho de quem registra o que ja aconteceu.
+    if (date != null && date.isBefore(LocalDate.now(ZONE_BR))) return new ArrayList<>();
+
     SchedulingContext context =
         buildSchedulingContext(
             tenantId, professionalId, date, serviceDurationMinutes, bufferMinutes, ignorarAgendamentoId);
