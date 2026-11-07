@@ -96,7 +96,10 @@ public class NfseXmlSignerService {
     KeyInfo keyInfo = keyInfoFactory.newKeyInfo(List.of(x509Data));
 
     DOMSignContext signContext = new DOMSignContext(keyMaterial.privateKey(), root);
-    signContext.setDefaultNamespacePrefix("ds");
+    // Leiaute nacional (DPS e pedido de evento): assinatura SEM prefixo, no namespace padrao. A Sefin
+    // recusa "ds:" com E1228 "Xml declarado com prefixo de namespace" (homologacao, 06/11/2026). O
+    // ABRASF segue com "ds:", como sempre foi.
+    signContext.setDefaultNamespacePrefix(ehLeiauteNacional(root) ? "" : "ds");
     XMLSignature signature = factory.newXMLSignature(signedInfo, keyInfo);
     signature.sign(signContext);
 
@@ -134,6 +137,10 @@ public class NfseXmlSignerService {
     }
     target.setIdAttribute("Id", true);
     return id;
+  }
+
+  static boolean ehLeiauteNacional(Element root) {
+    return root != null && "http://www.sped.fazenda.gov.br/nfse".equals(root.getNamespaceURI());
   }
 
   private String toXmlString(Document document) throws Exception {

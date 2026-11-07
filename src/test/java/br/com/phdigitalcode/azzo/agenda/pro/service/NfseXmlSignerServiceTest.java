@@ -99,6 +99,20 @@ class NfseXmlSignerServiceTest {
     assertThat(validateSignature(assinado)).isTrue();
   }
 
+  /** E1228 (homologacao, 06/11/2026): a Sefin recusa a assinatura com prefixo "ds:". */
+  @Test
+  void leiauteNacionalAssinaSemPrefixoDeNamespace() throws Exception {
+    when(fiscalCertificateService.loadActiveKeyMaterial(eq(CERT_PASSWORD))).thenReturn(keyMaterial);
+    String xml = "<DPS xmlns=\"http://www.sped.fazenda.gov.br/nfse\" versao=\"1.01\">"
+        + "<infDPS Id=\"DPS1\"><tpAmb>2</tpAmb></infDPS></DPS>";
+
+    String assinado = service.sign(xml, CERT_PASSWORD);
+
+    assertThat(assinado).doesNotContain("ds:").doesNotContain("xmlns:ds");
+    assertThat(assinado).contains("<Signature xmlns=\"http://www.w3.org/2000/09/xmldsig#\">");
+    assertThat(validateSignature(assinado)).isTrue();
+  }
+
   @Test
   void xmlNuloOuVazioLancaIllegalArgument() {
     assertThatThrownBy(() -> service.sign(null, CERT_PASSWORD))
