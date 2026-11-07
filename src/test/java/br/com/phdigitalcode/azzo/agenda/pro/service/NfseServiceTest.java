@@ -189,6 +189,7 @@ class NfseServiceTest {
   void criarRascunho_emissorNacionalHerdaOCodigoNacionalDaConfiguracao() {
     NfseConfigEntity config = config("3303302", "SEFIN_NACIONAL");
     config.setNationalTaxCodeDefault("060101");
+    config.setCodigoTributacaoMunicipio("001");
     when(nfseConfigRepository.findByTenantAndAmbiente(tenantId, NfseAmbiente.HOMOLOGACAO))
         .thenReturn(Optional.of(config));
     when(nfseConfigService.resolveProvedor("SEFIN_NACIONAL", "3303302")).thenReturn("SEFIN_NACIONAL");
@@ -204,6 +205,8 @@ class NfseServiceTest {
 
     assertThat(result.fiscalStatus).isEqualTo("DRAFT");
     assertThat(result.nationalTaxCode).isEqualTo("060101");
+    // E0312 em Niteroi sem o codigo municipal (homologacao, 07/11/2026).
+    assertThat(result.codigoTributacaoMunicipio).isEqualTo("001");
   }
 
   @Test
