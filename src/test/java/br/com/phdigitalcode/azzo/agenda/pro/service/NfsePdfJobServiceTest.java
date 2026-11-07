@@ -118,6 +118,19 @@ class NfsePdfJobServiceTest {
     verify(nfsePdfJobRepository, never()).save(any());
   }
 
+  /** Cancelamento recusado: a nota segue autorizada na Receita, e o PDF tem de sair. */
+  @Test
+  void solicitarGeracaoParaCancelamentoRecusadoTambemGeraPdf() {
+    NfseInvoiceEntity invoice = invoiceComId(NfseFiscalStatus.CANCEL_REJECTED);
+    when(contextoTenant.obterTenantIdOuFalhar()).thenReturn(tenantId);
+    when(nfseInvoiceRepository.findByTenantAndId(tenantId, invoice.getId())).thenReturn(Optional.of(invoice));
+    when(nfsePdfJobRepository.findActiveJob(tenantId, invoice.getId())).thenReturn(Optional.empty());
+    when(authenticatedUser.idOuFalhar()).thenReturn(userId);
+    when(nfsePdfJobRepository.save(any(NfsePdfJobEntity.class))).thenAnswer(inv -> inv.getArgument(0));
+
+    assertThat(service.solicitarGeracao(invoice.getId().toString()).status).isEqualTo("QUEUED");
+  }
+
   @Test
   void solicitarGeracaoParaInvoiceCanceladaCriaNovoJobQueuedComOUsuarioAtual() {
     NfseInvoiceEntity invoice = invoiceComId(NfseFiscalStatus.CANCELLED);

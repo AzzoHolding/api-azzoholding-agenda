@@ -67,8 +67,13 @@ public class NfsePdfJobService {
   public NfseDtos.PdfJobResponse solicitarGeracao(String invoiceId) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     NfseInvoiceEntity invoice = obterInvoiceOuFalhar(tenantId, invoiceId);
-    if (invoice.getFiscalStatus() != NfseFiscalStatus.AUTHORIZED
-        && invoice.getFiscalStatus() != NfseFiscalStatus.CANCELLED) {
+    // Com cancelamento pedido ou recusado, a nota continua valida na Receita: o PDF tambem sai.
+    if (!java.util.EnumSet.of(
+            NfseFiscalStatus.AUTHORIZED,
+            NfseFiscalStatus.CANCEL_PENDING,
+            NfseFiscalStatus.CANCEL_REJECTED,
+            NfseFiscalStatus.CANCELLED)
+        .contains(invoice.getFiscalStatus())) {
       throw new IllegalArgumentException("PDF da NFS-e só pode ser gerado para documento autorizado/cancelado.");
     }
 
