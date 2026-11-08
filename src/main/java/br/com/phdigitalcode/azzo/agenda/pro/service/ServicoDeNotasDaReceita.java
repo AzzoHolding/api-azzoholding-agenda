@@ -227,6 +227,12 @@ public class ServicoDeNotasDaReceita {
         dto.canceladaEm = dados.quando();
         dto.motivoCancelamento = dados.motivo();
         dto.justificativaCancelamento = dados.justificativa();
+        dto.codigoMotivoCancelamento = dados.codigoMotivo();
+        dto.tipoCancelamento = dados.tipo();
+        dto.cancelamentoProcessadoEm = dados.processadoEm();
+        dto.cancelamentoAutorDocumento = dados.autor();
+        dto.numeroDoEventoCancelamento = dados.numeroDoEvento();
+        dto.chaveSubstituta = dados.chaveSubstituta();
       }
       resposta.itens.add(dto);
     }

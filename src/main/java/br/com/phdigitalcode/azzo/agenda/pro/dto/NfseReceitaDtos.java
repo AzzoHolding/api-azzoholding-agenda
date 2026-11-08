@@ -51,6 +51,13 @@ public final class NfseReceitaDtos {
     public String motivoCancelamento;
     /** O texto digitado por quem cancelou. */
     public String justificativaCancelamento;
+    /** Detalhe do evento, para o dialogo da nota cancelada. */
+    public String codigoMotivoCancelamento;
+    public String tipoCancelamento;
+    public String cancelamentoProcessadoEm;
+    public String cancelamentoAutorDocumento;
+    public String numeroDoEventoCancelamento;
+    public String chaveSubstituta;
   }
 
   public static class ListaResponse {

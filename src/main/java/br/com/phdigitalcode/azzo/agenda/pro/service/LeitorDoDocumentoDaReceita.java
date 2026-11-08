@@ -66,7 +66,26 @@ final class LeitorDoDocumentoDaReceita {
   }
 
   /** Quando e por que a nota foi cancelada, lido do evento. */
-  record Cancelamento(String quando, String motivo, String justificativa) {}
+  /**
+   * O que o evento de cancelamento diz. {@code quando}: quando foi pedido (dhEvento); {@code
+   * processadoEm}: quando a Receita registrou (dhProc). {@code autor}: CNPJ/CPF de quem pediu.
+   * {@code chaveSubstituta}: a nota que substituiu esta (so no cancelamento por substituicao).
+   */
+  record Cancelamento(
+      String quando,
+      String motivo,
+      String justificativa,
+      String codigoMotivo,
+      String tipo,
+      String processadoEm,
+      String autor,
+      String numeroDoEvento,
+      String chaveSubstituta) {
+
+    Cancelamento(String quando, String motivo, String justificativa) {
+      this(quando, motivo, justificativa, null, null, null, null, null, null);
+    }
+  }
 
   /**
    * O evento traz {@code dhEvento} (ou {@code dhProc}), e no grupo {@code e101101} (cancelamento) ou
@@ -80,7 +99,18 @@ final class LeitorDoDocumentoDaReceita {
     String codigo = evento.busca("cMotivo");
     boolean substituicao = xml.contains("e105102");
     String motivo = motivoDoCancelamento(codigo, substituicao, evento.busca("xDesc"));
-    return new Cancelamento(quando == null ? null : quando.toString(), motivo, evento.busca("xMotivo"));
+    Instant processado = instante(evento.busca("dhProc"));
+    String substituta = evento.busca("chSubstituta");
+    return new Cancelamento(
+        quando == null ? null : quando.toString(),
+        motivo,
+        evento.busca("xMotivo"),
+        codigo,
+        substituicao ? "Cancelamento por substituição" : "Cancelamento",
+        processado == null ? null : processado.toString(),
+        primeiro(evento.busca("CNPJAutor"), evento.busca("CPFAutor")),
+        primeiro(evento.busca("nSeqEvento"), evento.busca("nPedRegEvento")),
+        substituta == null ? null : substituta.replaceAll("\\D", ""));
   }
 
   /** Tabela do evento 101101 (leiaute nacional): 1, 2 e 9. Substituicao usa outra tabela: o texto do evento. */
