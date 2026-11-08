@@ -63,7 +63,7 @@ class AuditRetentionPurgeServiceTest {
     long purged = service.purgeExpiredAuditEvents();
 
     assertThat(purged).isEqualTo(0);
-    verify(auditEventRepository, never()).purgeBeforeByTenant(any(), any());
+    verify(auditEventRepository, never()).deleteBeforeByTenantRespeitandoACadeia(any(), any(), anyLong());
   }
 
   @Test
@@ -74,16 +74,16 @@ class AuditRetentionPurgeServiceTest {
     when(auditEventRepository.findTenantIdsWithEventsBefore(any(), eq(500))).thenReturn(List.of(tenant1, tenant2));
     when(auditEventRepository.findOldestCreatedAtBefore(eq(tenant1), any())).thenReturn(Optional.of(Instant.now().minusSeconds(1000)));
     when(auditEventRepository.findOldestCreatedAtBefore(eq(tenant2), any())).thenReturn(Optional.empty());
-    when(auditEventRepository.purgeBeforeByTenant(eq(tenant1), any())).thenReturn(10L);
-    when(auditEventRepository.purgeBeforeByTenant(eq(tenant2), any())).thenReturn(0L);
+    when(auditEventRepository.deleteBeforeByTenantRespeitandoACadeia(eq(tenant1), any(), anyLong())).thenReturn(10);
+    when(auditEventRepository.deleteBeforeByTenantRespeitandoACadeia(eq(tenant2), any(), anyLong())).thenReturn(0);
 
     long purged = service.purgeExpiredAuditEvents();
 
     assertThat(purged).isEqualTo(10L);
     verify(retentionService, times(1)).registerPurgeEvent(
-        eq(tenant1), eq("v1"), eq(90), any(), any(), eq(10L), eq("SCHEDULER"), any(), any());
+        eq(tenant1), eq("v1"), eq(90), any(), any(), eq(10L), eq("SCHEDULER"), any(), any(), any(), any());
     // tenant2 nao purgou nada (purged <= 0): nao registra evidencia para ele.
-    verify(retentionService, times(1)).registerPurgeEvent(any(), any(), anyInt(), any(), any(), anyLong(), any(), any(), any());
+    verify(retentionService, times(1)).registerPurgeEvent(any(), any(), anyInt(), any(), any(), anyLong(), any(), any(), any(), any(), any());
   }
 
   /**
@@ -140,11 +140,57 @@ class AuditRetentionPurgeServiceTest {
   void purgeTenantRetornaZeroSemRegistrarEvidenciaQuandoNadaPurgado() {
     UUID tenantId = UUID.randomUUID();
     when(auditEventRepository.findOldestCreatedAtBefore(eq(tenantId), any())).thenReturn(Optional.empty());
-    when(auditEventRepository.purgeBeforeByTenant(eq(tenantId), any())).thenReturn(0L);
+    when(auditEventRepository.deleteBeforeByTenantRespeitandoACadeia(eq(tenantId), any(), anyLong())).thenReturn(0);
 
     long purged = service.purgeTenant(tenantId, Instant.now(), 30, "exec-1");
 
     assertThat(purged).isEqualTo(0);
-    verify(retentionService, never()).registerPurgeEvent(any(), any(), anyInt(), any(), any(), anyLong(), any(), any(), any());
+    verify(retentionService, never()).registerPurgeEvent(any(), any(), anyInt(), any(), any(), anyLong(), any(), any(), any(), any(), any());
+  }
+
+  /**
+   * O expurgo remove so um prefixo da cadeia selada e guarda o elo do ultimo removido: o primeiro
+   * evento que fica continua conferivel (V164).
+   */
+  @Test
+  void expurgoGuardaAAncoraDoUltimoSeladoRemovidoESoCortaAntesDoPrimeiroQueFica() {
+    UUID tenantId = UUID.randomUUID();
+    Instant cutoff = Instant.now();
+    br.com.phdigitalcode.azzo.agenda.pro.entity.AuditEvent ultimo = new br.com.phdigitalcode.azzo.agenda.pro.entity.AuditEvent();
+    ultimo.setChainSeq(7L);
+    ultimo.setChainHash("elo-7");
+    when(auditEventRepository.findOldestCreatedAtBefore(eq(tenantId), any())).thenReturn(Optional.empty());
+    when(auditEventRepository.primeiraPosicaoQueFica(tenantId, cutoff)).thenReturn(8L);
+    when(auditEventRepository.ultimoSeladoAExpurgar(eq(tenantId), eq(cutoff), eq(8L), any()))
+        .thenReturn(List.of(ultimo));
+    when(auditEventRepository.deleteBeforeByTenantRespeitandoACadeia(tenantId, cutoff, 7L)).thenReturn(12);
+
+    long purged = service.purgeTenant(tenantId, cutoff, 30, "exec-1");
+
+    assertThat(purged).isEqualTo(12);
+    verify(auditEventRepository).esperarTravaDoSelador();
+    verify(auditEventRepository).enableRetentionPurgeFlag();
+    verify(retentionService).registerPurgeEvent(
+        eq(tenantId), any(), eq(30), any(), eq(cutoff), eq(12L), eq("SCHEDULER"), eq("exec-1"), any(),
+        eq("elo-7"), eq(7L));
+  }
+
+  @Test
+  void semSeladoParaRemoverAAncoraEhOUltimoLegadoRemovido() {
+    UUID tenantId = UUID.randomUUID();
+    Instant cutoff = Instant.now();
+    br.com.phdigitalcode.azzo.agenda.pro.entity.AuditEvent legado = new br.com.phdigitalcode.azzo.agenda.pro.entity.AuditEvent();
+    legado.setEventHash("hash-legado");
+    when(auditEventRepository.findOldestCreatedAtBefore(eq(tenantId), any())).thenReturn(Optional.empty());
+    when(auditEventRepository.ultimoSeladoAExpurgar(eq(tenantId), eq(cutoff), eq(Long.MAX_VALUE), any()))
+        .thenReturn(List.of());
+    when(auditEventRepository.ultimoLegadoAExpurgar(eq(tenantId), eq(cutoff), any())).thenReturn(List.of(legado));
+    when(auditEventRepository.deleteBeforeByTenantRespeitandoACadeia(tenantId, cutoff, 0L)).thenReturn(3);
+
+    service.purgeTenant(tenantId, cutoff, 30, "exec-1");
+
+    verify(retentionService).registerPurgeEvent(
+        eq(tenantId), any(), eq(30), any(), eq(cutoff), eq(3L), eq("SCHEDULER"), eq("exec-1"), any(),
+        eq("hash-legado"), eq(null));
   }
 }

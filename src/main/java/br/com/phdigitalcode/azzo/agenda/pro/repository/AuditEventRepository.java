@@ -76,6 +76,104 @@ public interface AuditEventRepository
       "select e from AuditEvent e where e.tenantId = :tenantId order by e.createdAt desc, e.id desc")
   List<AuditEvent> findByTenantOrderByCreatedAtDesc(@Param("tenantId") UUID tenantId, Limit limit);
 
+  // ---- cadeia selada (v2, V164) ----
+
+  /** Eventos v2 ja confirmados e ainda sem selo, na ordem em que foram criados. */
+  @Query(
+      "select e from AuditEvent e where e.hashVersion = 2 and e.chainSeq is null "
+          + "order by e.createdAt asc, e.id asc")
+  List<AuditEvent> findNaoSelados(Limit limit);
+
+  @Query("select e from AuditEvent e where e.tenantId = :tenantId and e.chainSeq is not null order by e.chainSeq desc")
+  List<AuditEvent> findUltimosSelados(@Param("tenantId") UUID tenantId, Limit limit);
+
+  default Optional<AuditEvent> ultimoSelado(UUID tenantId) {
+    return findUltimosSelados(tenantId, Limit.of(1)).stream().findFirst();
+  }
+
+  @Query(
+      "select e from AuditEvent e where e.tenantId = :tenantId and e.hashVersion = 1 "
+          + "order by e.createdAt desc, e.id desc")
+  List<AuditEvent> findUltimosLegados(@Param("tenantId") UUID tenantId, Limit limit);
+
+  default Optional<AuditEvent> ultimoLegado(UUID tenantId) {
+    return findUltimosLegados(tenantId, Limit.of(1)).stream().findFirst();
+  }
+
+  /** Um selador por vez, em qualquer quantidade de instancias da API: quem nao pega a trava pula a rodada. */
+  @Query(value = "select pg_try_advisory_xact_lock(hashtext('audit_events:selo'))", nativeQuery = true)
+  boolean travaDoSelador();
+
+  /** A mesma trava, esperando: o expurgo nao pode mexer na cadeia enquanto o selador liga eventos. */
+  @Query(
+      value = "select 1 from (select pg_advisory_xact_lock(hashtext('audit_events:selo'))) t",
+      nativeQuery = true)
+  Integer esperarTravaDoSelador();
+
+  /** Liga, SO nesta transacao, a excecao do gatilho que permite selar (V164). */
+  @Query(value = "select set_config('app.audit_seal', 'on', true)", nativeQuery = true)
+  String habilitarSeloNestaTransacao();
+
+  @Query("select e from AuditEvent e where e.tenantId = :tenantId and e.chainSeq = :posicao")
+  Optional<AuditEvent> naPosicao(@Param("tenantId") UUID tenantId, @Param("posicao") long posicao);
+
+  // ---- conferencia (paginas por chave, sem OFFSET) ----
+
+  @Query(
+      "select e from AuditEvent e where e.tenantId = :tenantId and e.hashVersion = 1 "
+          + "and (e.createdAt > :depoisDe or (e.createdAt = :depoisDe and e.id > :depoisDoId)) "
+          + "order by e.createdAt asc, e.id asc")
+  List<AuditEvent> paginaDoLegado(
+      @Param("tenantId") UUID tenantId,
+      @Param("depoisDe") Instant depoisDe,
+      @Param("depoisDoId") UUID depoisDoId,
+      Limit limit);
+
+  @Query(
+      "select e from AuditEvent e where e.tenantId = :tenantId and e.chainSeq > :depoisDe "
+          + "order by e.chainSeq asc")
+  List<AuditEvent> paginaDaCadeia(@Param("tenantId") UUID tenantId, @Param("depoisDe") long depoisDe, Limit limit);
+
+  @Query(
+      "select count(e) from AuditEvent e where e.tenantId = :tenantId and e.hashVersion = 2 "
+          + "and e.chainSeq is null and e.createdAt < :antesDe")
+  long contarSemSeloAntesDe(@Param("tenantId") UUID tenantId, @Param("antesDe") Instant antesDe);
+
+  @Query(value = "SELECT DISTINCT tenant_id FROM audit_events", nativeQuery = true)
+  List<UUID> tenantsComEventos();
+
+  // ---- expurgo que respeita a cadeia ----
+
+  /** A menor posicao selada que FICA (criada a partir do corte): o expurgo v2 remove so o que vem antes. */
+  @Query(
+      "select min(e.chainSeq) from AuditEvent e where e.tenantId = :tenantId and e.chainSeq is not null "
+          + "and e.createdAt >= :cutoff")
+  Long primeiraPosicaoQueFica(@Param("tenantId") UUID tenantId, @Param("cutoff") Instant cutoff);
+
+  @Query(
+      "select e from AuditEvent e where e.tenantId = :tenantId and e.chainSeq is not null "
+          + "and e.createdAt < :cutoff and e.chainSeq < :limite order by e.chainSeq desc")
+  List<AuditEvent> ultimoSeladoAExpurgar(
+      @Param("tenantId") UUID tenantId, @Param("cutoff") Instant cutoff, @Param("limite") long limite, Limit limit);
+
+  @Query(
+      "select e from AuditEvent e where e.tenantId = :tenantId and e.hashVersion = 1 and e.createdAt < :cutoff "
+          + "order by e.createdAt desc, e.id desc")
+  List<AuditEvent> ultimoLegadoAExpurgar(
+      @Param("tenantId") UUID tenantId, @Param("cutoff") Instant cutoff, Limit limit);
+
+  @Modifying
+  @Query(
+      value =
+          """
+          DELETE FROM audit_events
+          WHERE tenant_id = :tenantId AND created_at < :cutoff
+            AND (hash_version = 1 OR (chain_seq IS NOT NULL AND chain_seq <= :ultimaPosicao))
+          """,
+      nativeQuery = true)
+  int deleteBeforeByTenantRespeitandoACadeia(
+      @Param("tenantId") UUID tenantId, @Param("cutoff") Instant cutoff, @Param("ultimaPosicao") long ultimaPosicao);
+
   /** Espelha {@code auditEventRepository.findLastByTenant(tenantId)}. */
   default Optional<AuditEvent> findLastByTenant(UUID tenantId) {
     if (tenantId == null) return Optional.empty();
@@ -114,10 +212,14 @@ public interface AuditEventRepository
     return Optional.ofNullable(findOldestCreatedAtBeforeRaw(tenantId, cutoff));
   }
 
-  @Modifying
-  @Transactional
+  /**
+   * Liga, SO nesta transacao, a excecao do gatilho para o DELETE do expurgo. Era {@code @Modifying
+   * void}: o driver recusava o SELECT ("um resultado foi retornado quando nenhum era esperado") e o
+   * expurgo nunca rodou — achado no teste contra Postgres real em 07/11/2026, antes de algum evento
+   * passar dos 365 dias. Sem {@code @Transactional} proprio: vale a transacao de quem chama.
+   */
   @Query(value = "SELECT set_config('app.audit_retention_purge', 'on', true)", nativeQuery = true)
-  void enableRetentionPurgeFlag();
+  String enableRetentionPurgeFlag();
 
   @Modifying
   @Transactional

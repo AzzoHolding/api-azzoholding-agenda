@@ -63,7 +63,10 @@ class GatesPorPerfilDeAcessoTest {
     @Bean
     AuditoriaController auditoriaController() {
       return new AuditoriaController(
-          mock(ContextoTenant.class), mock(AuditQueryService.class), mock(AuditService.class));
+          mock(ContextoTenant.class),
+          mock(AuditQueryService.class),
+          mock(AuditService.class),
+          mock(br.com.phdigitalcode.azzo.agenda.pro.service.ConferenciaDaAuditoria.class));
     }
 
     @Bean

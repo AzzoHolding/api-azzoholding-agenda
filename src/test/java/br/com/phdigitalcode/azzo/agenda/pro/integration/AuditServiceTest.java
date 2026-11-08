@@ -82,7 +82,33 @@ class AuditServiceTest {
 
     AuditEvent saved = service.recordSuccess(baseCommand());
 
-    assertThat(saved.getPrevEventHash()).isEqualTo("hash-anterior");
+    // Desde a V164 quem grava nao le "o ultimo evento" (isso bifurcava a cadeia): o selador liga.
+    assertThat(saved.getPrevEventHash()).isNull();
+    assertThat(saved.getChainSeq()).isNull();
+    assertThat(saved.getHashVersion()).isEqualTo((short) 2);
+    verify(auditEventRepository, org.mockito.Mockito.never()).findLastByTenant(any());
+  }
+
+  @Test
+  void hashV2CobreAtorIpENavegadorEUsaAPrecisaoDoBanco() {
+    AuditEventCommand command = baseCommand();
+    command.actorUserId = UUID.randomUUID();
+    command.ipAddress = "10.0.0.1";
+    command.userAgent = "Navegador";
+    command.after = Map.of("status", "PAID");
+
+    AuditEvent saved = service.recordSuccess(command);
+
+    assertThat(saved.getCreatedAt().getNano() % 1000).isZero();
+    assertThat(saved.getPayloadDigests()).isEqualTo(
+        HashesDaAuditoria.digestsDosJson(saved.getBeforeJson(), saved.getAfterJson(), saved.getMetadataJson()));
+    assertThat(saved.getEventHash()).isEqualTo(HashesDaAuditoria.hashDoConteudoV2(saved));
+    String original = saved.getEventHash();
+    saved.setIpAddress("10.0.0.2");
+    assertThat(HashesDaAuditoria.hashDoConteudoV2(saved)).isNotEqualTo(original);
+    saved.setIpAddress("10.0.0.1");
+    saved.setActorUserId(UUID.randomUUID());
+    assertThat(HashesDaAuditoria.hashDoConteudoV2(saved)).isNotEqualTo(original);
   }
 
   @Test

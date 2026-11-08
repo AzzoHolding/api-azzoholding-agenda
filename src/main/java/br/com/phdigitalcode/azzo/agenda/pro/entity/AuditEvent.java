@@ -111,6 +111,25 @@ public class AuditEvent {
   @Column(name = "redacted_at")
   private Instant redactedAt;
 
+  /** 1: eventos ate a V164 (hash sem ator/IP/erro). 2: hash de todas as colunas e cadeia selada. */
+  @Column(name = "hash_version", nullable = false)
+  private short hashVersion = 1;
+
+  /** v2: digest do before, after e metadata originais ({@code -} quando nulo), separados por {@code |}. */
+  @Column(name = "payload_digests")
+  private String payloadDigests;
+
+  /** v2: posicao do evento na cadeia do salao (1, 2, 3...). Preenchida pelo selador. */
+  @Column(name = "chain_seq")
+  private Long chainSeq;
+
+  /** v2: o elo — hash do salao, da posicao, do {@code event_hash} e do elo anterior. */
+  @Column(name = "chain_hash")
+  private String chainHash;
+
+  @Column(name = "sealed_at")
+  private Instant sealedAt;
+
   @PrePersist
   void prePersist() {
     if (id == null) id = UUID.randomUUID();

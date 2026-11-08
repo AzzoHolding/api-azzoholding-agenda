@@ -1,11 +1,8 @@
 package br.com.phdigitalcode.azzo.agenda.pro.integration;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
-import java.util.HexFormat;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -225,10 +222,9 @@ public class AuditService {
     String module = command.module.trim().toUpperCase();
     String action = command.action.trim().toUpperCase();
     try {
-      Instant now = Instant.now();
-      String prevHash = auditEventRepository.findLastByTenant(command.tenantId)
-          .map(AuditEvent::getEventHash)
-          .orElse(null);
+      // Precisao do banco (microssegundos): o hash tem de bater com o que o Postgres devolve. Na v1
+      // o instante tinha nanossegundos e o banco os perdia (conferido em 07/11/2026).
+      Instant now = HashesDaAuditoria.instanteDoBanco(Instant.now());
 
       String beforeJson = toCanonicalJson(command.before);
       String afterJson = toCanonicalJson(command.after);
@@ -237,6 +233,8 @@ public class AuditService {
       String changedFieldsJson = toCanonicalJson(change.changedFields());
 
       AuditEvent event = new AuditEvent();
+      event.setId(UUID.randomUUID());
+      event.setHashVersion((short) HashesDaAuditoria.V2);
       event.setTenantId(command.tenantId);
       event.setActorUserId(command.actorUserId);
       event.setActorRole(sanitize(command.actorRole));
@@ -257,9 +255,12 @@ public class AuditService {
       event.setMetadataJson(metadataJson);
       event.setHasChanges(change.hasChanges());
       event.setChangedFieldsJson(changedFieldsJson);
-      event.setPrevEventHash(prevHash);
+      event.setPayloadDigests(HashesDaAuditoria.digestsDosJson(beforeJson, afterJson, metadataJson));
       event.setCreatedAt(now);
-      event.setEventHash(hashEvent(event));
+      // O elo (chain_seq, prev_event_hash, chain_hash) NAO e calculado aqui: ler "o ultimo evento"
+      // sem trava bifurcava a cadeia em escritas simultaneas (52 bifurcacoes em producao ate
+      // 07/11/2026). O SeladorDaAuditoria liga os eventos ja confirmados, um por vez.
+      event.setEventHash(HashesDaAuditoria.hashDoConteudoV2(event));
 
       auditEventRepository.save(event);
       registrarMetricas(status, true, sample);
@@ -289,26 +290,6 @@ public class AuditService {
           e);
       throw e;
     }
-  }
-
-  private String hashEvent(AuditEvent event) {
-    String payload = String.join(
-        "|",
-        safe(event.getTenantId()),
-        safe(event.getModule()),
-        safe(event.getAction()),
-        safe(event.getEntityType()),
-        safe(event.getEntityId()),
-        safe(event.getStatus()),
-        safe(event.getRequestId()),
-        safe(event.getSourceChannel()),
-        safe(event.getBeforeJson()),
-        safe(event.getAfterJson()),
-        safe(event.getMetadataJson()),
-        safe(event.getChangedFieldsJson()),
-        safe(event.getPrevEventHash()),
-        safe(event.getCreatedAt()));
-    return sha256(payload);
   }
 
   private ChangeResult detectChanges(String beforeJson, String afterJson) {
@@ -420,20 +401,6 @@ public class AuditService {
     if (value == null) return null;
     if (value.length() <= max) return value;
     return value.substring(0, max);
-  }
-
-  private String sha256(String input) {
-    try {
-      MessageDigest digest = MessageDigest.getInstance("SHA-256");
-      byte[] hash = digest.digest(input.getBytes(StandardCharsets.UTF_8));
-      return HexFormat.of().formatHex(hash);
-    } catch (Exception e) {
-      throw new IllegalStateException("Falha ao gerar hash de auditoria", e);
-    }
-  }
-
-  private String safe(Object value) {
-    return value == null ? "" : String.valueOf(value);
   }
 
   private void registrarMetricas(String status, boolean success, Timer.Sample sample) {
