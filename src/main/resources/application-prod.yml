@@ -5,6 +5,11 @@ spring:
     username: ${DB_USERNAME}
     password: ${DB_PASSWORD}
     url: ${DB_URL}
+  # A API conecta com um papel sem superusuario e sem posse das tabelas (DB_USERNAME); as migrations
+  # precisam do dono (CREATE/ALTER). Sem FLYWAY_DB_*, vale o mesmo usuario da API, como antes.
+  flyway:
+    user: ${FLYWAY_DB_USERNAME:${DB_USERNAME}}
+    password: ${FLYWAY_DB_PASSWORD:${DB_PASSWORD}}
 
 app:
   security:
