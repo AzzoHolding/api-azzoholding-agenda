@@ -121,6 +121,13 @@ public class AuthServiceImpl implements AuthService {
    */
   private final ConcurrentHashMap<UUID, Long> ultimoPassoMfa = new ConcurrentHashMap<>();
 
+  /**
+   * Erros da senha ATUAL na troca de senha, por pessoa. Sem limite, quem pegasse uma sessao aberta
+   * (computador destravado) testava a senha atual a vontade (achado em 08/11/2026). Em memoria,
+   * como o bloqueio do login.
+   */
+  private final ConcurrentHashMap<UUID, LoginAttemptEntry> errosDaSenhaAtual = new ConcurrentHashMap<>();
+
   private final TenantRepository tenantRepository;
   private final UsuarioRepository usuarioRepository;
   private final RbacRoleRepository rbacRoleRepository;
@@ -496,14 +503,25 @@ public class AuthServiceImpl implements AuthService {
     usuario.setPhone(
         br.com.phdigitalcode.azzo.agenda.pro.util.TelefoneBr.normalizarSeMudou(request.phone, usuario.getPhone()));
     usuarioRepository.save(usuario);
-    registrarAuditoriaAuth(
-        usuario.getTenantId(),
-        usuario.getId(),
-        AuditConstants.Status.SUCCESS,
-        "AUTH_PROFILE_UPDATED",
-        Map.of(
-            "nomeMudou", !java.util.Objects.equals(nomeAntes, usuario.getName()),
-            "telefoneMudou", !java.util.Objects.equals(telefoneAntes, usuario.getPhone())));
+    // A trilha mostra o nome de antes e o de depois. O telefone fica so como "mudou": e dado
+    // pessoal, e a trilha guarda por 365 dias.
+    boolean telefoneMudou = !java.util.Objects.equals(telefoneAntes, usuario.getPhone());
+    try {
+      AuditEventCommand command = new AuditEventCommand();
+      command.tenantId = usuario.getTenantId();
+      command.actorUserId = usuario.getId();
+      command.module = AuditConstants.Module.AUTH;
+      command.action = "AUTH_PROFILE_UPDATED";
+      command.entityType = "USER_AUTH";
+      command.entityId = usuario.getId().toString();
+      command.sourceChannel = AuditConstants.SourceChannel.API;
+      command.before = Map.of("name", nomeAntes == null ? "" : nomeAntes, "telefone", "(oculto)");
+      command.after = Map.of("name", usuario.getName(), "telefone", telefoneMudou ? "(alterado)" : "(oculto)");
+      command.metadata = Map.of("telefoneMudou", telefoneMudou);
+      if (usuario.getTenantId() != null) auditService.recordSuccess(command);
+    } catch (Exception ignored) {
+      // Auditoria nao deve quebrar a tela de perfil.
+    }
     return usuarioMapper.toResponse(usuario);
   }
 
@@ -512,11 +530,28 @@ public class AuthServiceImpl implements AuthService {
   public GenericMessageResponse trocarMinhaSenha(UUID userId, TrocarMinhaSenhaRequest request) {
     Usuario usuario = usuarioRepository.findById(userId)
         .orElseThrow(() -> new ApiClientErrorException("Usuário não encontrado", 401));
+    LoginAttemptEntry erros = errosDaSenhaAtual.get(userId);
+    if (erros != null && erros.windowStart().isBefore(Instant.now().minus(EMAIL_LOCKOUT_WINDOW))) {
+      errosDaSenhaAtual.remove(userId);
+    } else if (erros != null && erros.count().get() >= EMAIL_LOCKOUT_MAX_ATTEMPTS) {
+      registrarAuditoriaAuth(
+          usuario.getTenantId(), usuario.getId(), AuditConstants.Status.DENIED, "AUTH_PASSWORD_CHANGE",
+          Map.of("reason", "TOO_MANY_ATTEMPTS"));
+      throw new ApiClientErrorException("Muitas tentativas. Aguarde 15 minutos e tente novamente.", 429);
+    }
     boolean atualConfere = usuario.getPasswordHash() != null
         && BCrypt.verifyer().verify(request.senhaAtual.toCharArray(), usuario.getPasswordHash()).verified;
     if (!atualConfere) {
+      errosDaSenhaAtual.compute(userId, (k, existente) -> {
+        if (existente == null || existente.windowStart().isBefore(Instant.now().minus(EMAIL_LOCKOUT_WINDOW))) {
+          return new LoginAttemptEntry(new AtomicInteger(1), Instant.now());
+        }
+        existente.count().incrementAndGet();
+        return existente;
+      });
       registrarAuditoriaAuth(
-          usuario.getTenantId(), usuario.getId(), AuditConstants.Status.DENIED, "AUTH_PASSWORD_CHANGE", Map.of());
+          usuario.getTenantId(), usuario.getId(), AuditConstants.Status.DENIED, "AUTH_PASSWORD_CHANGE",
+          Map.of("reason", "CURRENT_PASSWORD_MISMATCH"));
       // Sem a palavra "senha": o GlobalExceptionHandler.safeMessage troca qualquer mensagem com ela
       // por "Erro na requisicao", e a tela ficava sem dizer o que errou.
       throw new ApiClientErrorException("A atual não confere. Digite a mesma que você usa para entrar.", 400);
@@ -529,6 +564,7 @@ public class AuthServiceImpl implements AuthService {
     usuarioRepository.save(usuario);
     passwordResetTokenRepository.markAllActiveAsUsedByUser(usuario.getId(), Instant.now());
     refreshTokenService.revokeAllForUser(usuario.getId());
+    errosDaSenhaAtual.remove(userId);
     registrarAuditoriaAuth(
         usuario.getTenantId(), usuario.getId(), AuditConstants.Status.SUCCESS, "AUTH_PASSWORD_CHANGE", Map.of());
     return new GenericMessageResponse("Senha trocada. Entre de novo com a nova senha.");
@@ -560,7 +596,10 @@ public class AuthServiceImpl implements AuthService {
       if (AuditConstants.Status.SUCCESS.equals(status)) {
         auditService.recordSuccess(command);
       } else if (AuditConstants.Status.DENIED.equals(status)) {
-        auditService.recordDenied(command);
+        // Transacao PROPRIA: quem e recusado sai com excecao, e a transacao do login/troca desfaz.
+        // Com recordDenied comum o evento sumia junto — producao tinha 118 logins e nenhuma
+        // recusa na trilha (achado em 08/11/2026).
+        auditService.recordDeniedIsolated(command);
       } else {
         auditService.recordError(command);
       }

@@ -76,6 +76,13 @@ public class ServicoPublicBooking {
   private final ProfissionalWorkingHourRepository profissionalWorkingHourRepository;
   private final AgendamentoQueryRepository agendamentoQueryRepository;
 
+  private FotosDaEquipe fotos;
+
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setFotosDaEquipe(FotosDaEquipe fotos) {
+    this.fotos = fotos;
+  }
+
   public ServicoPublicBooking(
       TenantRepository tenantRepository,
       ServicoRepository servicoRepository,
@@ -627,7 +634,10 @@ public class ServicoPublicBooking {
     PublicBookingDtos.PublicProfessional r = new PublicBookingDtos.PublicProfessional();
     r.id = p.getId().toString();
     r.name = p.getName();
-    r.avatar = p.getAvatar();
+    // So URL: a chave do storage no <img> era foto quebrada. Sem o servico (teste), so a URL de fora.
+    r.avatar = fotos != null
+        ? fotos.url(p.getTenantId(), p.getAvatar())
+        : (p.getAvatar() != null && p.getAvatar().startsWith("http") ? p.getAvatar() : null);
     if (p.getSpecialties() != null) {
       r.specialties = p.getSpecialties().stream().map(Specialty::getName).sorted().toList();
     }
