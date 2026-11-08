@@ -59,7 +59,8 @@ public class ReportMaterializedViewRefreshService {
 
   private boolean refreshConcurrently(String viewName) {
     // viewName vem so da lista fixa acima — nunca de entrada externa.
-    String refresh = "REFRESH MATERIALIZED VIEW CONCURRENTLY " + viewName;
+    // Pela funcao da V165: a API nao e mais dona das views (nem superusuario), e REFRESH exige o dono.
+    String refresh = "SELECT atualizar_view_de_relatorio('" + viewName + "')";
     String estado =
         """
         INSERT INTO report_materialized_view_refresh_state(view_name, refreshed_at)
