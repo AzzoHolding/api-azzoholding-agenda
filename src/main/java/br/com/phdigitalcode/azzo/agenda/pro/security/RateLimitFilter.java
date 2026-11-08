@@ -147,7 +147,11 @@ public class RateLimitFilter extends OncePerRequestFilter {
           "/api/v1/auth/confirm-email",
           new RateLimitRule("auth-confirm-email", resetMax, Duration.ofMinutes(resetWindow)),
           "/api/v1/auth/resend-email-confirmation",
-          new RateLimitRule("auth-resend-email-confirmation", forgotMax, Duration.ofMinutes(forgotWindow)));
+          new RateLimitRule("auth-resend-email-confirmation", forgotMax, Duration.ofMinutes(forgotWindow)),
+          // A troca de senha confere a senha atual: sem limite, uma sessao aberta testava a atual
+          // a vontade (08/11/2026). O servico tambem limita por pessoa.
+          "/api/v1/auth/change-password",
+          new RateLimitRule("auth-change-password", resetMax, Duration.ofMinutes(resetWindow)));
 
       // Pentest 14/10/2026 (SEG-011/AGD-012): o agendamento publico nao tinha limite — dava para
       // encher a agenda de um salao de pedidos falsos e disparar confirmacao para telefones de

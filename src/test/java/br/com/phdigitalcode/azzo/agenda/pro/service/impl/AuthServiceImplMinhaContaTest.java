@@ -155,4 +155,49 @@ class AuthServiceImplMinhaContaTest {
     assertThat(usuario.getPhone()).isEqualTo("21987654321");
     verify(usuarioRepository).save(usuario);
   }
+
+  @Test
+  void recusaDaSenhaAtualFicaNaTrilhaMesmoComORollback() {
+    assertThatThrownBy(() -> service.trocarMinhaSenha(usuario.getId(), troca("Errada@1", "Nova@4567")))
+        .isInstanceOf(ApiClientErrorException.class);
+
+    // Transacao propria: a excecao desfaz a troca, mas nao a prova da tentativa.
+    ArgumentCaptor<AuditEventCommand> captor = ArgumentCaptor.forClass(AuditEventCommand.class);
+    verify(auditService).recordDeniedIsolated(captor.capture());
+    assertThat(captor.getValue().action).isEqualTo("AUTH_PASSWORD_CHANGE");
+    verify(auditService, never()).recordDenied(any());
+  }
+
+  @Test
+  void cincoErrosDaSenhaAtualBloqueiamAteComASenhaCerta() {
+    for (int i = 0; i < 5; i++) {
+      assertThatThrownBy(() -> service.trocarMinhaSenha(usuario.getId(), troca("Errada@1", "Nova@4567")))
+          .hasMessageStartingWith("A atual não confere");
+    }
+
+    assertThatThrownBy(() -> service.trocarMinhaSenha(usuario.getId(), troca("Senha@123", "Nova@4567")))
+        .isInstanceOf(ApiClientErrorException.class)
+        .hasMessageStartingWith("Muitas tentativas")
+        .extracting(e -> ((ApiClientErrorException) e).getStatus())
+        .isEqualTo(429);
+    assertThat(BCrypt.verifyer().verify("Senha@123".toCharArray(), usuario.getPasswordHash()).verified).isTrue();
+  }
+
+  @Test
+  void trilhaDoPerfilMostraONomeDeAntesEODeDepoisSemOTelefone() {
+    usuario.setPhone("21987654321");
+    AtualizarMeuPerfilRequest request = new AtualizarMeuPerfilRequest();
+    request.name = "Bruna Souza";
+    request.phone = "(21) 91234-5678";
+
+    service.atualizarMeuPerfil(usuario.getId(), request);
+
+    ArgumentCaptor<AuditEventCommand> captor = ArgumentCaptor.forClass(AuditEventCommand.class);
+    verify(auditService).recordSuccess(captor.capture());
+    AuditEventCommand evento = captor.getValue();
+    assertThat(evento.action).isEqualTo("AUTH_PROFILE_UPDATED");
+    assertThat((java.util.Map<String, Object>) evento.before).containsEntry("name", "Bruna");
+    assertThat((java.util.Map<String, Object>) evento.after).containsEntry("name", "Bruna Souza").containsEntry("telefone", "(alterado)");
+    assertThat(evento.before.toString() + evento.after.toString()).doesNotContain("98765").doesNotContain("91234");
+  }
 }
