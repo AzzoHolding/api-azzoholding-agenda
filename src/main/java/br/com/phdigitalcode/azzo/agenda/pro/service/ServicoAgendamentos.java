@@ -177,6 +177,13 @@ public class ServicoAgendamentos {
 
   private final PermissionService permissionService;
 
+  private FotosDaEquipe fotos;
+
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setFotosDaEquipe(FotosDaEquipe fotos) {
+    this.fotos = fotos;
+  }
+
   public ServicoAgendamentos(
       AgendamentoRepository agendamentoRepository,
       AgendamentoQueryRepository agendamentoQueryRepository,
@@ -2638,6 +2645,7 @@ public class ServicoAgendamentos {
       pr.email = p.getEmail();
       pr.phone = p.getPhone();
       pr.avatar = p.getAvatar();
+      pr.avatarUrl = fotos == null ? null : fotos.url(p.getTenantId(), p.getAvatar());
       pr.commissionRate = p.getCommissionRate();
       pr.isActive = p.isActive();
       pr.createdAt = p.getCreatedAt() != null ? p.getCreatedAt().toString() : null;

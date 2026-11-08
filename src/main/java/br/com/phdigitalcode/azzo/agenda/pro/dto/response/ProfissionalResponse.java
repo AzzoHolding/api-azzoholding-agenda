@@ -13,6 +13,8 @@ public class ProfissionalResponse {
   public String email;
   public String phone;
   public String avatar;
+  /** A foto pronta para o navegador (link assinado do proxy). Nulo: a tela mostra as iniciais. */
+  public String avatarUrl;
   public List<String> specialties;
   /** Especialidades com nome + descricao - usado pelo assistente WhatsApp. */
   public List<SpecialidadeInfoDto> specialtiesDetailed;

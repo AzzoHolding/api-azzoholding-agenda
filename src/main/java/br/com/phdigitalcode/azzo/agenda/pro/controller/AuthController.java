@@ -72,6 +72,13 @@ public class AuthController {
   private final VerificacaoDoDocumentoNoCadastro verificacaoDoDocumento;
   private final ServicoConfirmacaoDeEmail confirmacaoDeEmail;
 
+  private br.com.phdigitalcode.azzo.agenda.pro.service.FotosDaEquipe fotosDaEquipe;
+
+  @org.springframework.beans.factory.annotation.Autowired
+  void setFotosDaEquipe(br.com.phdigitalcode.azzo.agenda.pro.service.FotosDaEquipe fotosDaEquipe) {
+    this.fotosDaEquipe = fotosDaEquipe;
+  }
+
   public AuthController(
       AuthService authService,
       AuthCookieService authCookieService,
@@ -179,6 +186,22 @@ public class AuthController {
   @PutMapping("/me")
   public UsuarioResponse atualizarMe(@Valid @RequestBody AtualizarMeuPerfilRequest request) {
     return authService.atualizarMeuPerfil(usuarioLogado(), request);
+  }
+
+  /** A propria foto (tela Perfil). Multipart, campo {@code file}. */
+  @PostMapping(value = "/me/avatar", consumes = org.springframework.http.MediaType.MULTIPART_FORM_DATA_VALUE)
+  public UsuarioResponse enviarMinhaFoto(
+      @org.springframework.web.bind.annotation.RequestPart(name = "file", required = false)
+          org.springframework.web.multipart.MultipartFile arquivo) throws java.io.IOException {
+    if (arquivo == null) throw new ApiClientErrorException("Escolha uma imagem.", 400);
+    fotosDaEquipe.trocarAMinha(arquivo.getBytes(), arquivo.getOriginalFilename());
+    return me();
+  }
+
+  @org.springframework.web.bind.annotation.DeleteMapping("/me/avatar")
+  public UsuarioResponse removerMinhaFoto() {
+    fotosDaEquipe.removerAMinha();
+    return me();
   }
 
   @PostMapping("/change-password")
