@@ -18,6 +18,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.dto.NfseReceitaDtos;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.NfseDocumentoDaReceitaEntity;
 import br.com.phdigitalcode.azzo.agenda.pro.security.ContextoTenant;
 import br.com.phdigitalcode.azzo.agenda.pro.service.FiscalAccessService;
+import br.com.phdigitalcode.azzo.agenda.pro.service.AuditoriaFiscal;
 import br.com.phdigitalcode.azzo.agenda.pro.service.ServicoDeNotasDaReceita;
 
 /**
@@ -32,6 +33,17 @@ public class NfseReceitaController {
   private final ServicoDeNotasDaReceita servico;
   private final FiscalAccessService fiscalAccessService;
   private final ContextoTenant contextoTenant;
+  private AuditoriaFiscal auditoriaFiscal;
+
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setAuditoriaFiscal(AuditoriaFiscal auditoriaFiscal) {
+    this.auditoriaFiscal = auditoriaFiscal;
+  }
+
+  private void auditar(String acao, Object id, java.util.Map<String, ?> detalhes) {
+    if (auditoriaFiscal == null) return;
+    auditoriaFiscal.registrar(contextoTenant.obterTenantIdOuFalhar(), acao, AuditoriaFiscal.NOTA_DA_RECEITA, id, detalhes);
+  }
 
   public NfseReceitaController(
       ServicoDeNotasDaReceita servico, FiscalAccessService fiscalAccessService, ContextoTenant contextoTenant) {
@@ -44,7 +56,9 @@ public class NfseReceitaController {
   @PreAuthorize(FiscalController.OPERACAO)
   public NfseReceitaDtos.BuscaResponse buscar(@RequestBody(required = false) NfseReceitaDtos.BuscaRequest pedido) {
     validarAcesso();
-    return servico.buscar(pedido);
+    NfseReceitaDtos.BuscaResponse resposta = servico.buscar(pedido);
+    auditar("RECEITA_SEARCH", null, AuditoriaFiscal.detalhes("ambiente", pedido == null ? null : pedido.ambiente));
+    return resposta;
   }
 
   @GetMapping("/notas")
@@ -61,18 +75,22 @@ public class NfseReceitaController {
   public ResponseEntity<byte[]> xml(@PathVariable String id) {
     validarAcesso();
     NfseDocumentoDaReceitaEntity doc = servico.obter(id);
+    byte[] xml = servico.xml(id).getBytes(StandardCharsets.UTF_8);
+    auditar("RECEITA_XML_DOWNLOAD", id, AuditoriaFiscal.detalhes("chaveAcesso", doc.getChaveAcesso()));
     return ResponseEntity.ok()
         .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + nomeDoArquivo(doc) + ".xml\"")
-        .body(servico.xml(id).getBytes(StandardCharsets.UTF_8));
+        .body(xml);
   }
 
   @GetMapping(value = "/notas/{id}/danfse", produces = MediaType.APPLICATION_PDF_VALUE)
   public ResponseEntity<byte[]> danfse(@PathVariable String id) {
     validarAcesso();
     NfseDocumentoDaReceitaEntity doc = servico.obter(id);
+    byte[] pdf = servico.danfse(id);
+    auditar("RECEITA_DANFSE_DOWNLOAD", id, AuditoriaFiscal.detalhes("chaveAcesso", doc.getChaveAcesso()));
     return ResponseEntity.ok()
         .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + nomeDoArquivo(doc) + ".pdf\"")
-        .body(servico.danfse(id));
+        .body(pdf);
   }
 
   private static String nomeDoArquivo(NfseDocumentoDaReceitaEntity doc) {

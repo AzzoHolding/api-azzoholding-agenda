@@ -39,6 +39,28 @@ public class RetentionService {
       String executedBy,
       String executionId,
       Map<String, Object> reportMetadata) {
+    return registerPurgeEvent(
+        tenantId, policyVersion, retentionPeriodDays, windowStart, windowEnd, affectedRows, executedBy,
+        executionId, reportMetadata, null, null);
+  }
+
+  /**
+   * Com a ancora da cadeia (V164): o elo do ultimo evento removido. Ela entra na evidencia so quando
+   * existe — a evidencia dos expurgos antigos continua conferivel como era.
+   */
+  @Transactional
+  public AuditRetentionEvent registerPurgeEvent(
+      UUID tenantId,
+      String policyVersion,
+      int retentionPeriodDays,
+      Instant windowStart,
+      Instant windowEnd,
+      long affectedRows,
+      String executedBy,
+      String executionId,
+      Map<String, Object> reportMetadata,
+      String chainAnchorHash,
+      Long chainAnchorSeq) {
     if (policyVersion == null || policyVersion.isBlank()) throw new IllegalArgumentException("policyVersion obrigatória");
     if (retentionPeriodDays < 1) throw new IllegalArgumentException("retentionPeriodDays inválido");
     if (windowStart == null || windowEnd == null) throw new IllegalArgumentException("janela de expurgo obrigatória");
@@ -57,7 +79,8 @@ public class RetentionService {
             String.valueOf(affectedRows),
             executedBy.trim(),
             executionId.trim(),
-            reportJson == null ? "" : reportJson));
+            reportJson == null ? "" : reportJson)
+            + (chainAnchorHash == null ? "" : "|anchor=" + chainAnchorHash + "@" + chainAnchorSeq));
 
     AuditRetentionEvent event = new AuditRetentionEvent();
     event.setTenantId(tenantId);
@@ -69,6 +92,8 @@ public class RetentionService {
     event.setExecutedBy(executedBy.trim());
     event.setExecutionId(executionId.trim());
     event.setEvidenceHash(evidenceHash);
+    event.setChainAnchorHash(chainAnchorHash);
+    event.setChainAnchorSeq(chainAnchorSeq);
     auditRetentionEventRepository.save(event);
     return event;
   }

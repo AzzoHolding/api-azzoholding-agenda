@@ -1088,6 +1088,20 @@ public class NfseService {
     event.setPayloadHash(payloadSource == null ? null : sha256(payloadSource));
     event.setRequestedBy(authenticatedUser.idOuNulo());
     nfseInvoiceEventRepository.save(event);
+    if (auditoriaFiscal != null) {
+      auditoriaFiscal.registrar(
+          tenantId,
+          "NFSE_" + eventType,
+          AuditoriaFiscal.NOTA,
+          invoiceId,
+          AuditoriaFiscal.detalhes(
+              "status", eventStatus,
+              "codigo", providerCode,
+              "mensagem", providerMessage == null || providerMessage.length() <= 300
+                  ? providerMessage
+                  : providerMessage.substring(0, 300),
+              "payloadHash", event.getPayloadHash()));
+    }
   }
 
   private void transicionarFiscalStatus(
@@ -1391,6 +1405,14 @@ public class NfseService {
 
   /** Injetado por setter: o construtor ja e grande e e montado a mao nos testes. */
   private br.com.phdigitalcode.azzo.agenda.pro.repository.NfseDocumentoDaReceitaRepository notasDaReceita;
+
+  private AuditoriaFiscal auditoriaFiscal;
+
+  /** Cada evento da nota (emitir, recusa, cancelar...) tambem vai para a trilha geral. */
+  @Autowired(required = false)
+  void setAuditoriaFiscal(AuditoriaFiscal auditoriaFiscal) {
+    this.auditoriaFiscal = auditoriaFiscal;
+  }
 
   @Autowired(required = false)
   void setNotasDaReceita(br.com.phdigitalcode.azzo.agenda.pro.repository.NfseDocumentoDaReceitaRepository notasDaReceita) {

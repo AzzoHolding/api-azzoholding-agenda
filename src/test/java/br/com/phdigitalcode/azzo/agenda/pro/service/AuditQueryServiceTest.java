@@ -166,9 +166,30 @@ class AuditQueryServiceTest {
         .isEqualTo("{\"reason\":\"Valor diferente\"}");
   }
 
+  /** Evento v1 com o hash que a versao antiga gravava (instante em nanossegundos). */
+  private AuditEvent eventoV1(String anterior) {
+    AuditEvent event = buildEvent(AuditConstants.Module.FINANCE, UUID.randomUUID(), Instant.parse("2026-10-01T12:00:00.123456789Z"));
+    event.setPrevEventHash(anterior);
+    event.setEventHash(br.com.phdigitalcode.azzo.agenda.pro.integration.HashesDaAuditoria.hashV1(event));
+    event.setCreatedAt(Instant.parse("2026-10-01T12:00:00.123457Z")); // o banco arredonda
+    return event;
+  }
+
+  private AuditEvent eventoV2Selado(long posicao, String anterior) {
+    AuditEvent event = buildEvent(AuditConstants.Module.FINANCE, UUID.randomUUID(), Instant.parse("2026-11-08T12:00:00.123456Z"));
+    event.setHashVersion((short) 2);
+    event.setPayloadDigests(br.com.phdigitalcode.azzo.agenda.pro.integration.HashesDaAuditoria.digestsDosJson(null, null, null));
+    event.setEventHash(br.com.phdigitalcode.azzo.agenda.pro.integration.HashesDaAuditoria.hashDoConteudoV2(event));
+    event.setChainSeq(posicao);
+    event.setPrevEventHash(anterior);
+    event.setSealedAt(Instant.now());
+    event.setChainHash(br.com.phdigitalcode.azzo.agenda.pro.integration.HashesDaAuditoria.hashDoElo(event));
+    return event;
+  }
+
   @Test
-  void detailRetornaChainValidTrueQuandoNaoHaPrevHash() {
-    AuditEvent event = buildEvent(AuditConstants.Module.FINANCE, UUID.randomUUID(), Instant.now());
+  void detailLegadoSemAnteriorComHashCorretoConfere() {
+    AuditEvent event = eventoV1(null);
     when(auditEventRepository.findById(event.getId())).thenReturn(java.util.Optional.of(event));
 
     AuditDtos.AuditEventDetail detail = service.detail(tenantId, event.getId().toString());
@@ -178,49 +199,50 @@ class AuditQueryServiceTest {
   }
 
   @Test
-  void detailRetornaChainValidFalseQuandoHashAnteriorNaoBate() {
-    AuditEvent event = buildEvent(AuditConstants.Module.FINANCE, UUID.randomUUID(), Instant.now());
-    event.setPrevEventHash("hash-esperado");
+  void detailLegadoAdulteradoNaoConfere() {
+    AuditEvent event = eventoV1(null);
+    event.setAction("OUTRA_ACAO");
     when(auditEventRepository.findById(event.getId())).thenReturn(java.util.Optional.of(event));
 
-    AuditEvent previous = buildEvent(AuditConstants.Module.FINANCE, UUID.randomUUID(), event.getCreatedAt().minusSeconds(10));
-    previous.setEventHash("hash-diferente");
-    when(auditEventRepository.findAll(any(Specification.class), any(PageRequest.class)))
-        .thenReturn(new PageImpl<>(List.of(previous)));
-
-    AuditDtos.AuditEventDetail detail = service.detail(tenantId, event.getId().toString());
-
-    assertThat(detail.chainValid).isFalse();
+    assertThat(service.detail(tenantId, event.getId().toString()).chainValid).isFalse();
   }
 
   @Test
-  void detailRetornaChainValidTrueQuandoHashAnteriorBate() {
-    AuditEvent event = buildEvent(AuditConstants.Module.FINANCE, UUID.randomUUID(), Instant.now());
-    event.setPrevEventHash("hash-esperado");
+  void detailLegadoConfereOEloPeloAnteriorQueExisteOuPeloExpurgo() {
+    AuditEvent event = eventoV1("hash-anterior");
     when(auditEventRepository.findById(event.getId())).thenReturn(java.util.Optional.of(event));
 
-    AuditEvent previous = buildEvent(AuditConstants.Module.FINANCE, UUID.randomUUID(), event.getCreatedAt().minusSeconds(10));
-    previous.setEventHash("hash-esperado");
-    when(auditEventRepository.findAll(any(Specification.class), any(PageRequest.class)))
-        .thenReturn(new PageImpl<>(List.of(previous)));
+    when(auditEventRepository.count(any(Specification.class))).thenReturn(1L);
+    assertThat(service.detail(tenantId, event.getId().toString()).chainValid).isTrue();
 
-    AuditDtos.AuditEventDetail detail = service.detail(tenantId, event.getId().toString());
+    when(auditEventRepository.count(any(Specification.class))).thenReturn(0L);
+    assertThat(service.detail(tenantId, event.getId().toString()).chainValid).isFalse();
 
-    assertThat(detail.chainValid).isTrue();
-  }
-
-  @Test
-  void detailUsaLimiteDePurgaQuandoNaoHaCandidatoAnterior() {
-    AuditEvent event = buildEvent(AuditConstants.Module.FINANCE, UUID.randomUUID(), Instant.now());
-    event.setPrevEventHash("hash-esperado");
-    when(auditEventRepository.findById(event.getId())).thenReturn(java.util.Optional.of(event));
-    when(auditEventRepository.findAll(any(Specification.class), any(PageRequest.class)))
-        .thenReturn(new PageImpl<>(List.of()));
     when(auditRetentionEventRepository.existsPurgeBoundaryBefore(tenantId, event.getCreatedAt())).thenReturn(true);
+    assertThat(service.detail(tenantId, event.getId().toString()).chainValid).isTrue();
+  }
 
-    AuditDtos.AuditEventDetail detail = service.detail(tenantId, event.getId().toString());
+  @Test
+  void detailSeladoConfereOConteudoEOEloComAPosicaoAnterior() {
+    AuditEvent anterior = eventoV2Selado(4, "elo-3");
+    AuditEvent event = eventoV2Selado(5, anterior.getChainHash());
+    when(auditEventRepository.findById(event.getId())).thenReturn(java.util.Optional.of(event));
+    when(auditEventRepository.naPosicao(tenantId, 4)).thenReturn(java.util.Optional.of(anterior));
 
-    assertThat(detail.chainValid).isTrue();
+    assertThat(service.detail(tenantId, event.getId().toString()).chainValid).isTrue();
+
+    event.setIpAddress("192.168.0.99");
+    assertThat(service.detail(tenantId, event.getId().toString()).chainValid).isFalse();
+  }
+
+  @Test
+  void detailAindaSemSeloNaoDizQueConfereNemQueQuebrou() {
+    AuditEvent event = eventoV2Selado(1, null);
+    event.setChainSeq(null);
+    event.setChainHash(null);
+    when(auditEventRepository.findById(event.getId())).thenReturn(java.util.Optional.of(event));
+
+    assertThat(service.detail(tenantId, event.getId().toString()).chainValid).isNull();
   }
 
   @Test

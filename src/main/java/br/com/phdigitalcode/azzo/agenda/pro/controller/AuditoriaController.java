@@ -22,7 +22,9 @@ import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditConstants;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditEventCommand;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditService;
 import br.com.phdigitalcode.azzo.agenda.pro.security.ContextoTenant;
+import br.com.phdigitalcode.azzo.agenda.pro.entity.AuditChainVerification;
 import br.com.phdigitalcode.azzo.agenda.pro.service.AuditQueryService;
+import br.com.phdigitalcode.azzo.agenda.pro.service.ConferenciaDaAuditoria;
 
 /**
  * Espelha {@code modules/audit/api/AuditoriaResource.java} ({@code @Path("/api/v1/auditoria")},
@@ -41,9 +43,14 @@ public class AuditoriaController {
   private final ContextoTenant contextoTenant;
   private final AuditQueryService auditQueryService;
   private final AuditService auditService;
+  private final ConferenciaDaAuditoria conferencia;
 
   public AuditoriaController(
-      ContextoTenant contextoTenant, AuditQueryService auditQueryService, AuditService auditService) {
+      ContextoTenant contextoTenant,
+      AuditQueryService auditQueryService,
+      AuditService auditService,
+      ConferenciaDaAuditoria conferencia) {
+    this.conferencia = conferencia;
     this.contextoTenant = contextoTenant;
     this.auditQueryService = auditQueryService;
     this.auditService = auditService;
@@ -143,20 +150,68 @@ public class AuditoriaController {
         .body(download.payload());
   }
 
+  /** A ultima conferencia da cadeia do salao. Sem nenhuma: {@code NUNCA_CONFERIDA}. */
+  @GetMapping("/integridade")
+  public AuditDtos.AuditIntegrityResponse integridade() {
+    UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    AuditDtos.AuditIntegrityResponse response =
+        conferencia.ultima(tenantId).map(AuditoriaController::paraResposta).orElseGet(() -> {
+          AuditDtos.AuditIntegrityResponse vazio = new AuditDtos.AuditIntegrityResponse();
+          vazio.status = "NUNCA_CONFERIDA";
+          return vazio;
+        });
+    auditarLeitura(tenantId, "AUDIT_INTEGRITY_READ", null, Map.of("status", response.status));
+    return response;
+  }
+
+  /** Confere agora: sela a fila e recalcula a cadeia inteira do salao. */
+  @PostMapping("/integridade/verificar")
+  public AuditDtos.AuditIntegrityResponse verificarIntegridade() {
+    UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    AuditChainVerification resultado = conferencia.conferir(tenantId, "USUARIO", true);
+    AuditDtos.AuditIntegrityResponse response = paraResposta(resultado);
+    auditarLeitura(
+        tenantId,
+        "AUDIT_INTEGRITY_VERIFY",
+        resultado.getId() == null ? null : resultado.getId().toString(),
+        Map.of("status", response.status, "failures", response.failures));
+    return response;
+  }
+
+  private static AuditDtos.AuditIntegrityResponse paraResposta(AuditChainVerification v) {
+    AuditDtos.AuditIntegrityResponse r = new AuditDtos.AuditIntegrityResponse();
+    r.status = v.getStatus();
+    r.checkedEvents = v.getCheckedEvents();
+    r.sealedEvents = v.getSealedEvents();
+    r.legacyEvents = v.getLegacyEvents();
+    r.legacyForks = v.getLegacyForks();
+    r.redactedEvents = v.getRedactedEvents();
+    r.pendingSeal = v.getPendingSeal();
+    r.failures = v.getFailures();
+    r.firstFailureEventId = v.getFirstFailureEventId() == null ? null : v.getFirstFailureEventId().toString();
+    r.firstFailureReason = v.getFirstFailureReason();
+    r.lastChainSeq = v.getLastChainSeq();
+    r.lastChainHash = v.getLastChainHash();
+    r.executedBy = v.getExecutedBy();
+    r.startedAt = v.getStartedAt() == null ? null : v.getStartedAt().toString();
+    r.finishedAt = v.getFinishedAt() == null ? null : v.getFinishedAt().toString();
+    return r;
+  }
+
+  /**
+   * Quem leu ou exportou a trilha fica nela. Se esse registro falhar, a leitura falha junto: antes a
+   * falha era engolida, e uma exportacao inteira podia sair sem deixar rastro.
+   */
   private void auditarLeitura(UUID tenantId, String action, String entityId, Object metadata) {
-    try {
-      AuditEventCommand command = new AuditEventCommand();
-      command.tenantId = tenantId;
-      command.module = AuditConstants.Module.SYSTEM;
-      command.action = action;
-      command.entityType = "AUDIT_READ";
-      command.entityId = entityId;
-      command.sourceChannel = AuditConstants.SourceChannel.API;
-      command.metadata = metadata;
-      auditService.recordSuccess(command);
-    } catch (Exception ignored) {
-      // nao bloquear endpoint por falha de auditoria.
-    }
+    AuditEventCommand command = new AuditEventCommand();
+    command.tenantId = tenantId;
+    command.module = AuditConstants.Module.SYSTEM;
+    command.action = action;
+    command.entityType = "AUDIT_READ";
+    command.entityId = entityId;
+    command.sourceChannel = AuditConstants.SourceChannel.API;
+    command.metadata = metadata;
+    auditService.recordSuccess(command);
   }
 
   private List<String> splitList(String value) {
