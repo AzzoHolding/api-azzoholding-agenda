@@ -108,9 +108,11 @@ class PagamentosIntegrationTest {
     public AvisoDaOperadora lerAviso(Conta conta, Map<String, String> cabecalhos, String corpo) {
       try {
         JsonNode n = new ObjectMapper().readTree(corpo);
+        boolean semTaxa = n.path("semTaxa").asBoolean(false);
         return new AvisoDaOperadora(n.path("evento").asText(), "pagamento", n.path("cobranca").asText(),
-            new StatusNaOperadora(Status.valueOf(n.path("status").asText()), BigDecimal.TEN, new BigDecimal("0.15"),
-                new BigDecimal("9.85"), null, "NSU9", "AUT9", "VISA", "4111111111111111", null, null));
+            new StatusNaOperadora(Status.valueOf(n.path("status").asText()), BigDecimal.TEN,
+                semTaxa ? null : new BigDecimal("0.15"), semTaxa ? null : new BigDecimal("9.85"), null, "NSU9", "AUT9",
+                "VISA", "4111111111111111", null, null));
       } catch (Exception e) {
         throw new AvisoInvalido("ilegível");
       }
@@ -123,6 +125,7 @@ class PagamentosIntegrationTest {
   @Autowired private OperadoraDeTeste operadora;
   @Autowired private Ouvinte ouvinte;
   @Autowired private JdbcTemplate jdbc;
+  @Autowired private br.com.phdigitalcode.azzo.agenda.pro.repository.CobrancaRepository cobrancas;
 
   private ServicoDePagamentos.NovaCobranca pix(String chave) {
     return new ServicoDePagamentos.NovaCobranca("TESTE", null, "PIX", BigDecimal.TEN, 1, "teste",
@@ -143,15 +146,18 @@ class PagamentosIntegrationTest {
     contas.save(conta);
 
     // Criar, e o clique duplo (mesma chave) devolve a mesma cobranca sem chamar a operadora de novo.
+    int criadasAntes = operadora.criadas.size();
     PagamentosDtos.Cobranca criada = pagamentos.criar(tenant, pix("comanda-1:pix"));
     PagamentosDtos.Cobranca repetida = pagamentos.criar(tenant, pix("comanda-1:pix"));
     assertThat(criada.status).isEqualTo("AGUARDANDO");
     assertThat(criada.pixCopiaECola).isEqualTo("00020126pix");
     assertThat(repetida.id).isEqualTo(criada.id);
-    assertThat(operadora.criadas).hasSize(1);
+    assertThat(operadora.criadas).hasSize(criadasAntes + 1);
 
     // Aviso pago: status, taxa, liquido, NSU e so os 4 ultimos do cartao.
-    String aviso = "{\"evento\":\"evt-1\",\"cobranca\":\"op-1\",\"status\":\"PAGA\"}";
+    // O id na operadora vem do banco: a operadora de teste e uma so para todos os testes.
+    String op = jdbc.queryForObject("SELECT id_na_operadora FROM cobrancas WHERE id = ?::uuid", String.class, criada.id);
+    String aviso = "{\"evento\":\"evt-1\",\"cobranca\":\"" + op + "\",\"status\":\"PAGA\"}";
     pagamentos.receberAviso("getnet", conta.getWebhookToken(), Map.of(), aviso);
     Map<String, Object> linha = jdbc.queryForMap("SELECT * FROM cobrancas WHERE id = ?::uuid", criada.id);
     assertThat(linha.get("status")).isEqualTo("PAGA");
@@ -170,7 +176,7 @@ class PagamentosIntegrationTest {
 
     // Paga nao volta a "aguardando".
     pagamentos.receberAviso("getnet", conta.getWebhookToken(), Map.of(),
-        "{\"evento\":\"evt-2\",\"cobranca\":\"op-1\",\"status\":\"AGUARDANDO\"}");
+        "{\"evento\":\"evt-2\",\"cobranca\":\"" + op + "\",\"status\":\"AGUARDANDO\"}");
     assertThat(jdbc.queryForObject("SELECT status FROM cobrancas WHERE id = ?::uuid", String.class, criada.id)).isEqualTo("PAGA");
 
     // Token errado ou operadora trocada na URL: nao reconhece.
@@ -185,6 +191,36 @@ class PagamentosIntegrationTest {
     operadora.statusNaConsulta = ProvedorDePagamento.Status.PAGA;
     assertThat(pagamentos.consultarPendentes()).isEqualTo(1);
     assertThat(jdbc.queryForObject("SELECT status FROM cobrancas WHERE id = ?::uuid", String.class, outra.id)).isEqualTo("PAGA");
+  }
+
+  /** Fase 5: sem a taxa real, a cobranca paga ganha taxa, liquido e previsao pela tabela da conta. */
+  @Test
+  void taxaEstimadaPelaTabelaDaContaEntraNosRecebiveis() {
+    UUID tenant = criarTenant();
+    ContaDePagamento conta = new ContaDePagamento();
+    conta.setTenantId(tenant);
+    conta.setProvedor("GETNET");
+    conta.setApelido("Caixa");
+    conta.setAmbiente("SANDBOX");
+    conta.setCredenciaisEnc(cifra.encrypt("{\"apiKey\":\"chave-de-teste\"}"));
+    conta.setWebhookToken("token-" + UUID.randomUUID());
+    conta.setPadraoPara("PIX");
+    contas.save(conta);
+    jdbc.update("INSERT INTO taxas_de_pagamento (id, tenant_id, conta_id, meio, percentual, valor_fixo, dias_para_receber) "
+        + "VALUES (?, ?, ?, 'PIX', 1.000, 0.05, 2)", UUID.randomUUID(), tenant, conta.getId());
+
+    PagamentosDtos.Cobranca criada = pagamentos.criar(tenant, pix("comanda-taxa:pix"));
+    String idNaOperadora = jdbc.queryForObject("SELECT id_na_operadora FROM cobrancas WHERE id = ?::uuid", String.class, criada.id);
+    pagamentos.receberAviso("getnet", conta.getWebhookToken(), Map.of(),
+        "{\"evento\":\"evt-taxa\",\"cobranca\":\"" + idNaOperadora + "\",\"status\":\"PAGA\",\"semTaxa\":true}");
+
+    Map<String, Object> linha = jdbc.queryForMap("SELECT * FROM cobrancas WHERE id = ?::uuid", criada.id);
+    assertThat((BigDecimal) linha.get("taxa")).isEqualByComparingTo("0.15"); // 1% de 10,00 + 0,05
+    assertThat((BigDecimal) linha.get("valor_liquido")).isEqualByComparingTo("9.85");
+    java.time.LocalDate hoje = java.time.LocalDate.now(java.time.ZoneId.of("America/Sao_Paulo"));
+    assertThat(linha.get("previsao_recebimento").toString()).isEqualTo(hoje.plusDays(2).toString());
+    assertThat(cobrancas.recebiveis(tenant, hoje, hoje.plusDays(5))).extracting(c -> c.getId().toString()).containsExactly(criada.id);
+    assertThat(cobrancas.pagasSemPrevisao(tenant)).isZero();
   }
 
   @Test

@@ -117,4 +117,47 @@ public final class PagamentosDtos {
     /** Vazio: estorna o que falta. */
     public BigDecimal valor;
   }
+
+  /** Faixa de taxa da operadora (Fase 5). Percentual em % (3.49 = 3,49%). */
+  public static class Taxa {
+    public String meio;
+    public Integer parcelasDe;
+    public Integer parcelasAte;
+    public java.math.BigDecimal percentual;
+    public java.math.BigDecimal valorFixo;
+    public Integer diasParaReceber;
+  }
+
+  public static class Recebivel {
+    public String cobrancaId;
+    public String data;
+    public String conta;
+    public String provedor;
+    public String meio;
+    public int parcelas;
+    public java.math.BigDecimal bruto;
+    public java.math.BigDecimal taxa;
+    public java.math.BigDecimal liquido;
+    public String origem;
+  }
+
+  public static class TotalDaOperadora {
+    public String conta;
+    public int quantidade;
+    public java.math.BigDecimal bruto = java.math.BigDecimal.ZERO;
+    public java.math.BigDecimal taxa = java.math.BigDecimal.ZERO;
+    public java.math.BigDecimal liquido = java.math.BigDecimal.ZERO;
+  }
+
+  public static class Recebiveis {
+    public String de;
+    public String ate;
+    public java.math.BigDecimal bruto = java.math.BigDecimal.ZERO;
+    public java.math.BigDecimal taxa = java.math.BigDecimal.ZERO;
+    public java.math.BigDecimal liquido = java.math.BigDecimal.ZERO;
+    public List<Recebivel> itens = new ArrayList<>();
+    public List<TotalDaOperadora> porOperadora = new ArrayList<>();
+    /** Pagas sem data prevista: a conta nao tem a tabela de taxas preenchida. */
+    public long semPrevisao;
+  }
 }

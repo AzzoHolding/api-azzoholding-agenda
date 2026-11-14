@@ -1352,6 +1352,7 @@ public class ServicoComanda {
     }
 
     registrarGorjetaSeAplicavel(tenantId, comanda, metodoPagamento);
+    registrarTaxasDaOperadora(tenantId, comanda, pagamentos);
     comanda.setPontosFidelidadeCreditados(
         creditarPontosFidelidadeSeAplicavel(tenantId, comanda, itens, valoresLiquidosPorItem));
 
@@ -1557,6 +1558,56 @@ public class ServicoComanda {
     transacao.setDate(Instant.now());
     transacaoRepository.save(transacao);
     return transacao;
+  }
+
+  /**
+   * Pagamentos integrados (Fase 5): a taxa da operadora vira despesa ao fechar a comanda — real
+   * quando a operadora informou, estimada pela tabela da conta quando nao. Sem taxa conhecida,
+   * nada e lancado (o Azzo nao inventa taxa). O estorno da comanda desfaz esta despesa junto com
+   * as outras transacoes dela.
+   */
+  private void registrarTaxasDaOperadora(UUID tenantId, Comanda comanda, List<ComandaPagamento> pagamentos) {
+    if (cobrancaRepository == null) return;
+    UUID categoriaId = null;
+    for (ComandaPagamento p : pagamentos) {
+      if (p.getCobrancaId() == null || !ComandaPagamento.STATUS_CONFIRMADO.equals(p.getStatus())) continue;
+      var cobranca = cobrancaRepository.findById(p.getCobrancaId()).orElse(null);
+      if (cobranca == null || cobranca.getTaxa() == null || NumericUtil.isZeroOrNegative(cobranca.getTaxa())) continue;
+      if (categoriaId == null) categoriaId = resolveTransactionCategoryId(tenantId, "TAXAS DE PAGAMENTO");
+      Transacao taxa = new Transacao();
+      taxa.setTenantId(tenantId);
+      taxa.setComandaId(comanda.getId());
+      taxa.setAppointmentId(comanda.getAppointmentId());
+      taxa.setType(TipoTransacao.EXPENSE);
+      taxa.setCategoryId(categoriaId);
+      taxa.setDescription("Taxa da operadora - " + nomeDaOperadora(cobranca.getProvedor()) + " ("
+          + rotuloDoMeioIntegrado(cobranca.getMeio(), cobranca.getParcelas()) + ")");
+      taxa.setAmount(cobranca.getTaxa());
+      taxa.setPaymentMethod(mapearMetodoPagamento(p.getMeio()));
+      taxa.setDate(Instant.now());
+      transacaoRepository.save(taxa);
+    }
+  }
+
+  private static String nomeDaOperadora(String provedor) {
+    if (provedor == null) return "operadora";
+    return switch (provedor) {
+      case "MERCADO_PAGO" -> "Mercado Pago";
+      case "PAGARME" -> "Stone / Pagar.me";
+      case "PAGBANK" -> "PagBank";
+      case "CIELO" -> "Cielo";
+      case "REDE" -> "Rede";
+      case "GETNET" -> "Getnet";
+      case "ASAAS" -> "Asaas";
+      default -> provedor;
+    };
+  }
+
+  private static String rotuloDoMeioIntegrado(String meio, int parcelas) {
+    if ("CREDITO".equals(meio)) return parcelas > 1 ? "crédito " + parcelas + "x" : "crédito";
+    if ("DEBITO".equals(meio)) return "débito";
+    if ("LINK".equals(meio)) return "link";
+    return "Pix";
   }
 
   /**

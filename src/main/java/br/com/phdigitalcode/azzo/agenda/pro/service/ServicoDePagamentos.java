@@ -91,6 +91,13 @@ public class ServicoDePagamentos {
   private final AuditService auditService;
   private final ApplicationEventPublisher publicador;
   private final TransactionTemplate transacao;
+  private ServicoDeTaxasDePagamento taxasDePagamento;
+
+  /** Setter (e nao construtor): o servico de taxas e opcional nos testes que montam este a mao. */
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setTaxasDePagamento(ServicoDeTaxasDePagamento taxasDePagamento) {
+    this.taxasDePagamento = taxasDePagamento;
+  }
 
   public ServicoDePagamentos(
       CobrancaRepository cobrancas,
@@ -333,6 +340,8 @@ public class ServicoDePagamentos {
         }
       }
       if ("PAGA".equals(novo) && c.getPagaEm() == null) c.setPagaEm(Instant.now());
+      // Fase 5: sem a taxa real da operadora, estima pela tabela da conta (taxa, liquido, previsao).
+      if ("PAGA".equals(novo) && taxasDePagamento != null) taxasDePagamento.estimarSeFaltar(c);
       cobrancas.save(c);
       eventos.save(evento(conta, c, origem, tipo, status, chave, corpo, true, null));
       if (!novo.equals(anterior)) {
