@@ -93,6 +93,18 @@ public class ServicoDeContasDePagamento implements ApplicationRunner {
   private final String urlPublica;
   private final SecureRandom aleatorio = new SecureRandom();
 
+  /** Piloto dos pagamentos (14/11). Setter: os testes que montam este servico a mao seguem liberados. */
+  private LiberacaoDePagamentos liberacao;
+
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setLiberacao(LiberacaoDePagamentos liberacao) {
+    this.liberacao = liberacao;
+  }
+
+  private void exigirLiberado(UUID tenantId) {
+    if (liberacao != null) liberacao.exigir(tenantId);
+  }
+
   public ServicoDeContasDePagamento(
       ContaDePagamentoRepository contas,
       TenantPaymentSettingsRepository configuracoesAntigas,
@@ -117,6 +129,7 @@ public class ServicoDeContasDePagamento implements ApplicationRunner {
   // ---- catalogo ------------------------------------------------------------------------------
 
   public List<PagamentosDtos.Operadora> operadoras() {
+    exigirLiberado(contextoTenant.obterTenantIdOuFalhar());
     List<PagamentosDtos.Operadora> lista = new ArrayList<>();
     OPERADORAS_DO_PLANO.forEach((codigo, nome) -> {
       PagamentosDtos.Operadora o = new PagamentosDtos.Operadora();
@@ -145,12 +158,14 @@ public class ServicoDeContasDePagamento implements ApplicationRunner {
   @Transactional(readOnly = true)
   public List<PagamentosDtos.Conta> listar() {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    exigirLiberado(tenantId);
     return contas.findByTenantIdAndAtivoTrueOrderByCreatedAtAsc(tenantId).stream().map(this::paraDto).toList();
   }
 
   @Transactional
   public PagamentosDtos.Conta conectar(PagamentosDtos.ContaRequest pedido) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    exigirLiberado(tenantId);
     ProvedorDePagamento provedor = provedor(pedido == null ? null : pedido.provedor);
     Map<String, String> credenciais = limpar(pedido.credenciais);
     exigirCampos(provedor, credenciais, null);
@@ -174,6 +189,7 @@ public class ServicoDeContasDePagamento implements ApplicationRunner {
   @Transactional
   public PagamentosDtos.Conta atualizar(UUID id, PagamentosDtos.ContaRequest pedido) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    exigirLiberado(tenantId);
     ContaDePagamento conta = doSalao(id, tenantId);
     ProvedorDePagamento provedor = provedor(conta.getProvedor());
     Map<String, Object> antes = resumo(conta);
@@ -214,6 +230,7 @@ public class ServicoDeContasDePagamento implements ApplicationRunner {
   @Transactional
   public PagamentosDtos.Conta testar(UUID id) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    exigirLiberado(tenantId);
     ContaDePagamento conta = doSalao(id, tenantId);
     conferirNaOperadora(conta, provedor(conta.getProvedor()), false);
     contas.save(conta);
@@ -225,6 +242,8 @@ public class ServicoDeContasDePagamento implements ApplicationRunner {
   public PagamentosDtos.Disponiveis disponiveis() {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     PagamentosDtos.Disponiveis d = new PagamentosDtos.Disponiveis();
+    // Fora do piloto: nada integrado, o PDV fica como era.
+    if (liberacao != null && !liberacao.liberado(tenantId)) return d;
     padrao(tenantId, "PIX").ifPresent(c -> {
       ProvedorDePagamento p = provedores.get(c.getProvedor());
       d.pix = p != null && p.capacidades().contains(ProvedorDePagamento.Capacidade.PIX);
@@ -262,6 +281,7 @@ public class ServicoDeContasDePagamento implements ApplicationRunner {
   @Transactional(readOnly = true)
   public List<PagamentosDtos.Terminal> terminaisNaOperadora(UUID contaId) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    exigirLiberado(tenantId);
     ContaDePagamento conta = doSalao(contaId, tenantId);
     try {
       return provedor(conta.getProvedor()).terminais(abrir(conta)).stream().map(t -> {
@@ -280,6 +300,7 @@ public class ServicoDeContasDePagamento implements ApplicationRunner {
   @Transactional
   public PagamentosDtos.Conta adicionarTerminal(UUID contaId, PagamentosDtos.TerminalRequest pedido) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    exigirLiberado(tenantId);
     ContaDePagamento conta = doSalao(contaId, tenantId);
     if (pedido == null || pedido.serial == null || pedido.serial.isBlank()) {
       throw new ApiClientErrorException("Escolha a maquininha.", 400);

@@ -37,6 +37,18 @@ import br.com.phdigitalcode.azzo.agenda.pro.security.ContextoTenant;
 @Service
 public class ServicoDeTaxasDePagamento {
 
+  /** Piloto dos pagamentos (14/11). Setter: os testes que montam este servico a mao seguem liberados. */
+  private LiberacaoDePagamentos liberacao;
+
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setLiberacao(LiberacaoDePagamentos liberacao) {
+    this.liberacao = liberacao;
+  }
+
+  private void exigirLiberado(UUID tenantId) {
+    if (liberacao != null) liberacao.exigir(tenantId);
+  }
+
   private static final ZoneId BRASILIA = ZoneId.of("America/Sao_Paulo");
   private static final Set<String> MEIOS = Set.of("PIX", "CREDITO", "DEBITO", "LINK");
 
@@ -61,6 +73,7 @@ public class ServicoDeTaxasDePagamento {
 
   @Transactional(readOnly = true)
   public List<PagamentosDtos.Taxa> listar(UUID contaId) {
+    exigirLiberado(contextoTenant.obterTenantIdOuFalhar());
     ContaDePagamento conta = doSalao(contaId);
     return taxas.findByContaIdOrderByMeioAscParcelasDeAsc(conta.getId()).stream().map(ServicoDeTaxasDePagamento::paraDto).toList();
   }
@@ -68,6 +81,7 @@ public class ServicoDeTaxasDePagamento {
   /** Troca todas as faixas da conta de uma vez (a tela edita a tabela inteira). */
   @Transactional
   public List<PagamentosDtos.Taxa> salvar(UUID contaId, List<PagamentosDtos.Taxa> faixas) {
+    exigirLiberado(contextoTenant.obterTenantIdOuFalhar());
     ContaDePagamento conta = doSalao(contaId);
     List<TaxaDePagamento> novas = new ArrayList<>();
     for (PagamentosDtos.Taxa f : faixas == null ? List.<PagamentosDtos.Taxa>of() : faixas) {
@@ -141,6 +155,7 @@ public class ServicoDeTaxasDePagamento {
   @Transactional(readOnly = true)
   public PagamentosDtos.Recebiveis recebiveis(LocalDate de, LocalDate ate) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    exigirLiberado(tenantId);
     if (de == null) de = LocalDate.now(BRASILIA);
     if (ate == null) ate = de.plusDays(30);
     if (ate.isBefore(de)) throw new ApiClientErrorException("A data final é anterior à inicial.", 400);

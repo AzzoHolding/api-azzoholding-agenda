@@ -16,7 +16,9 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import br.com.phdigitalcode.azzo.agenda.pro.dto.PagamentosDtos;
+import br.com.phdigitalcode.azzo.agenda.pro.security.ContextoTenant;
 import br.com.phdigitalcode.azzo.agenda.pro.security.RequiresPermission;
+import br.com.phdigitalcode.azzo.agenda.pro.service.LiberacaoDePagamentos;
 import br.com.phdigitalcode.azzo.agenda.pro.service.ServicoDeContasDePagamento;
 import br.com.phdigitalcode.azzo.agenda.pro.service.ServicoDePagamentos;
 
@@ -34,10 +36,21 @@ public class PagamentosController {
 
   private final ServicoDeContasDePagamento contas;
   private final ServicoDePagamentos pagamentos;
+  private final LiberacaoDePagamentos liberacao;
+  private final ContextoTenant contextoTenant;
 
-  public PagamentosController(ServicoDeContasDePagamento contas, ServicoDePagamentos pagamentos) {
+  public PagamentosController(ServicoDeContasDePagamento contas, ServicoDePagamentos pagamentos,
+      LiberacaoDePagamentos liberacao, ContextoTenant contextoTenant) {
     this.contas = contas;
     this.pagamentos = pagamentos;
+    this.liberacao = liberacao;
+    this.contextoTenant = contextoTenant;
+  }
+
+  /** O salao esta no piloto dos pagamentos integrados? As telas mostram ou escondem por aqui. */
+  @GetMapping("/liberacao")
+  public java.util.Map<String, Boolean> liberacao() {
+    return java.util.Map.of("liberado", liberacao.liberado(contextoTenant.obterTenantIdOuFalhar()));
   }
 
   @GetMapping("/operadoras")

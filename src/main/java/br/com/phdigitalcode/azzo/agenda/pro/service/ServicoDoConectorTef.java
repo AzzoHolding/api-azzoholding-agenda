@@ -56,6 +56,18 @@ import br.com.phdigitalcode.azzo.agenda.pro.security.ContextoTenant;
 @Service
 public class ServicoDoConectorTef {
 
+  /** Piloto dos pagamentos (14/11). Setter: os testes que montam este servico a mao seguem liberados. */
+  private LiberacaoDePagamentos liberacao;
+
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setLiberacao(LiberacaoDePagamentos liberacao) {
+    this.liberacao = liberacao;
+  }
+
+  private void exigirLiberado(UUID tenantId) {
+    if (liberacao != null) liberacao.exigir(tenantId);
+  }
+
   private static final Logger LOG = LoggerFactory.getLogger(ServicoDoConectorTef.class);
   private static final String ALFABETO = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   private static final Duration PRAZO_DO_CODIGO = Duration.ofMinutes(15);
@@ -96,6 +108,7 @@ public class ServicoDoConectorTef {
   /** Cria o terminal TEF_LOCAL e devolve o codigo de pareamento (unica vez que ele aparece). */
   public ConectorTefDtos.CodigoDePareamento gerarPareamento(UUID contaId, String apelido) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    exigirLiberado(tenantId);
     ContaDePagamento conta = contas.findById(contaId).filter(c -> c.getTenantId().equals(tenantId) && c.isAtivo())
         .orElseThrow(() -> new ApiClientErrorException("Conta de pagamento não encontrada.", 404));
     if (!TefProvedor.CODIGO.equals(conta.getProvedor())) {

@@ -33,6 +33,18 @@ import br.com.phdigitalcode.azzo.agenda.pro.security.ContextoTenant;
 @Service
 public class ServicoClientMemberships {
 
+  /** Piloto dos pagamentos (14/11). Setter: os testes que montam este servico a mao seguem liberados. */
+  private LiberacaoDePagamentos liberacao;
+
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setLiberacao(LiberacaoDePagamentos liberacao) {
+    this.liberacao = liberacao;
+  }
+
+  private void exigirLiberado(UUID tenantId) {
+    if (liberacao != null) liberacao.exigir(tenantId);
+  }
+
   private static final ZoneId ZONE_BR = ZoneId.of("America/Sao_Paulo");
 
   private final ContextoTenant contextoTenant;
@@ -113,6 +125,7 @@ public class ServicoClientMemberships {
     }
 
     if ("CARTAO".equalsIgnoreCase(request.formaDeCobranca)) {
+      exigirLiberado(tenantId);
       return assinarNoCartao(tenantId, clientId, cliente, plano);
     }
 

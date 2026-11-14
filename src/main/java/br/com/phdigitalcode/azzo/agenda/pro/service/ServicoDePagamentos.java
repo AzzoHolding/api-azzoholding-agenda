@@ -92,6 +92,18 @@ public class ServicoDePagamentos {
   private final AuditService auditService;
   private final ApplicationEventPublisher publicador;
   private final TransactionTemplate transacao;
+
+  /** Piloto dos pagamentos (14/11). Setter: os testes que montam este servico a mao seguem liberados. */
+  private LiberacaoDePagamentos liberacao;
+
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setLiberacao(LiberacaoDePagamentos liberacao) {
+    this.liberacao = liberacao;
+  }
+
+  private void exigirLiberado(UUID tenantId) {
+    if (liberacao != null) liberacao.exigir(tenantId);
+  }
   private ServicoDeTaxasDePagamento taxasDePagamento;
   private br.com.phdigitalcode.azzo.agenda.pro.security.PermissionService permissoes;
 
@@ -137,6 +149,7 @@ public class ServicoDePagamentos {
    */
   public PagamentosDtos.Cobranca criar(UUID tenantId, NovaCobranca pedido) {
     validar(pedido);
+    exigirLiberado(tenantId);
     Optional<Cobranca> repetida = cobrancas.findByTenantIdAndIdempotencyKey(tenantId, pedido.idempotencyKey());
     if (repetida.isPresent()) return paraDto(repetida.get());
 
