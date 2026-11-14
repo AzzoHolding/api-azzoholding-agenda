@@ -140,6 +140,36 @@ class CredentialsEmailServiceTest {
     assertThat((String) captor.getValue().getContent()).contains("SenhaTemp123!").contains("Fulano");
   }
 
+  /** Decisao de 14/11/2026: todo e-mail automatico sai de no-reply; MAIL_FROM e o suporte. */
+  @Test
+  void emailAutomaticoSaiDeNoReplyComNomeEORodapeApontaOSuporte() throws Exception {
+    CredentialsEmailService service = service(true, "support@azzoholding.com.br", false);
+
+    service.sendProfessionalAccess("prof@x.com", "Fulano", "prof@x.com", "Senha123!");
+    CredentialsEmailService.DeliveryResult html =
+        service.sendHtmlEmail("dono@x.com", "Aviso", "<p>x</p>", null, null, null, "TEST");
+
+    org.mockito.ArgumentCaptor<MimeMessage> captor = org.mockito.ArgumentCaptor.forClass(MimeMessage.class);
+    verify(mailSender, org.mockito.Mockito.times(2)).send(captor.capture());
+    MimeMessage acesso = captor.getAllValues().get(0);
+    assertThat(acesso.getFrom()[0].toString()).contains("no-reply@azzoholding.com.br");
+    assertThat((String) acesso.getContent()).contains("nao responda").contains("support@azzoholding.com.br");
+    MimeMessage aviso = captor.getAllValues().get(1);
+    assertThat(aviso.getFrom()[0].toString()).contains("no-reply@azzoholding.com.br").contains("Azzo Agenda Pro");
+    assertThat(html.from()).isEqualTo("no-reply@azzoholding.com.br");
+    assertThat(service.enderecoDeSuporte()).isEqualTo("support@azzoholding.com.br");
+  }
+
+  @Test
+  void remetenteDoModeloConfiguradoPeloAdminContinuaValendo() throws Exception {
+    CredentialsEmailService service = service(true, "support@azzoholding.com.br", false);
+    service.setNoReply("nao-responda@azzoholding.com.br");
+    assertThat(service.sendHtmlEmail("c@x.com", "A", "<p>x</p>", "outro@azzoholding.com.br", null, null, "TEST").from())
+        .isEqualTo("outro@azzoholding.com.br");
+    assertThat(service.sendHtmlEmail("c@x.com", "A", "<p>x</p>", null, null, null, "TEST").from())
+        .isEqualTo("nao-responda@azzoholding.com.br");
+  }
+
   @Test
   void sendProfessionalAccessNaoEnviaQuandoDesabilitado() {
     CredentialsEmailService service = service(false, "no-reply@azzoholding.com.br", true);

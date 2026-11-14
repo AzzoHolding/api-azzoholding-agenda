@@ -34,4 +34,21 @@ public interface ClientMembershipRepository extends JpaRepository<ClientMembersh
       """)
   List<ClientMembership> findPendentesDeCancelamento(
       @Param("statusCancelada") String statusCancelada, @Param("now") Instant now);
+
+  List<ClientMembership> findByTenantIdOrderByCreatedAtDesc(UUID tenantId, org.springframework.data.domain.Limit limit);
+
+  Optional<ClientMembership> findByProvedorRecorrenciaAndAssinaturaNaOperadora(String provedor, String assinatura);
+
+  /**
+   * Cartao recorrente que pede consulta: esperando o cartao, ou com o periodo vencendo/vencido (a
+   * cobranca do mes ja deveria ter vindo). A reserva para quando o aviso da operadora se perde.
+   */
+  @Query("""
+      select m from ClientMembership m
+      where m.assinaturaNaOperadora is not null
+        and m.status in ('AGUARDANDO_CARTAO', 'ATIVA', 'INADIMPLENTE')
+        and (m.status = 'AGUARDANDO_CARTAO' or m.periodEnd < :limite)
+      order by m.updatedAt asc
+      """)
+  List<ClientMembership> cartaoRecorrenteParaConsultar(@Param("limite") Instant limite, org.springframework.data.domain.Limit limit);
 }

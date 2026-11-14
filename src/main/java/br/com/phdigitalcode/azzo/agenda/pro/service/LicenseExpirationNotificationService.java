@@ -131,15 +131,16 @@ public class LicenseExpirationNotificationService {
             + (diasRestantes == 1 ? "vence amanha" : "vence em " + diasRestantes + " dias");
     String html = montarHtmlNotificacao(tenant.getName(), diasRestantes, vencimento);
 
+    // Sai de no-reply, mas aqui o dono pode precisar de ajuda: a resposta vai para o suporte.
     for (Usuario owner : owners) {
       if (owner.getEmail() == null || owner.getEmail().isBlank()) continue;
       credentialsEmailService.sendHtmlEmail(
-          owner.getEmail(), assunto, html, null, null, null, "LICENSE_EXPIRING_SOON");
+          owner.getEmail(), assunto, html, null, null, credentialsEmailService.enderecoDeSuporte(), "LICENSE_EXPIRING_SOON");
     }
 
     if (owners.isEmpty() && tenant.getEmail() != null && !tenant.getEmail().isBlank()) {
       credentialsEmailService.sendHtmlEmail(
-          tenant.getEmail(), assunto, html, null, null, null, "LICENSE_EXPIRING_SOON");
+          tenant.getEmail(), assunto, html, null, null, credentialsEmailService.enderecoDeSuporte(), "LICENSE_EXPIRING_SOON");
     }
   }
 

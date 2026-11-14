@@ -64,12 +64,18 @@ public final class ComandaDtos {
   public static class RegistrarPagamentoRequest {
     @NotBlank
     @Pattern(
-        regexp = "DINHEIRO|PIX_ASAAS|CARTAO_CREDITO_EXTERNO|CARTAO_DEBITO_EXTERNO|CREDITO_SINAL")
+        regexp = "DINHEIRO|PIX_ASAAS|CARTAO_CREDITO_EXTERNO|CARTAO_DEBITO_EXTERNO|CREDITO_SINAL|PIX|CARTAO_CREDITO|CARTAO_DEBITO|LINK")
     public String meio;
 
     @NotNull
     @DecimalMin(value = "0.01", inclusive = true)
     public BigDecimal valor;
+
+    /** Cartao de credito na maquininha integrada: em quantas vezes (1 a 12). */
+    public Integer parcelas;
+
+    /** Maquininha integrada que recebe a cobranca (CARTAO_CREDITO / CARTAO_DEBITO). */
+    public String terminalId;
   }
 
   public static class CancelarComandaRequest {
@@ -139,7 +145,20 @@ public final class ComandaDtos {
     public BigDecimal valor;
     public String status;
     public String pixPayload;
+    /** QR Code do Pix pendente, SVG em data URI, para o cliente ler na tela do caixa. */
+    public String pixQrCode;
     public String paidAt;
+    /** Meios integrados: a cobranca na operadora (a tela acompanha e cancela por ela). */
+    public String cobrancaId;
+    public String linkDePagamento;
+    public String nsu;
+    public String bandeira;
+    public Integer parcelas;
+    public String motivoRecusa;
+    /** TEF: a via do cliente do comprovante, para reimprimir. */
+    public String comprovante;
+    /** Pix na chave do salao: o caixa confirma o recebimento ("Recebi"); nao vem aviso. */
+    public boolean confirmacaoManual;
   }
 
   public static class ComandaResponse {

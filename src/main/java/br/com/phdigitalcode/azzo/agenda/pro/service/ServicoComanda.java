@@ -124,6 +124,20 @@ public class ServicoComanda {
 
   private final PermissionService permissionService;
 
+  private ServicoDePagamentos servicoDePagamentos;
+  private br.com.phdigitalcode.azzo.agenda.pro.repository.CobrancaRepository cobrancaRepository;
+  private br.com.phdigitalcode.azzo.agenda.pro.repository.TerminalDePagamentoRepository terminaisDePagamento;
+
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setPagamentosIntegrados(
+      ServicoDePagamentos servicoDePagamentos,
+      br.com.phdigitalcode.azzo.agenda.pro.repository.CobrancaRepository cobrancaRepository,
+      br.com.phdigitalcode.azzo.agenda.pro.repository.TerminalDePagamentoRepository terminaisDePagamento) {
+    this.servicoDePagamentos = servicoDePagamentos;
+    this.cobrancaRepository = cobrancaRepository;
+    this.terminaisDePagamento = terminaisDePagamento;
+  }
+
   public ServicoComanda(
       ContextoTenant contextoTenant,
       AuthenticatedUser authenticatedUser,
@@ -300,15 +314,17 @@ public class ServicoComanda {
     return response;
   }
 
-  @Transactional(readOnly = true)
+  @Transactional
   public ComandaDtos.ComandaResponse obter(UUID id) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Comanda comanda = buscarOuFalhar(id, tenantId);
     exigirComandaDoProfissional(tenantId, comanda);
+    List<ComandaPagamento> pagamentos = comandaPagamentoRepository.findByComandaIdOrderByCreatedAt(comanda.getId());
+    sincronizarPagamentosIntegrados(pagamentos);
     return toResponse(
         comanda,
         comandaItemRepository.findByComandaIdOrderByCreatedAt(comanda.getId()),
-        comandaPagamentoRepository.findByComandaIdOrderByCreatedAt(comanda.getId()));
+        pagamentos);
   }
 
   @Transactional
@@ -982,6 +998,11 @@ public class ServicoComanda {
     pagamento.setRegistradoPor(obterUsuarioId());
 
     switch (request.meio) {
+      case ComandaPagamento.MEIO_PIX, ComandaPagamento.MEIO_CARTAO_CREDITO, ComandaPagamento.MEIO_CARTAO_DEBITO,
+          ComandaPagamento.MEIO_LINK -> {
+        registrarPagamentoIntegrado(tenantId, comanda, pagamento, request);
+        return obter(id);
+      }
       case ComandaPagamento.MEIO_PIX_ASAAS -> registrarPagamentoPix(tenantId, comanda, pagamento);
       case ComandaPagamento.MEIO_CREDITO_SINAL ->
           registrarPagamentoCreditoSinal(tenantId, comanda, pagamento);
@@ -1030,7 +1051,10 @@ public class ServicoComanda {
 
     BigDecimal confirmado =
         comandaPagamentoRepository.findByComandaIdOrderByCreatedAt(comanda.getId()).stream()
-            .filter(p -> ComandaPagamento.STATUS_CONFIRMADO.equals(p.getStatus()))
+            // Cobranca integrada esperando a operadora tambem ocupa o saldo: sem isto, dava para mandar
+            // a comanda inteira para a maquininha duas vezes.
+            .filter(p -> ComandaPagamento.STATUS_CONFIRMADO.equals(p.getStatus())
+                || (ComandaPagamento.STATUS_PENDENTE.equals(p.getStatus()) && p.getCobrancaId() != null))
             .map(ComandaPagamento::getValor)
             .reduce(BigDecimal.ZERO, NumericUtil::add);
     BigDecimal restante = NumericUtil.maxZero(NumericUtil.subtract(totalComGorjeta, confirmado));
@@ -1044,6 +1068,106 @@ public class ServicoComanda {
           "O valor passa do que falta pagar ("
               + String.format(java.util.Locale.of("pt", "BR"), "R$ %,.2f", restante)
               + "). Só o pagamento em dinheiro tem troco.");
+    }
+  }
+
+  /**
+   * Pagamento pela operadora conectada (Pagamentos — Fase 1). O pagamento nasce PENDENTE e so vira
+   * CONFIRMADO quando a operadora avisa (ou a consulta de reserva confirma) — ver
+   * {@link #aoMudarACobranca}. A cobranca e criada com a chave do proprio pagamento: clique duplo nao
+   * cobra duas vezes.
+   */
+  private void registrarPagamentoIntegrado(
+      UUID tenantId, Comanda comanda, ComandaPagamento pagamento, ComandaDtos.RegistrarPagamentoRequest request) {
+    if (servicoDePagamentos == null) throw new IllegalStateException("Pagamentos integrados indisponíveis.");
+    String meio = pagamento.getMeio();
+    boolean cartao = ComandaPagamento.MEIO_CARTAO_CREDITO.equals(meio) || ComandaPagamento.MEIO_CARTAO_DEBITO.equals(meio);
+    int parcelas = request.parcelas == null ? 1 : request.parcelas;
+    if (parcelas < 1 || parcelas > 12 || (parcelas > 1 && !ComandaPagamento.MEIO_CARTAO_CREDITO.equals(meio))) {
+      throw new IllegalArgumentException("Parcelas só no crédito, de 1 a 12.");
+    }
+    br.com.phdigitalcode.azzo.agenda.pro.entity.TerminalDePagamento terminal = null;
+    if (cartao) {
+      UUID terminalId = parseUuidOrNull(request.terminalId);
+      if (terminalId == null) throw new IllegalArgumentException("Escolha a maquininha.");
+      terminal = terminaisDePagamento.findByIdAndTenantIdAndAtivoTrue(terminalId, tenantId)
+          .orElseThrow(() -> new IllegalArgumentException("Maquininha não encontrada."));
+    }
+
+    pagamento.setStatus(ComandaPagamento.STATUS_PENDENTE);
+    comandaPagamentoRepository.save(pagamento);
+    comandaPagamentoRepository.flush();
+
+    br.com.phdigitalcode.azzo.agenda.pro.integration.pagamentos.ProvedorDePagamento.Pagador pagador = null;
+    if (comanda.getClientId() != null) {
+      Cliente cliente = clienteRepository.findByIdAndTenantId(comanda.getClientId(), tenantId).orElse(null);
+      if (cliente != null && cliente.getAnonymizedAt() == null) {
+        pagador = new br.com.phdigitalcode.azzo.agenda.pro.integration.pagamentos.ProvedorDePagamento.Pagador(
+            cliente.getId().toString(), cliente.getName(), cliente.getEmail(), cliente.getPhone(), cliente.getCpfCnpj());
+      }
+    }
+    String meioDaCobranca = switch (meio) {
+      case ComandaPagamento.MEIO_CARTAO_CREDITO -> "CREDITO";
+      case ComandaPagamento.MEIO_CARTAO_DEBITO -> "DEBITO";
+      default -> meio;
+    };
+    var cobranca = servicoDePagamentos.criar(tenantId, new ServicoDePagamentos.NovaCobranca(
+        "COMANDA", pagamento.getId(), meioDaCobranca, pagamento.getValor(), parcelas, "Comanda",
+        pagador, terminal == null ? null : terminal.getContaId(), terminal == null ? null : terminal.getId(),
+        terminal == null ? null : terminal.getSerial(),
+        Instant.now().plus(java.time.Duration.ofMinutes(ComandaPagamento.MEIO_LINK.equals(meio) ? 24 * 60 : 30)),
+        "comanda-pagamento:" + pagamento.getId()));
+    pagamento.setCobrancaId(UUID.fromString(cobranca.id));
+    pagamento.setPixPayload(cobranca.pixCopiaECola);
+    comandaPagamentoRepository.save(pagamento);
+
+    Map<String, Object> dados = new HashMap<>();
+    dados.put("meio", meio);
+    dados.put("valor", pagamento.getValor());
+    dados.put("status", pagamento.getStatus());
+    dados.put("cobrancaId", cobranca.id);
+    dados.put("provedor", cobranca.provedor);
+    auditar(tenantId, "POS_PAYMENT_ADD", comanda, null, dados);
+  }
+
+  /**
+   * A cobranca mudou na operadora: o pagamento da comanda acompanha. PAGA confirma; recusada,
+   * cancelada ou expirada vira RECUSADO (nao entra no caixa); estornada vira ESTORNADO.
+   * Tambem roda na leitura da comanda ({@link #sincronizarPagamentosIntegrados}), para o caso de o
+   * aviso chegar antes de a transacao que criou o pagamento terminar.
+   */
+  @org.springframework.context.event.EventListener
+  @Transactional
+  public void aoMudarACobranca(ServicoDePagamentos.CobrancaMudouDeStatus evento) {
+    if (!"COMANDA".equals(evento.origemTipo()) || evento.origemId() == null) return;
+    comandaPagamentoRepository.findById(evento.origemId())
+        .filter(p -> evento.tenantId().equals(p.getTenantId()))
+        .ifPresent(p -> aplicarStatusDaCobranca(p, evento.statusNovo()));
+  }
+
+  private boolean aplicarStatusDaCobranca(ComandaPagamento pagamento, String statusDaCobranca) {
+    String novo = switch (statusDaCobranca) {
+      case "PAGA" -> ComandaPagamento.STATUS_CONFIRMADO;
+      case "RECUSADA", "CANCELADA", "EXPIRADA" -> ComandaPagamento.STATUS_RECUSADO;
+      case "ESTORNADA" -> ComandaPagamento.STATUS_ESTORNADO;
+      default -> null;
+    };
+    if (novo == null || novo.equals(pagamento.getStatus())) return false;
+    // Ja confirmado so sai por estorno; recusado nao volta.
+    if (ComandaPagamento.STATUS_CONFIRMADO.equals(pagamento.getStatus()) && !ComandaPagamento.STATUS_ESTORNADO.equals(novo)) return false;
+    if (ComandaPagamento.STATUS_RECUSADO.equals(pagamento.getStatus())) return false;
+    pagamento.setStatus(novo);
+    if (ComandaPagamento.STATUS_CONFIRMADO.equals(novo) && pagamento.getPaidAt() == null) pagamento.setPaidAt(Instant.now());
+    comandaPagamentoRepository.save(pagamento);
+    return true;
+  }
+
+  /** Confere na tabela de cobrancas os pagamentos integrados ainda pendentes. */
+  private void sincronizarPagamentosIntegrados(List<ComandaPagamento> pagamentos) {
+    if (cobrancaRepository == null) return;
+    for (ComandaPagamento p : pagamentos) {
+      if (p.getCobrancaId() == null || !ComandaPagamento.STATUS_PENDENTE.equals(p.getStatus())) continue;
+      cobrancaRepository.findById(p.getCobrancaId()).ifPresent(c -> aplicarStatusDaCobranca(p, c.getStatus()));
     }
   }
 
@@ -1228,6 +1352,7 @@ public class ServicoComanda {
     }
 
     registrarGorjetaSeAplicavel(tenantId, comanda, metodoPagamento);
+    registrarTaxasDaOperadora(tenantId, comanda, pagamentos);
     comanda.setPontosFidelidadeCreditados(
         creditarPontosFidelidadeSeAplicavel(tenantId, comanda, itens, valoresLiquidosPorItem));
 
@@ -1367,6 +1492,9 @@ public class ServicoComanda {
       case ComandaPagamento.MEIO_PIX_ASAAS -> MetodoPagamento.PIX;
       case ComandaPagamento.MEIO_CARTAO_CREDITO_EXTERNO -> MetodoPagamento.CREDIT_CARD;
       case ComandaPagamento.MEIO_CARTAO_DEBITO_EXTERNO -> MetodoPagamento.DEBIT_CARD;
+      case ComandaPagamento.MEIO_PIX -> MetodoPagamento.PIX;
+      case ComandaPagamento.MEIO_CARTAO_CREDITO -> MetodoPagamento.CREDIT_CARD;
+      case ComandaPagamento.MEIO_CARTAO_DEBITO -> MetodoPagamento.DEBIT_CARD;
       default -> MetodoPagamento.OTHER;
     };
   }
@@ -1430,6 +1558,56 @@ public class ServicoComanda {
     transacao.setDate(Instant.now());
     transacaoRepository.save(transacao);
     return transacao;
+  }
+
+  /**
+   * Pagamentos integrados (Fase 5): a taxa da operadora vira despesa ao fechar a comanda — real
+   * quando a operadora informou, estimada pela tabela da conta quando nao. Sem taxa conhecida,
+   * nada e lancado (o Azzo nao inventa taxa). O estorno da comanda desfaz esta despesa junto com
+   * as outras transacoes dela.
+   */
+  private void registrarTaxasDaOperadora(UUID tenantId, Comanda comanda, List<ComandaPagamento> pagamentos) {
+    if (cobrancaRepository == null) return;
+    UUID categoriaId = null;
+    for (ComandaPagamento p : pagamentos) {
+      if (p.getCobrancaId() == null || !ComandaPagamento.STATUS_CONFIRMADO.equals(p.getStatus())) continue;
+      var cobranca = cobrancaRepository.findById(p.getCobrancaId()).orElse(null);
+      if (cobranca == null || cobranca.getTaxa() == null || NumericUtil.isZeroOrNegative(cobranca.getTaxa())) continue;
+      if (categoriaId == null) categoriaId = resolveTransactionCategoryId(tenantId, "TAXAS DE PAGAMENTO");
+      Transacao taxa = new Transacao();
+      taxa.setTenantId(tenantId);
+      taxa.setComandaId(comanda.getId());
+      taxa.setAppointmentId(comanda.getAppointmentId());
+      taxa.setType(TipoTransacao.EXPENSE);
+      taxa.setCategoryId(categoriaId);
+      taxa.setDescription("Taxa da operadora - " + nomeDaOperadora(cobranca.getProvedor()) + " ("
+          + rotuloDoMeioIntegrado(cobranca.getMeio(), cobranca.getParcelas()) + ")");
+      taxa.setAmount(cobranca.getTaxa());
+      taxa.setPaymentMethod(mapearMetodoPagamento(p.getMeio()));
+      taxa.setDate(Instant.now());
+      transacaoRepository.save(taxa);
+    }
+  }
+
+  private static String nomeDaOperadora(String provedor) {
+    if (provedor == null) return "operadora";
+    return switch (provedor) {
+      case "MERCADO_PAGO" -> "Mercado Pago";
+      case "PAGARME" -> "Stone / Pagar.me";
+      case "PAGBANK" -> "PagBank";
+      case "CIELO" -> "Cielo";
+      case "REDE" -> "Rede";
+      case "GETNET" -> "Getnet";
+      case "ASAAS" -> "Asaas";
+      default -> provedor;
+    };
+  }
+
+  private static String rotuloDoMeioIntegrado(String meio, int parcelas) {
+    if ("CREDITO".equals(meio)) return parcelas > 1 ? "crédito " + parcelas + "x" : "crédito";
+    if ("DEBITO".equals(meio)) return "débito";
+    if ("LINK".equals(meio)) return "link";
+    return "Pix";
   }
 
   /**
@@ -1530,6 +1708,9 @@ public class ServicoComanda {
     }
     if (!recebidos.isEmpty()) {
       if (request.estornarPagamento) {
+        // O que entrou pela operadora volta pela operadora; o resto (dinheiro, maquininha avulsa)
+        // o caixa devolve na mao, como antes.
+        estornarNaOperadora(recebidos);
         recebidos.forEach(p -> p.setStatus(ComandaPagamento.STATUS_ESTORNADO));
       } else {
         travaFinanceira.exigirDiaAberto(
@@ -1543,6 +1724,9 @@ public class ServicoComanda {
           && ComandaPagamento.STATUS_PENDENTE.equals(pagamento.getStatus())
           && pagamento.getAsaasPaymentId() != null) {
         cancelarCobrancaPixMelhorEsforco(tenantId, pagamento);
+      }
+      if (pagamento.getCobrancaId() != null && ComandaPagamento.STATUS_PENDENTE.equals(pagamento.getStatus())) {
+        cancelarCobrancaIntegradaMelhorEsforco(pagamento);
       }
       if (ComandaPagamento.MEIO_CREDITO_SINAL.equals(pagamento.getMeio())
           && pagamento.getAppointmentDepositId() != null) {
@@ -1566,6 +1750,30 @@ public class ServicoComanda {
         comanda,
         comandaItemRepository.findByComandaIdOrderByCreatedAt(comanda.getId()),
         pagamentos);
+  }
+
+  /**
+   * Devolve na operadora os pagamentos integrados confirmados. Se a operadora recusar, nada muda
+   * aqui (a excecao desfaz a transacao): estornar a venda e manter o dinheiro com o salao nao pode
+   * acontecer em silencio.
+   */
+  private void estornarNaOperadora(List<ComandaPagamento> pagamentos) {
+    for (ComandaPagamento p : pagamentos) {
+      if (p.getCobrancaId() == null || !ComandaPagamento.STATUS_CONFIRMADO.equals(p.getStatus())) continue;
+      if (servicoDePagamentos == null) throw new IllegalStateException("Pagamentos integrados indisponíveis.");
+      servicoDePagamentos.estornar(p.getCobrancaId(), null);
+    }
+  }
+
+  /** Cobranca integrada que ainda esperava a operadora: cancela la (se ja passou, a consulta acerta). */
+  private void cancelarCobrancaIntegradaMelhorEsforco(ComandaPagamento pagamento) {
+    try {
+      if (servicoDePagamentos != null) servicoDePagamentos.cancelar(pagamento.getCobrancaId());
+    } catch (RuntimeException e) {
+      org.slf4j.LoggerFactory.getLogger(ServicoComanda.class)
+          .warn("pos_cancelar_cobranca_integrada_falhou pagamento_id={}", pagamento.getId(), e);
+    }
+    pagamento.setStatus(ComandaPagamento.STATUS_RECUSADO);
   }
 
   /**
@@ -1627,6 +1835,13 @@ public class ServicoComanda {
         tenantId, comanda.getClosedAt(), "POS_COMANDA_REVERSE", "COMANDA",
         comanda.getId().toString(), Map.of("motivo", request.motivo == null ? "" : request.motivo));
     String motivo = request.motivo.trim();
+
+    // Primeiro a operadora: se ela recusar o estorno, nada do financeiro e mexido.
+    List<ComandaPagamento> pagamentosDaComanda = comandaPagamentoRepository.findByComandaIdOrderByCreatedAt(comanda.getId());
+    estornarNaOperadora(pagamentosDaComanda);
+    pagamentosDaComanda.stream()
+        .filter(p -> p.getCobrancaId() != null && ComandaPagamento.STATUS_CONFIRMADO.equals(p.getStatus()))
+        .forEach(p -> p.setStatus(ComandaPagamento.STATUS_ESTORNADO));
 
     List<ComandaItem> itens = comandaItemRepository.findByComandaIdOrderByCreatedAt(comanda.getId());
     List<Transacao> transacoesAtivas =
@@ -2029,6 +2244,25 @@ public class ServicoComanda {
     r.status = pagamento.getStatus();
     r.pixPayload = pagamento.getPixPayload();
     r.paidAt = pagamento.getPaidAt() != null ? pagamento.getPaidAt().toString() : null;
+    if (pagamento.getCobrancaId() != null) {
+      r.cobrancaId = pagamento.getCobrancaId().toString();
+      if (cobrancaRepository != null) {
+        cobrancaRepository.findById(pagamento.getCobrancaId()).ifPresent(c -> {
+          r.linkDePagamento = c.getLinkDePagamento();
+          r.nsu = c.getNsu();
+          r.bandeira = c.getBandeira();
+          r.parcelas = c.getParcelas();
+          r.motivoRecusa = c.getMotivoRecusa();
+          r.comprovante = c.getComprovanteCliente();
+          r.confirmacaoManual = "PIX_CHAVE".equals(c.getProvedor());
+          if (r.pixPayload == null) r.pixPayload = c.getPixCopiaECola();
+        });
+      }
+    }
+    // O QR so enquanto espera: pago ou recusado, ninguem mais precisa ler.
+    if (r.pixPayload != null && ComandaPagamento.STATUS_PENDENTE.equals(r.status)) {
+      r.pixQrCode = br.com.phdigitalcode.azzo.agenda.pro.integration.pagamentos.QrCodeDoPix.dataUri(r.pixPayload);
+    }
     return r;
   }
 

@@ -352,4 +352,30 @@ class ServicoClientMembershipsTest {
     assertThat(assinaturas.get(0).saldos.get(0).usadasNoPeriodo).isEqualTo(3);
     assertThat(assinaturas.get(0).saldos.get(0).disponiveis).isEqualTo(1);
   }
+
+  /** Fase 7: no cartao, nada de Asaas — a assinatura nasce AGUARDANDO_CARTAO com o link da operadora. */
+  @Test
+  void assinarNoCartaoNaoUsaAsaasENasceEsperandoOCartao() {
+    clienteExiste();
+    planoExiste(true);
+    ServicoDeAssinaturasNoCartao cartao = mock(ServicoDeAssinaturasNoCartao.class);
+    org.mockito.Mockito.doAnswer(inv -> {
+      ClientMembership m = inv.getArgument(0);
+      m.setAssinaturaNaOperadora("pre-1");
+      m.setLinkDoCartao("https://op/cartao");
+      m.setStatus(ClientMembership.STATUS_AGUARDANDO_CARTAO);
+      return null;
+    }).when(cartao).criarNaOperadora(any(), any(), any());
+    service.setAssinaturasNoCartao(cartao);
+
+    MembershipDtos.SubscribeRequest pedido = new MembershipDtos.SubscribeRequest();
+    pedido.planId = planId.toString();
+    pedido.formaDeCobranca = "CARTAO";
+    MembershipDtos.ClientMembershipResponse r = service.assinar(clientId, pedido);
+
+    assertThat(r.status).isEqualTo("AGUARDANDO_CARTAO");
+    assertThat(r.formaDeCobranca).isEqualTo("CARTAO");
+    assertThat(r.linkDoCartao).isEqualTo("https://op/cartao");
+    org.mockito.Mockito.verifyNoInteractions(asaasClient, tenantAsaasChargeService);
+  }
 }
