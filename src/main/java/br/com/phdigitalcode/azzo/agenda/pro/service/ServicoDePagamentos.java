@@ -93,6 +93,13 @@ public class ServicoDePagamentos {
   private final ApplicationEventPublisher publicador;
   private final TransactionTemplate transacao;
   private ServicoDeTaxasDePagamento taxasDePagamento;
+  private br.com.phdigitalcode.azzo.agenda.pro.security.PermissionService permissoes;
+
+  /** Setter (e nao construtor), pelo mesmo motivo do servico de taxas. */
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setPermissoes(br.com.phdigitalcode.azzo.agenda.pro.security.PermissionService permissoes) {
+    this.permissoes = permissoes;
+  }
 
   /** Setter (e nao construtor): o servico de taxas e opcional nos testes que montam este a mao. */
   @org.springframework.beans.factory.annotation.Autowired(required = false)
@@ -221,7 +228,19 @@ public class ServicoDePagamentos {
    * com quem confirmou.
    */
   public PagamentosDtos.Cobranca confirmarRecebimento(UUID id) {
+    if (!podeConfirmarPix()) {
+      throw new ApiClientErrorException(
+          "Seu perfil de acesso não permite confirmar Pix recebido. Peça ao dono do salão.", 403);
+    }
     return confirmarRecebimento(contextoTenant.obterTenantIdOuFalhar(), id);
+  }
+
+  /** Opcao do perfil de acesso (V173), escolhida pelo dono; o dono confirma sempre. */
+  public static final String CONFIRMAR_PIX = "pos:pix-confirm";
+
+  private boolean podeConfirmarPix() {
+    if (usuarioLogado.temRole("OWNER")) return true;
+    return permissoes != null && permissoes.possuiPermissao(CONFIRMAR_PIX);
   }
 
   PagamentosDtos.Cobranca confirmarRecebimento(UUID tenantId, UUID id) {

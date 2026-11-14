@@ -24,7 +24,8 @@ import br.com.phdigitalcode.azzo.agenda.pro.service.ServicoDePagamentos;
  * Pagamentos integrados (Fase 0): as contas do salao nas operadoras e as cobrancas.
  *
  * <p>Conectar, alterar e desconectar conta: so o dono (mexe em credencial). Ver e acompanhar
- * cobranca: quem opera o caixa ({@code finance:view}). Estornar: so o dono.
+ * cobranca: quem opera o PDV ({@code pos:view}/{@code pos:manage}). Confirmar Pix na chave: o dono ou
+ * quem tem a opcao no perfil ({@code pos:pix-confirm}). Estornar: so o dono.
  */
 @RestController
 @RequestMapping("/api/v1/pagamentos")
@@ -103,29 +104,35 @@ public class PagamentosController {
     return pagamentos.criarTeste(pedido);
   }
 
-  /** Para o PDV: Pix, link e maquininhas disponiveis (sem dado de conta). */
+  /**
+   * Para o PDV: Pix, link e maquininhas disponiveis (sem dado de conta). Permissao do PDV, e nao do
+   * financeiro: a atendente com perfil so de PDV tambem cobra por Pix e maquininha (achado de 14/11).
+   */
   @GetMapping("/disponiveis")
-  @RequiresPermission("finance:view")
+  @RequiresPermission("pos:view")
   public PagamentosDtos.Disponiveis disponiveis() {
     return contas.disponiveis();
   }
 
   /** A tela acompanha a cobranca por aqui (o PDV pergunta enquanto espera a maquininha). */
   @GetMapping("/cobrancas/{id}")
-  @RequiresPermission("finance:view")
+  @RequiresPermission("pos:view")
   public PagamentosDtos.Cobranca cobranca(@PathVariable UUID id) {
     return pagamentos.obter(id);
   }
 
   @PostMapping("/cobrancas/{id}/cancelar")
-  @RequiresPermission("finance:view")
+  @RequiresPermission("pos:manage")
   public PagamentosDtos.Cobranca cancelar(@PathVariable UUID id) {
     return pagamentos.cancelar(id);
   }
 
-  /** Pix na chave do salao: o caixa confirma que o dinheiro chegou (nao ha aviso de operadora). */
+  /**
+   * Pix na chave do salao: o caixa confirma que o dinheiro chegou (nao ha aviso de operadora). Alem
+   * do PDV, exige o dono ou a opcao "Confirmar Pix recebido" no perfil de acesso (conferido no servico).
+   */
   @PostMapping("/cobrancas/{id}/confirmar-recebimento")
-  @RequiresPermission("finance:view")
+  @RequiresPermission("pos:manage")
   public PagamentosDtos.Cobranca confirmarRecebimento(@PathVariable UUID id) {
     return pagamentos.confirmarRecebimento(id);
   }
