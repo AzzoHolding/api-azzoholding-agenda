@@ -24,10 +24,22 @@ public class ComandaPagamento {
   public static final String MEIO_CARTAO_CREDITO_EXTERNO = "CARTAO_CREDITO_EXTERNO";
   public static final String MEIO_CARTAO_DEBITO_EXTERNO = "CARTAO_DEBITO_EXTERNO";
   public static final String MEIO_CREDITO_SINAL = "CREDITO_SINAL";
+  /** Pagamentos integrados (V168): a cobranca e feita na operadora conectada. */
+  public static final String MEIO_PIX = "PIX";
+  public static final String MEIO_CARTAO_CREDITO = "CARTAO_CREDITO";
+  public static final String MEIO_CARTAO_DEBITO = "CARTAO_DEBITO";
+  public static final String MEIO_LINK = "LINK";
 
   public static final String STATUS_PENDENTE = "PENDENTE";
   public static final String STATUS_CONFIRMADO = "CONFIRMADO";
   public static final String STATUS_ESTORNADO = "ESTORNADO";
+  /** A operadora recusou, cancelou ou a cobranca expirou (V168). Nao entra no caixa. */
+  public static final String STATUS_RECUSADO = "RECUSADO";
+
+  public static boolean integrado(String meio) {
+    return MEIO_PIX.equals(meio) || MEIO_CARTAO_CREDITO.equals(meio) || MEIO_CARTAO_DEBITO.equals(meio)
+        || MEIO_LINK.equals(meio);
+  }
 
   @Id
   @Column(name = "id", nullable = false)
@@ -62,6 +74,10 @@ public class ComandaPagamento {
 
   @Column(name = "paid_at")
   private Instant paidAt;
+
+  /** A cobranca na operadora, nos meios integrados (V168). */
+  @Column(name = "cobranca_id")
+  private UUID cobrancaId;
 
   @Column(name = "created_at", nullable = false)
   private Instant createdAt;

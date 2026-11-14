@@ -64,12 +64,18 @@ public final class ComandaDtos {
   public static class RegistrarPagamentoRequest {
     @NotBlank
     @Pattern(
-        regexp = "DINHEIRO|PIX_ASAAS|CARTAO_CREDITO_EXTERNO|CARTAO_DEBITO_EXTERNO|CREDITO_SINAL")
+        regexp = "DINHEIRO|PIX_ASAAS|CARTAO_CREDITO_EXTERNO|CARTAO_DEBITO_EXTERNO|CREDITO_SINAL|PIX|CARTAO_CREDITO|CARTAO_DEBITO|LINK")
     public String meio;
 
     @NotNull
     @DecimalMin(value = "0.01", inclusive = true)
     public BigDecimal valor;
+
+    /** Cartao de credito na maquininha integrada: em quantas vezes (1 a 12). */
+    public Integer parcelas;
+
+    /** Maquininha integrada que recebe a cobranca (CARTAO_CREDITO / CARTAO_DEBITO). */
+    public String terminalId;
   }
 
   public static class CancelarComandaRequest {
@@ -140,6 +146,13 @@ public final class ComandaDtos {
     public String status;
     public String pixPayload;
     public String paidAt;
+    /** Meios integrados: a cobranca na operadora (a tela acompanha e cancela por ela). */
+    public String cobrancaId;
+    public String linkDePagamento;
+    public String nsu;
+    public String bandeira;
+    public Integer parcelas;
+    public String motivoRecusa;
   }
 
   public static class ComandaResponse {
