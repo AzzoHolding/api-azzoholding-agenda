@@ -97,6 +97,8 @@ app:
       auth-mechanisms: ${MAIL_SMTP_AUTH_MECHANISMS:LOGIN PLAIN}
       timeout-seconds: ${MAIL_SMTP_TIMEOUT_SECONDS:20}
     from: ${MAIL_FROM:no-reply@azzoholding.com.br}
+    # Remetente de todo e-mail automatico (ninguem responde); MAIL_FROM fica como o endereco de suporte.
+    no-reply: ${MAIL_FROM_NO_REPLY:no-reply@azzoholding.com.br}
   email:
     product-name: ${EMAIL_PRODUCT_NAME:Azzo Agenda Pro}
     jobs:
