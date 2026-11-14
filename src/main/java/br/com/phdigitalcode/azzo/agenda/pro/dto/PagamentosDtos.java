@@ -69,6 +69,14 @@ public final class PagamentosDtos {
     public String apelido;
   }
 
+  /** O que o PDV pode oferecer agora: so o necessario para o caixa, sem dado de conta. */
+  public static class Disponiveis {
+    public boolean pix;
+    public boolean link;
+    public String operadoraDoPix;
+    public List<Terminal> maquininhas = new ArrayList<>();
+  }
+
   public static class Cobranca {
     public String id;
     public String contaId;

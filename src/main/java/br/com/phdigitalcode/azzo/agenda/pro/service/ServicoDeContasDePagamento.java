@@ -217,6 +217,34 @@ public class ServicoDeContasDePagamento implements ApplicationRunner {
     return paraDto(conta);
   }
 
+  /** O que o PDV oferece: Pix e link (se houver conta padrao que faca) e as maquininhas ativas. */
+  @Transactional(readOnly = true)
+  public PagamentosDtos.Disponiveis disponiveis() {
+    UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    PagamentosDtos.Disponiveis d = new PagamentosDtos.Disponiveis();
+    padrao(tenantId, "PIX").ifPresent(c -> {
+      ProvedorDePagamento p = provedores.get(c.getProvedor());
+      d.pix = p != null && p.capacidades().contains(ProvedorDePagamento.Capacidade.PIX);
+      d.operadoraDoPix = OPERADORAS_DO_PLANO.getOrDefault(c.getProvedor(), c.getProvedor());
+    });
+    padrao(tenantId, "ONLINE").ifPresent(c -> {
+      ProvedorDePagamento p = provedores.get(c.getProvedor());
+      d.link = p != null && p.capacidades().contains(ProvedorDePagamento.Capacidade.LINK);
+    });
+    if (terminais != null) {
+      for (ContaDePagamento conta : contas.findByTenantIdAndAtivoTrueOrderByCreatedAtAsc(tenantId)) {
+        for (var t : terminais.findByTenantIdAndContaIdAndAtivoTrue(tenantId, conta.getId())) {
+          PagamentosDtos.Terminal td = new PagamentosDtos.Terminal();
+          td.id = t.getId().toString();
+          td.apelido = t.getApelido();
+          td.modelo = t.getModelo();
+          d.maquininhas.add(td);
+        }
+      }
+    }
+    return d;
+  }
+
   // ---- maquininhas --------------------------------------------------------------------------
 
   /** As maquininhas que a conta tem NA OPERADORA, para o dono escolher qual adicionar. */

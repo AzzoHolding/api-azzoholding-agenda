@@ -103,6 +103,13 @@ public class PagamentosController {
     return pagamentos.criarTeste(pedido);
   }
 
+  /** Para o PDV: Pix, link e maquininhas disponiveis (sem dado de conta). */
+  @GetMapping("/disponiveis")
+  @RequiresPermission("finance:view")
+  public PagamentosDtos.Disponiveis disponiveis() {
+    return contas.disponiveis();
+  }
+
   /** A tela acompanha a cobranca por aqui (o PDV pergunta enquanto espera a maquininha). */
   @GetMapping("/cobrancas/{id}")
   @RequiresPermission("finance:view")
