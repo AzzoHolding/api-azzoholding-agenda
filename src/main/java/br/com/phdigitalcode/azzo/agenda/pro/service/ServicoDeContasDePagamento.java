@@ -68,6 +68,8 @@ public class ServicoDeContasDePagamento implements ApplicationRunner {
     // A maquininha Stone (Stone Connect) passa pela API da Pagar.me: e uma conta so.
     OPERADORAS_DO_PLANO.put("PAGARME", "Stone / Pagar.me");
     OPERADORAS_DO_PLANO.put("CIELO", "Cielo");
+    // A maquininha Cielo Smart usa outra API e outras credenciais (Order Manager): conta separada.
+    OPERADORAS_DO_PLANO.put("CIELO_SMART", "Cielo Smart (maquininha)");
     OPERADORAS_DO_PLANO.put("PAGBANK", "PagBank");
     OPERADORAS_DO_PLANO.put("REDE", "Rede");
     OPERADORAS_DO_PLANO.put("GETNET", "Getnet");
