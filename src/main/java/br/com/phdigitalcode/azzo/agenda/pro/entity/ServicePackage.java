@@ -39,6 +39,10 @@ public class ServicePackage {
   @Column(name = "ativo", nullable = false)
   private boolean ativo = true;
 
+  /** Validade opcional, em dias a partir da compra (V177); vazio = nao vence. */
+  @Column(name = "validade_dias")
+  private Integer validadeDias;
+
   @Column(name = "created_at", nullable = false)
   private Instant createdAt;
 

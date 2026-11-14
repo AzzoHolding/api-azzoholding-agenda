@@ -74,7 +74,9 @@ public class ServicoPackages {
     aplicar(request, pacote);
     servicePackageRepository.save(pacote);
     aplicarItens(tenantId, pacote.getId(), request.itens);
-    return toResponse(pacote);
+    PackageDtos.PackageResponse resposta = toResponse(pacote);
+    auditar(tenantId, "PACKAGE_CREATE", pacote.getId(), null, resposta);
+    return resposta;
   }
 
   @Transactional
@@ -82,13 +84,36 @@ public class ServicoPackages {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     ServicePackage pacote = buscarOuFalhar(id, tenantId);
     validar(tenantId, id, request);
+    PackageDtos.PackageResponse antes = toResponse(pacote);
     aplicar(request, pacote);
     // A composicao do pacote e regravada do zero, igual ao original
     // (`servicePackageItemRepository.delete("packageId", pacote.id)`).
     servicePackageItemRepository.deleteByPackageId(pacote.getId());
     servicePackageItemRepository.flush();
     aplicarItens(tenantId, pacote.getId(), request.itens);
-    return toResponse(pacote);
+    PackageDtos.PackageResponse depois = toResponse(pacote);
+    auditar(tenantId, "PACKAGE_UPDATE", pacote.getId(), antes, depois);
+    return depois;
+  }
+
+  /**
+   * Exclui so o pacote que nunca foi vendido nem lancado numa comanda (relatorio de 14/11, Baixo 5).
+   * O que ja foi vendido se inativa: as compras apontam para ele.
+   */
+  @Transactional
+  public void excluir(UUID id) {
+    UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    ServicePackage pacote = buscarOuFalhar(id, tenantId);
+    boolean emComanda = comandaItemRepository != null
+        && comandaItemRepository.existsByTenantIdAndTipoAndReferenciaId(tenantId, "PACOTE", id);
+    if (emComanda || clientPackagePurchaseRepository.existsByTenantIdAndPackageId(tenantId, id)) {
+      throw new ApiClientErrorException(
+          "Este pacote já foi vendido ou está numa comanda: inative-o em vez de excluir.", 409);
+    }
+    PackageDtos.PackageResponse antes = toResponse(pacote);
+    servicePackageItemRepository.deleteByPackageId(id);
+    servicePackageRepository.delete(pacote);
+    auditar(tenantId, "PACKAGE_DELETE", id, antes, null);
   }
 
   /**
@@ -139,6 +164,7 @@ public class ServicoPackages {
     pacote.setDescricao(request.descricao);
     pacote.setPreco(request.preco);
     pacote.setAtivo(request.ativo);
+    pacote.setValidadeDias(request.validadeDias);
   }
 
   private void aplicarItens(UUID tenantId, UUID packageId, List<PackageDtos.ItemRequest> itens) {
@@ -156,6 +182,39 @@ public class ServicoPackages {
       item.setSessoes(itemRequest.sessoes);
       servicePackageItemRepository.save(item);
     }
+  }
+
+  /** Criar e editar pacote (inclusive o preco) ficam na trilha (relatorio de 14/11, Alto 5). */
+  private br.com.phdigitalcode.azzo.agenda.pro.integration.AuditService auditService;
+
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setAuditService(br.com.phdigitalcode.azzo.agenda.pro.integration.AuditService auditService) {
+    this.auditService = auditService;
+  }
+
+  private void auditar(UUID tenantId, String acao, UUID pacoteId, Object antes, Object depois) {
+    if (auditService == null) return;
+    var command = new br.com.phdigitalcode.azzo.agenda.pro.integration.AuditEventCommand();
+    command.tenantId = tenantId;
+    command.module = br.com.phdigitalcode.azzo.agenda.pro.integration.AuditConstants.Module.FINANCE;
+    command.action = acao;
+    command.entityType = "SERVICE_PACKAGE";
+    command.entityId = pacoteId.toString();
+    command.sourceChannel = br.com.phdigitalcode.azzo.agenda.pro.integration.AuditConstants.SourceChannel.API;
+    command.before = antes == null ? null : mapa(antes);
+    command.after = depois == null ? null : mapa(depois);
+    auditService.recordSuccess(command);
+  }
+
+  private static java.util.Map<String, Object> mapa(Object resposta) {
+    var r = (PackageDtos.PackageResponse) resposta;
+    java.util.Map<String, Object> m = new java.util.LinkedHashMap<>();
+    m.put("nome", r.nome);
+    m.put("preco", r.preco);
+    m.put("ativo", r.ativo);
+    m.put("validadeDias", r.validadeDias);
+    m.put("itens", r.itens.stream().map(i -> i.serviceNome + " x" + i.sessoes).toList());
+    return m;
   }
 
   /** Setter: os testes que montam o servico a mao seguem sem os usos. */
@@ -179,6 +238,7 @@ public class ServicoPackages {
     r.descricao = pacote.getDescricao();
     r.preco = pacote.getPreco();
     r.ativo = pacote.isAtivo();
+    r.validadeDias = pacote.getValidadeDias();
     r.createdAt = pacote.getCreatedAt() != null ? pacote.getCreatedAt().toString() : null;
     r.itens =
         servicePackageItemRepository.findByPackageId(pacote.getId()).stream()
@@ -236,6 +296,8 @@ public class ServicoPackages {
                   saldoResponse.sessoesUsadas = saldo.getSessoesUsadas();
                   saldoResponse.sessoesDisponiveis =
                       saldo.getSessoesTotais() - saldo.getSessoesUsadas();
+                  saldoResponse.expiraEm = saldo.getExpiraEm() == null ? null : saldo.getExpiraEm().toString();
+                  saldoResponse.vencido = saldo.getExpiraEm() != null && saldo.getExpiraEm().isBefore(java.time.Instant.now());
                   return saldoResponse;
                 })
             .toList();

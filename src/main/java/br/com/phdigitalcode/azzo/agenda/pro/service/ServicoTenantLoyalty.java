@@ -55,12 +55,46 @@ public class ServicoTenantLoyalty {
           + "% do que gasta. O máximo é 100%: aumente os pontos para R$ 1,00 ou diminua os pontos por real.");
     }
     TenantLoyaltySettings config = findByTenantIdOrCreate(tenantId);
+    java.util.Map<String, Object> antes = resumo(config);
     config.setAtivo(request.ativo);
     config.setPontosPorReal(request.pontosPorReal);
     config.setProdutosContam(request.produtosContam);
     config.setValidadeDias(request.validadeDias);
     config.setPontosPorResgateReal(request.pontosPorResgateReal);
+    auditar(tenantId, antes, resumo(config));
     return toResponse(config);
+  }
+
+  /** Mudar o programa de pontos fica na trilha, com o antes e o depois (relatorio de 14/11, Alto 5). */
+  private br.com.phdigitalcode.azzo.agenda.pro.integration.AuditService auditService;
+
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setAuditService(br.com.phdigitalcode.azzo.agenda.pro.integration.AuditService auditService) {
+    this.auditService = auditService;
+  }
+
+  private static java.util.Map<String, Object> resumo(TenantLoyaltySettings c) {
+    java.util.Map<String, Object> m = new java.util.LinkedHashMap<>();
+    m.put("ativo", c.isAtivo());
+    m.put("pontosPorReal", c.getPontosPorReal());
+    m.put("pontosPorResgateReal", c.getPontosPorResgateReal());
+    m.put("produtosContam", c.isProdutosContam());
+    m.put("validadeDias", c.getValidadeDias());
+    return m;
+  }
+
+  private void auditar(UUID tenantId, java.util.Map<String, Object> antes, java.util.Map<String, Object> depois) {
+    if (auditService == null) return;
+    var command = new br.com.phdigitalcode.azzo.agenda.pro.integration.AuditEventCommand();
+    command.tenantId = tenantId;
+    command.module = br.com.phdigitalcode.azzo.agenda.pro.integration.AuditConstants.Module.SETTINGS;
+    command.action = "LOYALTY_SETTINGS_UPDATE";
+    command.entityType = "LOYALTY_PROGRAM";
+    command.entityId = tenantId.toString();
+    command.sourceChannel = br.com.phdigitalcode.azzo.agenda.pro.integration.AuditConstants.SourceChannel.API;
+    command.before = antes;
+    command.after = depois;
+    auditService.recordSuccess(command);
   }
 
   /** Setter: os testes que montam o servico a mao seguem sem o historico. */

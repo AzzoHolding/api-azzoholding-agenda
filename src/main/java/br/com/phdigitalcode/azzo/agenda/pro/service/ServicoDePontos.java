@@ -127,6 +127,52 @@ public class ServicoDePontos {
         saiu < creditados ? "Estorno: " + (creditados - saiu) + " pontos já tinham sido usados" : null);
   }
 
+  // ---- expiracao (validade definida pelo dono do salao) ----------------------------------------------
+
+  /** Setter: os testes que montam o servico a mao nao expiram nada. */
+  private org.springframework.transaction.support.TransactionTemplate transacao;
+
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setTransacoes(org.springframework.transaction.PlatformTransactionManager transacoes) {
+    this.transacao = new org.springframework.transaction.support.TransactionTemplate(transacoes);
+    this.transacao.setPropagationBehavior(org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+  }
+
+  /**
+   * Vence os creditos com data passada: o que sobrou de cada um sai do saldo e o extrato ganha
+   * "Venceu". Um credito por transacao, com o saldo da cliente travado — um resgate ao mesmo tempo
+   * espera, e nada e descontado duas vezes.
+   *
+   * @return quantos creditos venceram
+   */
+  public int expirarVencidos(int limite) {
+    if (transacao == null) return 0;
+    Instant agora = Instant.now();
+    int vencidos = 0;
+    for (UUID id : movimentos.vencidos(agora, org.springframework.data.domain.Limit.of(limite))) {
+      Boolean venceu = transacao.execute(s -> expirar(id, agora));
+      if (Boolean.TRUE.equals(venceu)) vencidos++;
+    }
+    return vencidos;
+  }
+
+  private boolean expirar(UUID creditoId, Instant agora) {
+    MovimentoDePontos credito = movimentos.findById(creditoId).orElse(null);
+    if (credito == null || credito.getExpiraEm() == null || credito.getExpiraEm().isAfter(agora)) return false;
+    clientes.travarSaldo(credito.getClientId(), credito.getTenantId());
+    Integer restantes = movimentos.restantesDe(creditoId);
+    if (restantes == null || restantes <= 0) return false;
+    int antes = saldo(credito.getTenantId(), credito.getClientId());
+    clientes.tirarPontosAteZero(credito.getClientId(), credito.getTenantId(), restantes);
+    int saiu = antes - saldo(credito.getTenantId(), credito.getClientId());
+    movimentos.zerarRestantes(creditoId);
+    String data = java.time.format.DateTimeFormatter.ofPattern("dd/MM/yyyy")
+        .withZone(java.time.ZoneId.of("America/Sao_Paulo")).format(credito.getCreatedAt());
+    registrar(credito.getTenantId(), credito.getClientId(), credito.getComandaId(), MovimentoDePontos.EXPIRACAO,
+        -saiu, 0, null, "Venceram os pontos ganhos em " + data);
+    return true;
+  }
+
   // ---- apoio --------------------------------------------------------------------------------------
 
   private void creditar(UUID tenantId, UUID clientId, UUID comandaId, int pontos, Integer validadeDias, String tipo, String motivo) {

@@ -277,6 +277,11 @@ class ServicoComandaTest {
     }
 
     @Override
+    public int pontosJaUsadosDaVenda(UUID tenant, UUID clientId, UUID comanda, int creditados) {
+      return Math.max(0, creditados - Math.max(0, saldo(tenant, clientId)));
+    }
+
+    @Override
     public void estornarCreditoDaVenda(UUID tenant, UUID clientId, UUID comanda, int creditados, ModoDeEstorno modo) {
       cliente(tenant, clientId).ifPresent(c -> c.setLoyaltyPoints(
           modo == ModoDeEstorno.SALDO_NEGATIVO ? c.getLoyaltyPoints() - creditados
@@ -1301,6 +1306,14 @@ class ServicoComandaTest {
     ComandaDtos.EstornarComandaRequest req = new ComandaDtos.EstornarComandaRequest();
     req.motivo = "  duplicidade  ";
 
+    // A cliente ja usou 15 dos 40 pontos desta venda (saldo 25): sem a confirmacao do dono, recusa
+    // ANTES de mexer em qualquer coisa (relatorio de 14/11, Alto 4).
+    assertThatThrownBy(() -> service.estornar(comandaId, req))
+        .isInstanceOf(ApiClientErrorException.class)
+        .hasMessageContaining("já usou 15 dos 40 pontos");
+    assertThat(transacao.getDeletedAt()).isNull();
+
+    req.aceitarSaldoNegativo = true;
     service.estornar(comandaId, req);
 
     // A Transacao original nunca some — vira soft delete para preservar auditoria.
@@ -1318,8 +1331,8 @@ class ServicoComandaTest {
             eq(BigDecimal.ONE),
             eq("Estorno de comanda: duplicidade"));
 
-    // Saldo de pontos nunca fica negativo: creditados 40, saldo atual 25 -> 0.
-    assertThat(cliente.getLoyaltyPoints()).isZero();
+    // O dono aceitou: creditados 40, saldo 25 -> -15 (a divida sai dos proximos pontos).
+    assertThat(cliente.getLoyaltyPoints()).isEqualTo(-15);
     assertThat(comanda.getStatus()).isEqualTo(Comanda.STATUS_ESTORNADA);
     assertThat(comanda.getEstornoMotivo()).isEqualTo("duplicidade");
     assertThat(comanda.getEstornadoPor()).isEqualTo(usuarioId);

@@ -90,6 +90,12 @@ public final class ComandaDtos {
 
   public static class EstornarComandaRequest {
     @NotBlank public String motivo;
+
+    /**
+     * O dono confirmou estornar mesmo com a cliente ja tendo usado pontos desta venda: o saldo dela
+     * fica negativo (a divida sai dos proximos pontos). Sem isso, o estorno nesse caso e recusado.
+     */
+    public Boolean aceitarSaldoNegativo;
   }
 
   /** Produto do estoque com preco de venda, para o PDV (etapa 4). */
@@ -197,6 +203,9 @@ public final class ComandaDtos {
     public String cancelMotivo;
     public String estornoMotivo;
     public String estornadoEm;
+    /** Comanda fechada: quantos dos pontos que esta venda gerou a cliente ja usou (aviso do estorno). */
+    public Integer pontosJaUsadosDaVenda;
+    public Integer pontosCreditados;
     public String openedAt;
     public String closedAt;
     public List<ComandaItemResponse> itens = new ArrayList<>();

@@ -60,4 +60,28 @@ class ServicoDePontosTest {
     assertThatThrownBy(() -> ServicoComanda.pontosInteiros(new BigDecimal("-3"))).hasMessageContaining("Informe");
     assertThatThrownBy(() -> ServicoComanda.pontosInteiros(null)).hasMessageContaining("Informe");
   }
+
+  /** Decisao do dono (14/11): valor da sessao proporcional ao preco de tabela (Medio 4). */
+  @Test
+  void valorDaSessaoProporcionalAoPrecoDeTabela() {
+    java.util.UUID corte = java.util.UUID.randomUUID();
+    java.util.UUID escova = java.util.UUID.randomUUID();
+    var itens = java.util.List.of(item(corte, 5), item(escova, 2));
+    var precos = java.util.Map.of(corte, new BigDecimal("80"), escova, new BigDecimal("50"));
+    var valores = ServicoComanda.valorDaSessaoProporcional(new BigDecimal("300"), itens, precos);
+    // Tabela: 5 x 80 + 2 x 50 = 500. Corte: 300 x 80 / 500 = 48; escova: 300 x 50 / 500 = 30.
+    assertThat(valores.get(corte)).isEqualByComparingTo("48.00");
+    assertThat(valores.get(escova)).isEqualByComparingTo("30.00");
+    // 5 x 48 + 2 x 30 = 300: o total fecha com o que a cliente pagou.
+    // Sem preco de tabela num servico: volta a divisao igual (mapa vazio).
+    assertThat(ServicoComanda.valorDaSessaoProporcional(new BigDecimal("300"), itens, java.util.Map.of(corte, new BigDecimal("80"))))
+        .isEmpty();
+  }
+
+  private static br.com.phdigitalcode.azzo.agenda.pro.entity.ServicePackageItem item(java.util.UUID servico, int sessoes) {
+    var i = new br.com.phdigitalcode.azzo.agenda.pro.entity.ServicePackageItem();
+    i.setServiceId(servico);
+    i.setSessoes(sessoes);
+    return i;
+  }
 }

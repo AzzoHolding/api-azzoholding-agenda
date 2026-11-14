@@ -584,12 +584,13 @@ public class ServicoComanda {
       for (ClientPackageBalance saldo : clientPackageBalanceRepository.findByPurchaseId(compra.getId())) {
         int disponiveis = saldo.getSessoesTotais() - saldo.getSessoesUsadas();
         if (!item.getReferenciaId().equals(saldo.getServiceId()) || disponiveis <= 0) continue;
+        if (saldo.getExpiraEm() != null && saldo.getExpiraEm().isBefore(Instant.now())) continue;
         ComandaDtos.OpcaoDeCoberturaResponse opcao = new ComandaDtos.OpcaoDeCoberturaResponse();
         opcao.tipo = ComandaItem.COBERTURA_PACOTE;
         opcao.saldoId = saldo.getId().toString();
         opcao.nome = compra.getPackageNome();
         opcao.disponiveis = disponiveis;
-        opcao.valorDaSessao = valorDaSessaoDoPacote(compra);
+        opcao.valorDaSessao = saldo.getValorSessao() != null ? saldo.getValorSessao() : valorDaSessaoDoPacote(compra);
         opcoes.add(opcao);
       }
     }
@@ -712,6 +713,11 @@ public class ServicoComanda {
     int sessoes = sessoesDoItem(item);
     if (ComandaItem.COBERTURA_PACOTE.equals(item.getCoberturaTipo())) {
       ClientPackageBalance saldo = saldoDePacoteDoCliente(tenantId, comanda, item);
+      if (saldo.getExpiraEm() != null && saldo.getExpiraEm().isBefore(Instant.now())) {
+        throw new IllegalArgumentException("As sessões de " + saldo.getServiceNome() + " deste pacote venceram em "
+            + java.time.format.DateTimeFormatter.ofPattern("dd/MM/yyyy").withZone(java.time.ZoneId.of("America/Sao_Paulo"))
+                .format(saldo.getExpiraEm()) + ".");
+      }
       if (saldo.getSessoesTotais() - saldo.getSessoesUsadas() < sessoes) {
         throw new IllegalArgumentException(
             mensagemDeSaldoDoPacote(saldo.getServiceNome(), saldo.getSessoesTotais() - saldo.getSessoesUsadas(), sessoes));
@@ -777,6 +783,7 @@ public class ServicoComanda {
   private BigDecimal valorDaSessaoDoSaldo(UUID tenantId, Comanda comanda, ComandaItem item) {
     if (ComandaItem.COBERTURA_PACOTE.equals(item.getCoberturaTipo())) {
       ClientPackageBalance saldo = saldoDePacoteDoCliente(tenantId, comanda, item);
+      if (saldo.getValorSessao() != null) return saldo.getValorSessao();
       return clientPackagePurchaseRepository
           .findById(saldo.getPurchaseId())
           .map(this::valorDaSessaoDoPacote)
@@ -790,6 +797,29 @@ public class ServicoComanda {
           .orElse(BigDecimal.ZERO);
     }
     throw new IllegalArgumentException("Tipo de cobertura inválido.");
+  }
+
+  /**
+   * Valor de cada sessao, proporcional ao preco de tabela de cada servico (decisao do dono, 14/11):
+   * pacote de R$ 300 com 5 cortes (R$ 80) e 2 escovas (R$ 50) = corte R$ 48,00 e escova R$ 30,00, e
+   * nao R$ 42,86 para os dois. Sem preco de tabela em algum servico, volta a divisao igual (mapa vazio).
+   */
+  static java.util.Map<UUID, BigDecimal> valorDaSessaoProporcional(
+      BigDecimal pago, List<ServicePackageItem> itens, java.util.Map<UUID, BigDecimal> precoDeTabela) {
+    java.util.Map<UUID, BigDecimal> valores = new java.util.HashMap<>();
+    if (pago == null || itens.isEmpty()) return valores;
+    BigDecimal tabela = BigDecimal.ZERO;
+    for (ServicePackageItem i : itens) {
+      BigDecimal preco = precoDeTabela.get(i.getServiceId());
+      if (preco == null || preco.signum() <= 0) return valores;
+      tabela = tabela.add(preco.multiply(BigDecimal.valueOf(i.getSessoes())));
+    }
+    if (tabela.signum() <= 0) return valores;
+    for (ServicePackageItem i : itens) {
+      valores.put(i.getServiceId(),
+          pago.multiply(precoDeTabela.get(i.getServiceId())).divide(tabela, 2, RoundingMode.HALF_UP));
+    }
+    return valores;
   }
 
   /** O que o cliente pagou pelo pacote dividido pelo total de sessoes dele. */
@@ -1442,9 +1472,23 @@ public class ServicoComanda {
     clientPackagePurchaseRepository.save(compra);
 
     int multiplicador = item.getQuantidade().setScale(0, RoundingMode.CEILING).intValue();
-    for (ServicePackageItem pacoteItem :
-        servicePackageItemRepository.findByPackageId(item.getReferenciaId())) {
+    List<ServicePackageItem> itensDoPacote = servicePackageItemRepository.findByPackageId(item.getReferenciaId());
+    java.util.Map<UUID, BigDecimal> precoDeTabela = new java.util.HashMap<>();
+    for (ServicePackageItem pacoteItem : itensDoPacote) {
+      servicoRepository.findById(pacoteItem.getServiceId())
+          .ifPresent(s -> precoDeTabela.put(pacoteItem.getServiceId(), s.getPrice()));
+    }
+    java.util.Map<UUID, BigDecimal> valorPorSessao =
+        valorDaSessaoProporcional(valorLiquido, itensDoPacote, precoDeTabela);
+    java.time.Instant vencimento = servicePackageRepository.findByIdAndTenantId(item.getReferenciaId(), tenantId)
+        .map(ServicePackage::getValidadeDias)
+        .filter(dias -> dias != null && dias > 0)
+        .map(dias -> java.time.Instant.now().plus(dias, java.time.temporal.ChronoUnit.DAYS))
+        .orElse(null);
+    for (ServicePackageItem pacoteItem : itensDoPacote) {
       ClientPackageBalance saldo = new ClientPackageBalance();
+      saldo.setValorSessao(valorPorSessao.get(pacoteItem.getServiceId()));
+      saldo.setExpiraEm(vencimento);
       saldo.setTenantId(tenantId);
       saldo.setPurchaseId(compra.getId());
       saldo.setServiceId(pacoteItem.getServiceId());
@@ -1854,6 +1898,19 @@ public class ServicoComanda {
         comanda.getId().toString(), Map.of("motivo", request.motivo == null ? "" : request.motivo));
     String motivo = request.motivo.trim();
 
+    // Pontos que esta venda gerou e a cliente ja usou (relatorio de 14/11, Alto 4): o dono decide.
+    // Conferido ANTES da operadora, porque o estorno na operadora nao volta atras.
+    boolean aceitarSaldoNegativo = Boolean.TRUE.equals(request.aceitarSaldoNegativo);
+    if (comanda.getPontosFidelidadeCreditados() > 0 && comanda.getClientId() != null) {
+      int usados = servicoDePontos.pontosJaUsadosDaVenda(
+          tenantId, comanda.getClientId(), comanda.getId(), comanda.getPontosFidelidadeCreditados());
+      if (usados > 0 && !aceitarSaldoNegativo) {
+        throw new ApiClientErrorException("A cliente já usou " + usados + " dos " + comanda.getPontosFidelidadeCreditados()
+            + " pontos que esta venda gerou. Para estornar mesmo assim, confirme: o saldo dela fica negativo em "
+            + usados + " pontos, que saem dos próximos pontos que ela ganhar.", 409);
+      }
+    }
+
     // Primeiro a operadora: se ela recusar o estorno, nada do financeiro e mexido.
     List<ComandaPagamento> pagamentosDaComanda = comandaPagamentoRepository.findByComandaIdOrderByCreatedAt(comanda.getId());
     estornarNaOperadora(pagamentosDaComanda);
@@ -1903,7 +1960,8 @@ public class ServicoComanda {
 
     if (comanda.getPontosFidelidadeCreditados() > 0 && comanda.getClientId() != null) {
       servicoDePontos.estornarCreditoDaVenda(tenantId, comanda.getClientId(), comanda.getId(),
-          comanda.getPontosFidelidadeCreditados(), ServicoDePontos.ModoDeEstorno.ATE_ZERO);
+          comanda.getPontosFidelidadeCreditados(),
+          aceitarSaldoNegativo ? ServicoDePontos.ModoDeEstorno.SALDO_NEGATIVO : ServicoDePontos.ModoDeEstorno.ATE_ZERO);
     }
 
     // FIN-007: o estorno revertia so os pontos CREDITADOS pela venda; os RESGATADOS nela se perdiam.
@@ -2317,6 +2375,12 @@ public class ServicoComanda {
     r.closedAt = comanda.getClosedAt() != null ? comanda.getClosedAt().toString() : null;
     r.itens = itens.stream().map(this::toItemResponse).toList();
     r.pagamentos = pagamentos.stream().map(this::toPagamentoResponse).toList();
+    r.pontosCreditados = comanda.getPontosFidelidadeCreditados();
+    if (Comanda.STATUS_FECHADA.equals(comanda.getStatus()) && comanda.getPontosFidelidadeCreditados() > 0
+        && comanda.getClientId() != null && servicoDePontos != null) {
+      r.pontosJaUsadosDaVenda = servicoDePontos.pontosJaUsadosDaVenda(
+          comanda.getTenantId(), comanda.getClientId(), comanda.getId(), comanda.getPontosFidelidadeCreditados());
+    }
     return r;
   }
 

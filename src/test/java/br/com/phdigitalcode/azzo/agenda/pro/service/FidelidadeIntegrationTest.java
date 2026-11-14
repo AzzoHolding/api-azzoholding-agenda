@@ -124,6 +124,31 @@ class FidelidadeIntegrationTest {
         .isEqualTo(7);
   }
 
+  /** A validade definida pelo dono: o credito vencido sai do saldo; o que nao venceu fica. */
+  @Test
+  void pontosVencidosSaemDoSaldoNaRotinaDiaria() {
+    UUID tenant = criarTenant();
+    UUID cliente = criarCliente(tenant, 0);
+    TransactionTemplate tx = new TransactionTemplate(transacoes);
+    UUID vendaAntiga = UUID.randomUUID();
+    tx.executeWithoutResult(s -> pontos.creditarVenda(tenant, cliente, vendaAntiga, 120, 30));
+    tx.executeWithoutResult(s -> pontos.creditarVenda(tenant, cliente, UUID.randomUUID(), 80, 30));
+    // A primeira venda "foi ha 31 dias"; a cliente usou 20 dos 120 pontos dela.
+    jdbc.update("UPDATE movimentos_de_pontos SET expira_em = now() - interval '1 day', created_at = now() - interval '31 days' "
+        + "WHERE comanda_id = ?", vendaAntiga);
+    tx.executeWithoutResult(s -> pontos.debitarResgate(tenant, cliente, UUID.randomUUID(), 20));
+    assertThat(saldo(cliente)).isEqualTo(180);
+
+    assertThat(pontos.expirarVencidos(500)).isGreaterThanOrEqualTo(1);
+    // Venceram os 100 que sobraram da venda antiga (o resgate consumiu primeiro o que vencia antes).
+    assertThat(saldo(cliente)).isEqualTo(80);
+    assertThat(jdbc.queryForObject("SELECT pontos FROM movimentos_de_pontos WHERE client_id = ? AND tipo = 'EXPIRACAO'",
+        Integer.class, cliente)).isEqualTo(-100);
+    // Rodar de novo nao vence nada duas vezes.
+    pontos.expirarVencidos(500);
+    assertThat(saldo(cliente)).isEqualTo(80);
+  }
+
   private int saldo(UUID cliente) {
     return jdbc.queryForObject("SELECT loyalty_points FROM clients WHERE id = ?", Integer.class, cliente);
   }

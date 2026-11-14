@@ -44,6 +44,11 @@ public final class PackageDtos {
 
     public boolean ativo = true;
 
+    /** Validade opcional, em dias a partir da compra; vazio = as sessoes nao vencem. */
+    @Min(value = 1, message = "a validade é de pelo menos 1 dia (deixe vazio para não vencer)")
+    @Max(value = 3650, message = "a validade é de no máximo 3.650 dias")
+    public Integer validadeDias;
+
     @NotEmpty @Valid public List<ItemRequest> itens = new ArrayList<>();
   }
 
@@ -59,6 +64,7 @@ public final class PackageDtos {
     public String descricao;
     public BigDecimal preco;
     public boolean ativo;
+    public Integer validadeDias;
     public String createdAt;
     public List<ItemResponse> itens = new ArrayList<>();
   }
@@ -70,6 +76,9 @@ public final class PackageDtos {
     public int sessoesTotais;
     public int sessoesUsadas;
     public int sessoesDisponiveis;
+    /** Quando as sessoes vencem; vazio = nao vencem. */
+    public String expiraEm;
+    public boolean vencido;
     /** Atendimentos feitos com este saldo (comandas fechadas), do mais recente ao mais antigo. */
     public List<UsoDoPacote> usos = new ArrayList<>();
   }

@@ -139,6 +139,10 @@ public interface ClienteRepository extends JpaRepository<Cliente, UUID> {
       + " where id = :id and tenant_id = :tenantId", nativeQuery = true)
   int tirarPontosAteZero(@Param("id") UUID id, @Param("tenantId") UUID tenantId, @Param("pontos") int pontos);
 
+  /** Trava o saldo da cliente ate o fim da transacao (expiracao x resgate ao mesmo tempo). */
+  @Query(value = "select loyalty_points from clients where id = :id and tenant_id = :tenantId for update", nativeQuery = true)
+  Integer travarSaldo(@Param("id") UUID id, @Param("tenantId") UUID tenantId);
+
   /** O saldo de verdade, direto do banco (a entidade carregada pode estar desatualizada). */
   @Query(value = "select loyalty_points from clients where id = :id and tenant_id = :tenantId", nativeQuery = true)
   Integer saldoDePontos(@Param("id") UUID id, @Param("tenantId") UUID tenantId);
