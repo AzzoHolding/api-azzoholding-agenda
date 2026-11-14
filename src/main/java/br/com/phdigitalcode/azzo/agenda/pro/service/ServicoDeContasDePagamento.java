@@ -229,6 +229,9 @@ public class ServicoDeContasDePagamento implements ApplicationRunner {
       // So o Mercado Pago emite Pix sem CPF/CNPJ de quem paga; as outras pedem o cliente cadastrado.
       d.pixExigeCliente = !"MERCADO_PAGO".equals(c.getProvedor());
     });
+    d.recorrente = contas.findByTenantIdAndAtivoTrueOrderByCreatedAtAsc(tenantId).stream()
+        .map(c -> provedores.get(c.getProvedor()))
+        .anyMatch(p -> p != null && p.capacidades().contains(ProvedorDePagamento.Capacidade.RECORRENTE));
     padrao(tenantId, "ONLINE").ifPresent(c -> {
       ProvedorDePagamento p = provedores.get(c.getProvedor());
       d.link = p != null && p.capacidades().contains(ProvedorDePagamento.Capacidade.LINK);
