@@ -64,8 +64,8 @@ public class ServicoDeContasDePagamento implements ApplicationRunner {
 
   static {
     OPERADORAS_DO_PLANO.put("MERCADO_PAGO", "Mercado Pago");
-    OPERADORAS_DO_PLANO.put("PAGARME", "Pagar.me");
-    OPERADORAS_DO_PLANO.put("STONE", "Stone");
+    // A maquininha Stone (Stone Connect) passa pela API da Pagar.me: e uma conta so.
+    OPERADORAS_DO_PLANO.put("PAGARME", "Stone / Pagar.me");
     OPERADORAS_DO_PLANO.put("CIELO", "Cielo");
     OPERADORAS_DO_PLANO.put("PAGBANK", "PagBank");
     OPERADORAS_DO_PLANO.put("REDE", "Rede");

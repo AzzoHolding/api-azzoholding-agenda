@@ -40,7 +40,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.security.EncryptionService;
 
 /**
  * Pagamentos (Fase 0) contra um Postgres REAL, com as migrations reais (V167) e uma operadora de
- * mentira no lugar de "PAGARME": criar cobranca, idempotencia, aviso pago, aviso repetido, token
+ * mentira no lugar de "GETNET": criar cobranca, idempotencia, aviso pago, aviso repetido, token
  * errado, operadora trocada na URL e a consulta de reserva quando o aviso se perde.
  */
 @SpringBootTest(properties = {
@@ -88,7 +88,7 @@ class PagamentosIntegrationTest {
     final List<String> criadas = new ArrayList<>();
     volatile Status statusNaConsulta = Status.AGUARDANDO;
 
-    public String codigo() { return "PAGARME"; }
+    public String codigo() { return "GETNET"; }
     public String nome() { return "Operadora de teste"; }
     public Set<Capacidade> capacidades() { return EnumSet.of(Capacidade.PIX, Capacidade.ESTORNO); }
     public List<CampoDeCredencial> camposDeCredencial() { return List.of(new CampoDeCredencial("apiKey", "Chave", true)); }
@@ -134,7 +134,7 @@ class PagamentosIntegrationTest {
     UUID tenant = criarTenant();
     ContaDePagamento conta = new ContaDePagamento();
     conta.setTenantId(tenant);
-    conta.setProvedor("PAGARME");
+    conta.setProvedor("GETNET");
     conta.setApelido("Teste");
     conta.setAmbiente("SANDBOX");
     conta.setCredenciaisEnc(cifra.encrypt("{\"apiKey\":\"chave-de-teste\"}"));
@@ -152,7 +152,7 @@ class PagamentosIntegrationTest {
 
     // Aviso pago: status, taxa, liquido, NSU e so os 4 ultimos do cartao.
     String aviso = "{\"evento\":\"evt-1\",\"cobranca\":\"op-1\",\"status\":\"PAGA\"}";
-    pagamentos.receberAviso("pagarme", conta.getWebhookToken(), Map.of(), aviso);
+    pagamentos.receberAviso("getnet", conta.getWebhookToken(), Map.of(), aviso);
     Map<String, Object> linha = jdbc.queryForMap("SELECT * FROM cobrancas WHERE id = ?::uuid", criada.id);
     assertThat(linha.get("status")).isEqualTo("PAGA");
     assertThat((BigDecimal) linha.get("valor_liquido")).isEqualByComparingTo("9.85");
@@ -165,16 +165,16 @@ class PagamentosIntegrationTest {
 
     // O mesmo aviso de novo nao cria evento nem muda nada.
     int eventosAntes = jdbc.queryForObject("SELECT count(*) FROM eventos_de_cobranca", Integer.class);
-    pagamentos.receberAviso("pagarme", conta.getWebhookToken(), Map.of(), aviso);
+    pagamentos.receberAviso("getnet", conta.getWebhookToken(), Map.of(), aviso);
     assertThat(jdbc.queryForObject("SELECT count(*) FROM eventos_de_cobranca", Integer.class)).isEqualTo(eventosAntes);
 
     // Paga nao volta a "aguardando".
-    pagamentos.receberAviso("pagarme", conta.getWebhookToken(), Map.of(),
+    pagamentos.receberAviso("getnet", conta.getWebhookToken(), Map.of(),
         "{\"evento\":\"evt-2\",\"cobranca\":\"op-1\",\"status\":\"AGUARDANDO\"}");
     assertThat(jdbc.queryForObject("SELECT status FROM cobrancas WHERE id = ?::uuid", String.class, criada.id)).isEqualTo("PAGA");
 
     // Token errado ou operadora trocada na URL: nao reconhece.
-    assertThatThrownBy(() -> pagamentos.receberAviso("pagarme", "token-errado", Map.of(), aviso))
+    assertThatThrownBy(() -> pagamentos.receberAviso("getnet", "token-errado", Map.of(), aviso))
         .isInstanceOf(ApiClientErrorException.class).hasMessage("Aviso não reconhecido.");
     assertThatThrownBy(() -> pagamentos.receberAviso("asaas", conta.getWebhookToken(), Map.of(), aviso))
         .isInstanceOf(ApiClientErrorException.class).hasMessage("Aviso não reconhecido.");
