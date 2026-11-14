@@ -74,6 +74,8 @@ public final class PagamentosDtos {
     public boolean pix;
     public boolean link;
     public String operadoraDoPix;
+    /** O Pix desta operadora exige cliente com CPF/CNPJ na comanda. */
+    public boolean pixExigeCliente;
     public List<Terminal> maquininhas = new ArrayList<>();
   }
 
