@@ -145,6 +145,8 @@ public final class ComandaDtos {
     public BigDecimal valor;
     public String status;
     public String pixPayload;
+    /** QR Code do Pix pendente, SVG em data URI, para o cliente ler na tela do caixa. */
+    public String pixQrCode;
     public String paidAt;
     /** Meios integrados: a cobranca na operadora (a tela acompanha e cancela por ela). */
     public String cobrancaId;

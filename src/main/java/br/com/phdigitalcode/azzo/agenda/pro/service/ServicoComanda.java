@@ -2206,6 +2206,10 @@ public class ServicoComanda {
         });
       }
     }
+    // O QR so enquanto espera: pago ou recusado, ninguem mais precisa ler.
+    if (r.pixPayload != null && ComandaPagamento.STATUS_PENDENTE.equals(r.status)) {
+      r.pixQrCode = br.com.phdigitalcode.azzo.agenda.pro.integration.pagamentos.QrCodeDoPix.dataUri(r.pixPayload);
+    }
     return r;
   }
 
