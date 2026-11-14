@@ -35,6 +35,22 @@ public class ServicoDePontos {
     SALDO_NEGATIVO
   }
 
+  /** Com que vencimento os pontos devolvidos voltam (V178, escolha de quem tem a permissao). */
+  public enum VencimentoDaDevolucao {
+    /** Voltam para os creditos de onde sairam, com o vencimento deles. */
+    ORIGINAL,
+    /** Voltam como credito novo, com a validade de hoje. */
+    NOVO
+  }
+
+  /** Setter: os testes que montam o servico a mao devolvem sempre como credito novo. */
+  private br.com.phdigitalcode.azzo.agenda.pro.repository.ConsumoDePontosRepository consumos;
+
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setConsumos(br.com.phdigitalcode.azzo.agenda.pro.repository.ConsumoDePontosRepository consumos) {
+    this.consumos = consumos;
+  }
+
   private final ClienteRepository clientes;
   private final MovimentoDePontosRepository movimentos;
   private final AuthenticatedUser usuarioLogado;
@@ -81,14 +97,61 @@ public class ServicoDePontos {
     if (clientes.debitarPontosSeHouver(clientId, tenantId, pontos) == 0) {
       throw new IllegalArgumentException("Cliente não possui pontos suficientes (saldo: " + saldo(tenantId, clientId) + ").");
     }
-    consumirCreditos(tenantId, clientId, pontos, null);
-    registrar(tenantId, clientId, comandaId, MovimentoDePontos.RESGATE, -pontos, 0, null, null);
+    var usados = consumirCreditos(tenantId, clientId, pontos, null);
+    MovimentoDePontos resgate = registrar(tenantId, clientId, comandaId, MovimentoDePontos.RESGATE, -pontos, 0, null, null);
+    if (consumos == null) return;
+    for (var usado : usados) {
+      var c = new br.com.phdigitalcode.azzo.agenda.pro.entity.ConsumoDePontos();
+      c.setTenantId(tenantId);
+      c.setResgateId(resgate.getId());
+      c.setCreditoId(usado.getKey());
+      c.setComandaId(comandaId);
+      c.setPontos(usado.getValue());
+      consumos.save(c);
+    }
   }
 
-  /** Pontos de um resgate voltam (resgate desfeito, comanda cancelada ou estornada). */
+  /**
+   * Pontos de um resgate voltam (resgate desfeito, comanda cancelada ou estornada). ORIGINAL: voltam
+   * para os creditos de onde sairam, com o vencimento deles (o que venceu no meio do caminho vence
+   * na proxima rotina). NOVO: voltam como credito novo, com a validade de hoje.
+   */
   @Transactional
-  public void devolverResgate(UUID tenantId, UUID clientId, UUID comandaId, int pontos, Integer validadeDias, String motivo) {
-    creditar(tenantId, clientId, comandaId, pontos, validadeDias, MovimentoDePontos.DEVOLUCAO, motivo);
+  public void devolverResgate(UUID tenantId, UUID clientId, UUID comandaId, int pontos, Integer validadeDias, String motivo,
+      VencimentoDaDevolucao vencimento) {
+    if (pontos <= 0) return;
+    if (vencimento == VencimentoDaDevolucao.NOVO || consumos == null) {
+      creditar(tenantId, clientId, comandaId, pontos, validadeDias, MovimentoDePontos.DEVOLUCAO,
+          juntar(motivo, "vencimento novo"));
+      return;
+    }
+    clientes.somarPontos(clientId, tenantId, pontos);
+    int devolvidos = 0;
+    for (var consumo : consumos.findByTenantIdAndComandaIdAndDevolvidoFalseOrderByCreatedAtDesc(tenantId, comandaId)) {
+      if (devolvidos >= pontos) break;
+      int volta = Math.min(consumo.getPontos(), pontos - devolvidos);
+      var credito = movimentos.findById(consumo.getCreditoId()).orElse(null);
+      if (credito == null) continue;
+      credito.setPontosRestantes(credito.getPontosRestantes() + volta);
+      movimentos.save(credito);
+      if (volta == consumo.getPontos()) {
+        consumo.setDevolvido(true);
+      } else {
+        consumo.setPontos(consumo.getPontos() - volta);
+      }
+      consumos.save(consumo);
+      devolvidos += volta;
+    }
+    // Resgate de antes do historico (sem consumo guardado): o que sobra volta como credito novo.
+    int sobra = pontos - devolvidos;
+    Instant expira = sobra > 0 && validadeDias != null && validadeDias > 0
+        ? Instant.now().plus(validadeDias, ChronoUnit.DAYS) : null;
+    registrar(tenantId, clientId, comandaId, MovimentoDePontos.DEVOLUCAO, pontos, sobra, expira,
+        juntar(motivo, "vencimento original"));
+  }
+
+  private static String juntar(String motivo, String extra) {
+    return motivo == null || motivo.isBlank() ? extra : motivo + " (" + extra + ")";
   }
 
   /** Pontos ganhos com a venda (ao fechar a comanda). */
@@ -185,28 +248,35 @@ public class ServicoDePontos {
     registrar(tenantId, clientId, comandaId, tipo, pontos, restantes, expira, motivo);
   }
 
-  /** Baixa {@code pontos} dos creditos com saldo; com {@code primeiroDaComanda}, comeca pelo credito dessa venda. */
-  private void consumirCreditos(UUID tenantId, UUID clientId, int pontos, UUID primeiroDaComanda) {
+  /**
+   * Baixa {@code pontos} dos creditos com saldo; com {@code primeiroDaComanda}, comeca pelo credito
+   * dessa venda. Devolve de qual credito saiu quanto (para a devolucao com o vencimento original).
+   */
+  private java.util.List<java.util.Map.Entry<UUID, Integer>> consumirCreditos(UUID tenantId, UUID clientId, int pontos,
+      UUID primeiroDaComanda) {
+    java.util.List<java.util.Map.Entry<UUID, Integer>> usados = new java.util.ArrayList<>();
     int falta = pontos;
     if (primeiroDaComanda != null) {
       var daVenda = movimentos.findFirstByTenantIdAndComandaIdAndTipo(tenantId, primeiroDaComanda, MovimentoDePontos.CREDITO);
-      if (daVenda.isPresent()) falta = baixar(daVenda.get(), falta);
+      if (daVenda.isPresent()) falta = baixar(daVenda.get(), falta, usados);
     }
     for (MovimentoDePontos credito : movimentos.creditosComSaldo(tenantId, clientId)) {
       if (falta <= 0) break;
-      falta = baixar(credito, falta);
+      falta = baixar(credito, falta, usados);
     }
+    return usados;
   }
 
-  private int baixar(MovimentoDePontos credito, int falta) {
+  private int baixar(MovimentoDePontos credito, int falta, java.util.List<java.util.Map.Entry<UUID, Integer>> usados) {
     int usar = Math.min(falta, credito.getPontosRestantes());
     if (usar <= 0) return falta;
     credito.setPontosRestantes(credito.getPontosRestantes() - usar);
     movimentos.save(credito);
+    usados.add(java.util.Map.entry(credito.getId(), usar));
     return falta - usar;
   }
 
-  private void registrar(UUID tenantId, UUID clientId, UUID comandaId, String tipo, int pontos, int restantes,
+  private MovimentoDePontos registrar(UUID tenantId, UUID clientId, UUID comandaId, String tipo, int pontos, int restantes,
       Instant expira, String motivo) {
     MovimentoDePontos m = new MovimentoDePontos();
     m.setTenantId(tenantId);
@@ -219,6 +289,6 @@ public class ServicoDePontos {
     m.setExpiraEm(expira);
     m.setMotivo(motivo == null ? null : motivo.length() > 200 ? motivo.substring(0, 200) : motivo);
     m.setCreatedBy(usuarioLogado == null ? null : usuarioLogado.idOuNulo());
-    movimentos.save(m);
+    return movimentos.save(m);
   }
 }

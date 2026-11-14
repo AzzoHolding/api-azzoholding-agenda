@@ -139,8 +139,9 @@ public class ComandaController {
 
   @PostMapping("/{id}/fidelidade/desfazer")
   @RequiresPermission("pos:manage")
-  public ComandaDtos.ComandaResponse desfazerResgate(@PathVariable UUID id) {
-    return servicoComanda.desfazerResgateNoCaixa(id);
+  public ComandaDtos.ComandaResponse desfazerResgate(
+      @PathVariable UUID id, @RequestBody(required = false) ComandaDtos.DesfazerResgateRequest request) {
+    return servicoComanda.desfazerResgateNoCaixa(id, request == null ? null : request.vencimentoDosPontos);
   }
 
   @PostMapping("/{id}/fidelidade/resgatar")

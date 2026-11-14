@@ -149,6 +149,41 @@ class FidelidadeIntegrationTest {
     assertThat(saldo(cliente)).isEqualTo(80);
   }
 
+  /** V178: devolucao com o vencimento original volta para o credito de onde saiu; a nova vira credito novo. */
+  @Test
+  void pontosDevolvidosVoltamComOVencimentoEscolhido() {
+    UUID tenant = criarTenant();
+    UUID cliente = criarCliente(tenant, 0);
+    TransactionTemplate tx = new TransactionTemplate(transacoes);
+    UUID venda = UUID.randomUUID();
+    tx.executeWithoutResult(s -> pontos.creditarVenda(tenant, cliente, venda, 100, 30));
+    java.sql.Timestamp vencimentoOriginal = jdbc.queryForObject(
+        "SELECT expira_em FROM movimentos_de_pontos WHERE comanda_id = ?", java.sql.Timestamp.class, venda);
+
+    UUID comanda1 = UUID.randomUUID();
+    tx.executeWithoutResult(s -> pontos.debitarResgate(tenant, cliente, comanda1, 60));
+    tx.executeWithoutResult(s -> pontos.devolverResgate(tenant, cliente, comanda1, 60, 30, "teste",
+        ServicoDePontos.VencimentoDaDevolucao.ORIGINAL));
+    // Os 60 voltaram para o credito original, com o mesmo vencimento; a devolucao nao criou credito novo.
+    assertThat(jdbc.queryForObject("SELECT pontos_restantes FROM movimentos_de_pontos WHERE comanda_id = ? AND tipo = 'CREDITO'",
+        Integer.class, venda)).isEqualTo(100);
+    assertThat(jdbc.queryForObject("SELECT pontos_restantes FROM movimentos_de_pontos WHERE comanda_id = ? AND tipo = 'DEVOLUCAO'",
+        Integer.class, comanda1)).isZero();
+    assertThat(jdbc.queryForObject("SELECT expira_em FROM movimentos_de_pontos WHERE comanda_id = ? AND tipo = 'CREDITO'",
+        java.sql.Timestamp.class, venda)).isEqualTo(vencimentoOriginal);
+
+    UUID comanda2 = UUID.randomUUID();
+    tx.executeWithoutResult(s -> pontos.debitarResgate(tenant, cliente, comanda2, 40));
+    tx.executeWithoutResult(s -> pontos.devolverResgate(tenant, cliente, comanda2, 40, 90, "teste",
+        ServicoDePontos.VencimentoDaDevolucao.NOVO));
+    // Vencimento novo: credito novo de 40, vencendo em 90 dias; o original ficou com 60.
+    assertThat(jdbc.queryForObject("SELECT pontos_restantes FROM movimentos_de_pontos WHERE comanda_id = ? AND tipo = 'DEVOLUCAO'",
+        Integer.class, comanda2)).isEqualTo(40);
+    assertThat(jdbc.queryForObject("SELECT pontos_restantes FROM movimentos_de_pontos WHERE comanda_id = ? AND tipo = 'CREDITO'",
+        Integer.class, venda)).isEqualTo(60);
+    assertThat(saldo(cliente)).isEqualTo(100);
+  }
+
   private int saldo(UUID cliente) {
     return jdbc.queryForObject("SELECT loyalty_points FROM clients WHERE id = ?", Integer.class, cliente);
   }

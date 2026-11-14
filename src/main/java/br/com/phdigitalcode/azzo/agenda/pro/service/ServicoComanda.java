@@ -1757,6 +1757,9 @@ public class ServicoComanda {
     }
     exigirComandaDoProfissional(tenantId, comanda);
     exigirAberta(comanda);
+    // Antes de mexer em cobranca: escolher "vencimento novo" sem permissao e recusado aqui.
+    ServicoDePontos.VencimentoDaDevolucao vencimentoDosPontos = comanda.getPontosFidelidadeResgatados() > 0
+        ? vencimentoEscolhido(request.vencimentoDosPontos) : ServicoDePontos.VencimentoDaDevolucao.ORIGINAL;
 
     List<ComandaPagamento> pagamentos =
         comandaPagamentoRepository.findByComandaIdOrderByCreatedAt(comanda.getId());
@@ -1803,7 +1806,7 @@ public class ServicoComanda {
       }
     }
 
-    devolverPontosResgatados(tenantId, comanda, "cancelamento da comanda");
+    devolverPontosResgatados(tenantId, comanda, "cancelamento da comanda", vencimentoDosPontos);
 
     comanda.setStatus(Comanda.STATUS_CANCELADA);
     comanda.setCancelMotivo(request.motivo.trim());
@@ -1905,6 +1908,8 @@ public class ServicoComanda {
     // Pontos que esta venda gerou e a cliente ja usou (relatorio de 14/11, Alto 4): o dono decide.
     // Conferido ANTES da operadora, porque o estorno na operadora nao volta atras.
     boolean aceitarSaldoNegativo = Boolean.TRUE.equals(request.aceitarSaldoNegativo);
+    ServicoDePontos.VencimentoDaDevolucao vencimentoDosPontos = comanda.getPontosFidelidadeResgatados() > 0
+        ? vencimentoEscolhido(request.vencimentoDosPontos) : ServicoDePontos.VencimentoDaDevolucao.ORIGINAL;
     if (comanda.getPontosFidelidadeCreditados() > 0 && comanda.getClientId() != null) {
       int usados = servicoDePontos.pontosJaUsadosDaVenda(
           tenantId, comanda.getClientId(), comanda.getId(), comanda.getPontosFidelidadeCreditados());
@@ -1969,7 +1974,7 @@ public class ServicoComanda {
     }
 
     // FIN-007: o estorno revertia so os pontos CREDITADOS pela venda; os RESGATADOS nela se perdiam.
-    devolverPontosResgatados(tenantId, comanda, "estorno da comanda");
+    devolverPontosResgatados(tenantId, comanda, "estorno da comanda", vencimentoDosPontos);
 
     List<ClientPackagePurchase> comprasPacote =
         clientPackagePurchaseRepository.findByTenantIdAndComandaId(tenantId, comanda.getId());
@@ -2133,6 +2138,11 @@ public class ServicoComanda {
   /** O caixa desfaz o resgate da comanda aberta: pontos de volta e o desconto do resgate sai. */
   @Transactional
   public ComandaDtos.ComandaResponse desfazerResgateNoCaixa(UUID id) {
+    return desfazerResgateNoCaixa(id, null);
+  }
+
+  @Transactional
+  public ComandaDtos.ComandaResponse desfazerResgateNoCaixa(UUID id, String vencimentoDosPontos) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Comanda comanda = buscarOuFalhar(id, tenantId);
     exigirComandaDoProfissional(tenantId, comanda);
@@ -2141,7 +2151,7 @@ public class ServicoComanda {
       throw new IllegalArgumentException("Esta comanda não tem resgate de pontos para desfazer.");
     }
     Map<String, Object> antes = dadosDoDesconto(comanda);
-    desfazerResgateDeFidelidade(tenantId, comanda, "resgate desfeito no caixa");
+    desfazerResgateDeFidelidade(tenantId, comanda, "resgate desfeito no caixa", vencimentoEscolhido(vencimentoDosPontos));
     List<ComandaItem> itens = comandaItemRepository.findByComandaIdOrderByCreatedAt(comanda.getId());
     comanda.setTotal(NumericUtil.maxZero(NumericUtil.subtract(somarItens(itens), comanda.getDesconto())));
     auditar(tenantId, "POS_LOYALTY_UNDO", comanda, antes, dadosDoDesconto(comanda));
@@ -2152,13 +2162,14 @@ public class ServicoComanda {
    * FIN-007: devolve ao cliente os pontos resgatados nesta comanda. Usado quando a comanda deixa de
    * existir como venda (cancelamento e estorno sao estados finais, entao nao ha devolucao dupla).
    */
-  private void devolverPontosResgatados(UUID tenantId, Comanda comanda, String motivo) {
+  private void devolverPontosResgatados(UUID tenantId, Comanda comanda, String motivo,
+      ServicoDePontos.VencimentoDaDevolucao vencimento) {
     int pontos = comanda.getPontosFidelidadeResgatados();
     if (pontos <= 0 || comanda.getClientId() == null) return;
     if (clienteRepository.findByIdAndTenantId(comanda.getClientId(), tenantId).isEmpty()) return;
     Integer validade = tenantLoyaltySettingsRepository.findByTenantId(tenantId)
         .map(TenantLoyaltySettings::getValidadeDias).orElse(null);
-    servicoDePontos.devolverResgate(tenantId, comanda.getClientId(), comanda.getId(), pontos, validade, motivo);
+    servicoDePontos.devolverResgate(tenantId, comanda.getClientId(), comanda.getId(), pontos, validade, motivo, vencimento);
     Map<String, Object> devolucao = new HashMap<>();
     devolucao.put("pontos", pontos);
     devolucao.put("valorResgate", comanda.getValorResgateFidelidade());
@@ -2172,8 +2183,31 @@ public class ServicoComanda {
    * resgate sai do desconto.
    */
   private void desfazerResgateDeFidelidade(UUID tenantId, Comanda comanda, String motivo) {
+    desfazerResgateDeFidelidade(tenantId, comanda, motivo, ServicoDePontos.VencimentoDaDevolucao.ORIGINAL);
+  }
+
+  /** Permissao do perfil para escolher vencimento novo nos pontos devolvidos (V178). */
+  private static final String ESCOLHER_VENCIMENTO = "pos:points-expiry";
+
+  /**
+   * Sem escolha, os pontos voltam com o vencimento original. "NOVO" e do dono ou de quem tem a opcao
+   * no perfil de acesso (decisao do dono, 14/11/2026).
+   */
+  ServicoDePontos.VencimentoDaDevolucao vencimentoEscolhido(String pedido) {
+    String p = pedido == null ? "" : pedido.trim().toUpperCase();
+    if (p.isEmpty() || p.equals("ORIGINAL")) return ServicoDePontos.VencimentoDaDevolucao.ORIGINAL;
+    if (!p.equals("NOVO")) throw new IllegalArgumentException("Vencimento dos pontos: use ORIGINAL ou NOVO.");
+    if (!authenticatedUser.temRole("OWNER") && !permissionService.possuiPermissao(ESCOLHER_VENCIMENTO)) {
+      throw new ApiClientErrorException(
+          "Seu perfil de acesso não permite devolver os pontos com vencimento novo. Peça ao dono do salão.", 403);
+    }
+    return ServicoDePontos.VencimentoDaDevolucao.NOVO;
+  }
+
+  private void desfazerResgateDeFidelidade(UUID tenantId, Comanda comanda, String motivo,
+      ServicoDePontos.VencimentoDaDevolucao vencimento) {
     if (comanda.getPontosFidelidadeResgatados() <= 0) return;
-    devolverPontosResgatados(tenantId, comanda, motivo);
+    devolverPontosResgatados(tenantId, comanda, motivo, vencimento);
     comanda.setDesconto(
         NumericUtil.maxZero(NumericUtil.subtract(comanda.getDesconto(), comanda.getValorResgateFidelidade())));
     comanda.setPontosFidelidadeResgatados(0);
@@ -2380,6 +2414,7 @@ public class ServicoComanda {
     r.itens = itens.stream().map(this::toItemResponse).toList();
     r.pagamentos = pagamentos.stream().map(this::toPagamentoResponse).toList();
     r.pontosCreditados = comanda.getPontosFidelidadeCreditados();
+    r.pontosResgatados = comanda.getPontosFidelidadeResgatados();
     if (Comanda.STATUS_FECHADA.equals(comanda.getStatus()) && comanda.getPontosFidelidadeCreditados() > 0
         && comanda.getClientId() != null && servicoDePontos != null) {
       r.pontosJaUsadosDaVenda = servicoDePontos.pontosJaUsadosDaVenda(

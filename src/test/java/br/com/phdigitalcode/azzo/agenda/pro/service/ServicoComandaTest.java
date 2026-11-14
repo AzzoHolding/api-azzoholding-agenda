@@ -267,7 +267,8 @@ class ServicoComandaTest {
     }
 
     @Override
-    public void devolverResgate(UUID tenant, UUID clientId, UUID comanda, int pontos, Integer validade, String motivo) {
+    public void devolverResgate(UUID tenant, UUID clientId, UUID comanda, int pontos, Integer validade, String motivo,
+        VencimentoDaDevolucao vencimento) {
       cliente(tenant, clientId).ifPresent(c -> c.setLoyaltyPoints(c.getLoyaltyPoints() + pontos));
     }
 
@@ -1478,6 +1479,18 @@ class ServicoComandaTest {
     req.pontos = java.math.BigDecimal.valueOf(pontos);
     service.resgatarFidelidade(comandaId, req);
     return cliente;
+  }
+
+  /** V178 (14/11): sem escolha, vencimento original; "novo" so para o dono ou com a opcao no perfil. */
+  @Test
+  void vencimentoNovoDosPontosDevolvidosPrecisaDePermissao() {
+    assertThat(service.vencimentoEscolhido(null)).isEqualTo(ServicoDePontos.VencimentoDaDevolucao.ORIGINAL);
+    assertThat(service.vencimentoEscolhido("original")).isEqualTo(ServicoDePontos.VencimentoDaDevolucao.ORIGINAL);
+    assertThatThrownBy(() -> service.vencimentoEscolhido("NOVO"))
+        .isInstanceOf(ApiClientErrorException.class).hasMessageContaining("não permite");
+    assertThatThrownBy(() -> service.vencimentoEscolhido("talvez")).hasMessageContaining("ORIGINAL ou NOVO");
+    when(permissionService.possuiPermissao("pos:points-expiry")).thenReturn(true);
+    assertThat(service.vencimentoEscolhido("novo")).isEqualTo(ServicoDePontos.VencimentoDaDevolucao.NOVO);
   }
 
   /** Etapa 4 (14/11): o caixa desfaz o resgate; os pontos voltam e o texto sai do motivo. */
