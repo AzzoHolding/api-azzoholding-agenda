@@ -124,6 +124,25 @@ public class ComandaController {
     return servicoComanda.registrarPagamento(id, request);
   }
 
+  /** Produtos do estoque com preco de venda (insumo nao aparece). */
+  @GetMapping("/produtos-a-venda")
+  @RequiresPermission("pos:view")
+  public java.util.List<ComandaDtos.ProdutoAVendaResponse> produtosAVenda() {
+    return servicoComanda.produtosAVenda();
+  }
+
+  @GetMapping("/{id}/fidelidade")
+  @RequiresPermission("pos:view")
+  public ComandaDtos.FidelidadeDaComandaResponse fidelidade(@PathVariable UUID id) {
+    return servicoComanda.fidelidadeDaComanda(id);
+  }
+
+  @PostMapping("/{id}/fidelidade/desfazer")
+  @RequiresPermission("pos:manage")
+  public ComandaDtos.ComandaResponse desfazerResgate(@PathVariable UUID id) {
+    return servicoComanda.desfazerResgateNoCaixa(id);
+  }
+
   @PostMapping("/{id}/fidelidade/resgatar")
   @RequiresPermission("pos:manage")
   public ComandaDtos.ComandaResponse resgatarFidelidade(

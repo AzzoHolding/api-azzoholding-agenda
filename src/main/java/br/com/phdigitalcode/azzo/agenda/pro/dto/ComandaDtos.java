@@ -92,6 +92,27 @@ public final class ComandaDtos {
     @NotBlank public String motivo;
   }
 
+  /** Produto do estoque com preco de venda, para o PDV (etapa 4). */
+  public static class ProdutoAVendaResponse {
+    public String id;
+    public String nome;
+    public BigDecimal precoVenda;
+    public BigDecimal saldoAtual;
+    public String unidadeMedida;
+  }
+
+  /** O que o caixa precisa para o resgate de pontos numa comanda (etapa 4). */
+  public static class FidelidadeDaComandaResponse {
+    public boolean programaAtivo;
+    public boolean temCliente;
+    /** Saldo da cliente agora (pode ser negativo, depois de estorno aceito pelo dono). */
+    public int saldo;
+    public BigDecimal valorDoSaldo;
+    public BigDecimal pontosPorResgateReal;
+    public int resgatadosNaComanda;
+    public BigDecimal valorResgatado;
+  }
+
   public static class ResgatarFidelidadeRequest {
     /** Numero (e nao int): 1,5 chega como 1,5 e e recusado, em vez de virar 1 em silencio. */
     public java.math.BigDecimal pontos;

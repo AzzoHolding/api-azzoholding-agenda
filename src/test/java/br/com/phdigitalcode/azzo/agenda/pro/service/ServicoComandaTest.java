@@ -431,9 +431,30 @@ class ServicoComandaTest {
 
     assertThatThrownBy(() -> service.adicionarItem(comandaId, req))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Preço de venda é obrigatório para item do tipo PRODUTO.");
+        .hasMessage("Este produto não tem preço de venda: cadastre o preço no estoque ou informe o valor.");
 
     verify(comandaItemRepository, never()).save(any());
+  }
+
+  /** Etapa 4 (14/11): com preco de venda no estoque, vale o do cadastro; produto inativo nao vende. */
+  @Test
+  void produtoComPrecoDeVendaUsaOCadastroEInativoNaoVende() {
+    comanda(Comanda.STATUS_ABERTA);
+    ItemEstoque produto = new ItemEstoque();
+    produto.setId(serviceId);
+    produto.setTenantId(tenantId);
+    produto.setNome("Shampoo");
+    produto.setAtivo(false);
+    produto.setPrecoVenda(new BigDecimal("39.90"));
+    when(itemEstoqueRepository.findByIdAndTenantId(eq(serviceId), eq(tenantId))).thenReturn(Optional.of(produto));
+
+    ComandaDtos.AdicionarItemRequest req = new ComandaDtos.AdicionarItemRequest();
+    req.tipo = ComandaItem.TIPO_PRODUTO;
+    req.referenciaId = serviceId.toString();
+    req.precoUnitario = new BigDecimal("1.00");
+    assertThatThrownBy(() -> service.adicionarItem(comandaId, req)).hasMessageContaining("inativo");
+    // O preco forjado (R$ 1,00) foi trocado pelo do cadastro antes da recusa.
+    assertThat(req.precoUnitario).isEqualByComparingTo("39.90");
   }
 
   // ---- FIN-002: pacote vende pelo preco do catalogo e em quantidade inteira --------------------
@@ -1444,6 +1465,23 @@ class ServicoComandaTest {
     req.pontos = java.math.BigDecimal.valueOf(pontos);
     service.resgatarFidelidade(comandaId, req);
     return cliente;
+  }
+
+  /** Etapa 4 (14/11): o caixa desfaz o resgate; os pontos voltam e o texto sai do motivo. */
+  @Test
+  void caixaDesfazOResgate() {
+    Comanda comanda = comanda(Comanda.STATUS_ABERTA);
+    comanda.setDescontoMotivo("aniversario");
+    Cliente cliente = resgatar(comanda, "200.00", 5000, 3000);
+    assertThat(cliente.getLoyaltyPoints()).isEqualTo(2000);
+
+    service.desfazerResgateNoCaixa(comandaId);
+
+    assertThat(cliente.getLoyaltyPoints()).isEqualTo(5000);
+    assertThat(comanda.getPontosFidelidadeResgatados()).isZero();
+    assertThat(comanda.getValorResgateFidelidade()).isEqualByComparingTo("0");
+    assertThat(comanda.getDescontoMotivo()).isEqualTo("aniversario");
+    assertThatThrownBy(() -> service.desfazerResgateNoCaixa(comandaId)).hasMessageContaining("não tem resgate");
   }
 
   @Test

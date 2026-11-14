@@ -415,9 +415,16 @@ public class ServicoComanda {
               .findByIdAndTenantId(referenciaId, tenantId)
               .orElseThrow(
                   () -> new ApiClientErrorException("Produto não encontrado no estoque.", 404));
-      if (request.precoUnitario == null) {
+      // Com preco de venda cadastrado (V176), vale o do cadastro, como no pacote (FIN-002): o caixa
+      // nao muda o preco. Sem cadastro, segue o de antes: o caixa informa.
+      BigDecimal precoDoProduto = produto.getPrecoVenda() != null ? produto.getPrecoVenda() : request.precoUnitario;
+      if (precoDoProduto == null) {
         throw new IllegalArgumentException(
-            "Preço de venda é obrigatório para item do tipo PRODUTO.");
+            "Este produto não tem preço de venda: cadastre o preço no estoque ou informe o valor.");
+      }
+      request.precoUnitario = precoDoProduto;
+      if (Boolean.FALSE.equals(produto.getAtivo())) {
+        throw new IllegalArgumentException("Este produto está inativo no estoque e não pode ser vendido.");
       }
       // Produto por R$ 0,00 seria brinde sem registro de brinde: sai do estoque e nao entra no caixa.
       if (NumericUtil.isZeroOrNegative(request.precoUnitario)) {
@@ -2017,6 +2024,65 @@ public class ServicoComanda {
     resgate.put("valorResgate", valorResgate);
     resgate.put("clientId", comanda.getClientId().toString());
     auditar(tenantId, "POS_LOYALTY_REDEEM", comanda, null, resgate);
+    return obter(id);
+  }
+
+  /** Produtos ativos do estoque com preco de venda, por nome (o insumo, sem preco, nao aparece). */
+  @Transactional(readOnly = true)
+  public List<ComandaDtos.ProdutoAVendaResponse> produtosAVenda() {
+    UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    return itemEstoqueRepository.findByTenantId(tenantId).stream()
+        .filter(p -> !Boolean.FALSE.equals(p.getAtivo()) && p.getPrecoVenda() != null && p.getPrecoVenda().signum() > 0)
+        .sorted(java.util.Comparator.comparing(p -> p.getNome() == null ? "" : p.getNome().toLowerCase()))
+        .map(p -> {
+          ComandaDtos.ProdutoAVendaResponse r = new ComandaDtos.ProdutoAVendaResponse();
+          r.id = p.getId().toString();
+          r.nome = p.getNome();
+          r.precoVenda = p.getPrecoVenda();
+          r.saldoAtual = p.getSaldoAtual();
+          r.unidadeMedida = p.getUnidadeMedida();
+          return r;
+        })
+        .toList();
+  }
+
+  /** Saldo da cliente e o resgate desta comanda, para o bloco "Fidelidade" do PDV. */
+  @Transactional(readOnly = true)
+  public ComandaDtos.FidelidadeDaComandaResponse fidelidadeDaComanda(UUID id) {
+    UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    Comanda comanda = buscarOuFalhar(id, tenantId);
+    exigirComandaDoProfissional(tenantId, comanda);
+    TenantLoyaltySettings config = tenantLoyaltySettingsRepository.findByTenantId(tenantId).orElse(null);
+    ComandaDtos.FidelidadeDaComandaResponse r = new ComandaDtos.FidelidadeDaComandaResponse();
+    r.programaAtivo = config != null && config.isAtivo();
+    r.temCliente = comanda.getClientId() != null;
+    r.pontosPorResgateReal = config == null ? null : config.getPontosPorResgateReal();
+    r.resgatadosNaComanda = comanda.getPontosFidelidadeResgatados();
+    r.valorResgatado = comanda.getValorResgateFidelidade();
+    if (r.temCliente) {
+      r.saldo = servicoDePontos.saldo(tenantId, comanda.getClientId());
+      r.valorDoSaldo = ServicoDePontos.valorEmReais(r.saldo, r.pontosPorResgateReal);
+    } else {
+      r.valorDoSaldo = BigDecimal.ZERO.setScale(2);
+    }
+    return r;
+  }
+
+  /** O caixa desfaz o resgate da comanda aberta: pontos de volta e o desconto do resgate sai. */
+  @Transactional
+  public ComandaDtos.ComandaResponse desfazerResgateNoCaixa(UUID id) {
+    UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    Comanda comanda = buscarOuFalhar(id, tenantId);
+    exigirComandaDoProfissional(tenantId, comanda);
+    exigirAberta(comanda);
+    if (comanda.getPontosFidelidadeResgatados() <= 0) {
+      throw new IllegalArgumentException("Esta comanda não tem resgate de pontos para desfazer.");
+    }
+    Map<String, Object> antes = dadosDoDesconto(comanda);
+    desfazerResgateDeFidelidade(tenantId, comanda, "resgate desfeito no caixa");
+    List<ComandaItem> itens = comandaItemRepository.findByComandaIdOrderByCreatedAt(comanda.getId());
+    comanda.setTotal(NumericUtil.maxZero(NumericUtil.subtract(somarItens(itens), comanda.getDesconto())));
+    auditar(tenantId, "POS_LOYALTY_UNDO", comanda, antes, dadosDoDesconto(comanda));
     return obter(id);
   }
 

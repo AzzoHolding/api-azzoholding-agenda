@@ -29,6 +29,8 @@ public final class EstoqueDtos {
     @NotBlank public String unidadeMedida;
     @NotNull @DecimalMin("0.0") @Digits(integer = 15, fraction = 4) public BigDecimal estoqueMinimo;
     public Boolean ativo;
+    /** Preco de venda no PDV; vazio (ou 0 na edicao) = nao se vende, so insumo. */
+    @DecimalMin("0.0") @Digits(integer = 10, fraction = 2) public BigDecimal precoVenda;
   }
 
   public static class ItemEstoqueUpdateRequest {
@@ -37,6 +39,8 @@ public final class EstoqueDtos {
     public String unidadeMedida;
     @DecimalMin("0.0") @Digits(integer = 15, fraction = 4) public BigDecimal estoqueMinimo;
     public Boolean ativo;
+    /** Preco de venda no PDV; vazio (ou 0 na edicao) = nao se vende, so insumo. */
+    @DecimalMin("0.0") @Digits(integer = 10, fraction = 2) public BigDecimal precoVenda;
   }
 
   public static class ItemEstoqueResponse {
@@ -48,6 +52,7 @@ public final class EstoqueDtos {
     public BigDecimal estoqueMinimo;
     public BigDecimal custoMedioUnitario;
     public Boolean ativo;
+    public BigDecimal precoVenda;
     public String createdAt;
     public String updatedAt;
   }

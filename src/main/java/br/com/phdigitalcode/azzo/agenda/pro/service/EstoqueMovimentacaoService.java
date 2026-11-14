@@ -691,6 +691,7 @@ public class EstoqueMovimentacaoService {
     response.estoqueMinimo = entity.getEstoqueMinimo();
     response.custoMedioUnitario = entity.getCustoMedioUnitario();
     response.ativo = entity.getAtivo();
+    response.precoVenda = entity.getPrecoVenda();
     response.createdAt = entity.getCreatedAt() != null ? entity.getCreatedAt().toString() : null;
     response.updatedAt = entity.getUpdatedAt() != null ? entity.getUpdatedAt().toString() : null;
     return response;
