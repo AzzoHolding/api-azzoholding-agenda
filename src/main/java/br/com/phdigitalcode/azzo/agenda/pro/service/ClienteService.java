@@ -148,6 +148,15 @@ public class ClienteService {
     return authenticatedUser.isProfessional() && !permissionService.possuiPermissao("client:full");
   }
 
+  /** Pontos e pacotes sao da ficha completa: a cliente existe neste salao e quem pede ve a ficha. */
+  @Transactional(readOnly = true)
+  public void exigirFichaCompletaDe(UUID id) {
+    exigirFichaCompleta();
+    UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    clienteRepository.findByIdAndTenantId(id, tenantId)
+        .orElseThrow(() -> new br.com.phdigitalcode.azzo.agenda.pro.exception.ApiClientErrorException("Cliente não encontrado.", 404));
+  }
+
   private void exigirFichaCompleta() {
     if (soNomeETelefone()) throw new AccessDeniedException("Acesso negado");
   }
@@ -166,6 +175,7 @@ public class ClienteService {
     cliente.totalVisits = 0;
     cliente.totalSpent = null;
     cliente.lastVisit = null;
+    cliente.loyaltyPoints = null;
     if (cliente instanceof ClienteDetailResponse detalhe) {
       detalhe.stats = null;
       detalhe.recentAppointments = List.of();
@@ -459,6 +469,7 @@ public class ClienteService {
     r.totalSpent = stats.totalSpent();
     r.lastVisit = stats.lastVisit() != null ? stats.lastVisit().toString() : null;
     r.createdAt = c.getCreatedAt() != null ? c.getCreatedAt().toString() : null;
+    r.loyaltyPoints = c.getLoyaltyPoints();
     return r;
   }
 
@@ -482,6 +493,7 @@ public class ClienteService {
     response.totalSpent = base.totalSpent;
     response.lastVisit = base.lastVisit;
     response.createdAt = base.createdAt;
+    response.loyaltyPoints = base.loyaltyPoints;
 
     response.stats = new ClienteStatsDto();
     response.stats.totalVisits = stats.totalVisits();

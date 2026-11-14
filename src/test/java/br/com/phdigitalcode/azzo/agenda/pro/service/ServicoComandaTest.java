@@ -236,6 +236,58 @@ class ServicoComandaTest {
             clientMembershipRepository,
             clientMembershipBalanceRepository,
             permissionService);
+    service.setServicoDePontos(new PontosEmMemoria());
+  }
+
+  /**
+   * O ServicoDePontos de verdade muda o saldo por instrucao no banco; aqui imita isso no objeto da
+   * cliente que o repositorio falso devolve, para os testes conferirem o saldo como antes.
+   */
+  private class PontosEmMemoria extends ServicoDePontos {
+    PontosEmMemoria() {
+      super(null, null, null);
+    }
+
+    private Optional<Cliente> cliente(UUID tenant, UUID clientId) {
+      return clienteRepository.findByIdAndTenantId(clientId, tenant);
+    }
+
+    @Override
+    public int saldo(UUID tenant, UUID clientId) {
+      return cliente(tenant, clientId).map(Cliente::getLoyaltyPoints).orElse(0);
+    }
+
+    @Override
+    public void debitarResgate(UUID tenant, UUID clientId, UUID comanda, int pontos) {
+      Cliente c = cliente(tenant, clientId).orElseThrow();
+      if (c.getLoyaltyPoints() < pontos) {
+        throw new IllegalArgumentException("Cliente não possui pontos suficientes (saldo: " + c.getLoyaltyPoints() + ").");
+      }
+      c.setLoyaltyPoints(c.getLoyaltyPoints() - pontos);
+    }
+
+    @Override
+    public void devolverResgate(UUID tenant, UUID clientId, UUID comanda, int pontos, Integer validade, String motivo,
+        VencimentoDaDevolucao vencimento) {
+      cliente(tenant, clientId).ifPresent(c -> c.setLoyaltyPoints(c.getLoyaltyPoints() + pontos));
+    }
+
+    @Override
+    public void creditarVenda(UUID tenant, UUID clientId, UUID comanda, int pontos, Integer validade) {
+      cliente(tenant, clientId).ifPresent(c -> c.setLoyaltyPoints(c.getLoyaltyPoints() + pontos));
+    }
+
+    @Override
+    public int pontosJaUsadosDaVenda(UUID tenant, UUID clientId, UUID comanda, int creditados) {
+      return Math.max(0, creditados - Math.max(0, saldo(tenant, clientId)));
+    }
+
+    @Override
+    public void estornarCreditoDaVenda(UUID tenant, UUID clientId, UUID comanda, int creditados, ModoDeEstorno modo) {
+      cliente(tenant, clientId).ifPresent(c -> c.setLoyaltyPoints(
+          modo == ModoDeEstorno.SALDO_NEGATIVO ? c.getLoyaltyPoints() - creditados
+              : Math.max(0, c.getLoyaltyPoints() - creditados)));
+    }
   }
 
   // ---------------------------------------------------------------- helpers
@@ -385,9 +437,30 @@ class ServicoComandaTest {
 
     assertThatThrownBy(() -> service.adicionarItem(comandaId, req))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Preço de venda é obrigatório para item do tipo PRODUTO.");
+        .hasMessage("Este produto não tem preço de venda: cadastre o preço no estoque ou informe o valor.");
 
     verify(comandaItemRepository, never()).save(any());
+  }
+
+  /** Etapa 4 (14/11): com preco de venda no estoque, vale o do cadastro; produto inativo nao vende. */
+  @Test
+  void produtoComPrecoDeVendaUsaOCadastroEInativoNaoVende() {
+    comanda(Comanda.STATUS_ABERTA);
+    ItemEstoque produto = new ItemEstoque();
+    produto.setId(serviceId);
+    produto.setTenantId(tenantId);
+    produto.setNome("Shampoo");
+    produto.setAtivo(false);
+    produto.setPrecoVenda(new BigDecimal("39.90"));
+    when(itemEstoqueRepository.findByIdAndTenantId(eq(serviceId), eq(tenantId))).thenReturn(Optional.of(produto));
+
+    ComandaDtos.AdicionarItemRequest req = new ComandaDtos.AdicionarItemRequest();
+    req.tipo = ComandaItem.TIPO_PRODUTO;
+    req.referenciaId = serviceId.toString();
+    req.precoUnitario = new BigDecimal("1.00");
+    assertThatThrownBy(() -> service.adicionarItem(comandaId, req)).hasMessageContaining("inativo");
+    // O preco forjado (R$ 1,00) foi trocado pelo do cadastro antes da recusa.
+    assertThat(req.precoUnitario).isEqualByComparingTo("39.90");
   }
 
   // ---- FIN-002: pacote vende pelo preco do catalogo e em quantidade inteira --------------------
@@ -511,7 +584,7 @@ class ServicoComandaTest {
 
     assertThatThrownBy(() -> service.adicionarItem(comandaId, req))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Comanda não esta aberta.");
+        .hasMessage("Comanda não está aberta.");
   }
 
   // ---------------------------------------------------------------- desconto
@@ -571,7 +644,7 @@ class ServicoComandaTest {
 
     assertThatThrownBy(() -> service.fechar(comandaId))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Comanda não esta quitada: pago 100.00, total com gorjeta 110.00.");
+        .hasMessage("Comanda não está quitada: pago 100.00, total com gorjeta 110.00.");
 
     verify(transacaoRepository, never()).save(any());
   }
@@ -587,7 +660,7 @@ class ServicoComandaTest {
 
     assertThatThrownBy(() -> service.fechar(comandaId))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Comanda não esta quitada: pago 0, total com gorjeta 100.00.");
+        .hasMessage("Comanda não está quitada: pago 0, total com gorjeta 100.00.");
   }
 
   // ─── FIN-003: troco e pagamento que nao cabe no saldo ───────────────────────────────────────
@@ -668,7 +741,7 @@ class ServicoComandaTest {
                 service.registrarPagamento(
                     comandaId, pedidoDePagamento(ComandaPagamento.MEIO_DINHEIRO, "80.00")))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Esta comanda já esta paga por inteiro: feche a comanda.");
+        .hasMessage("Esta comanda já está paga por inteiro: feche a comanda.");
 
     verify(comandaPagamentoRepository, never()).save(any());
   }
@@ -1206,7 +1279,7 @@ class ServicoComandaTest {
 
     assertThatThrownBy(() -> service.estornar(comandaId, req))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Comanda não esta fechada.");
+        .hasMessage("Comanda não está fechada.");
   }
 
   @Test
@@ -1234,6 +1307,14 @@ class ServicoComandaTest {
     ComandaDtos.EstornarComandaRequest req = new ComandaDtos.EstornarComandaRequest();
     req.motivo = "  duplicidade  ";
 
+    // A cliente ja usou 15 dos 40 pontos desta venda (saldo 25): sem a confirmacao do dono, recusa
+    // ANTES de mexer em qualquer coisa (relatorio de 14/11, Alto 4).
+    assertThatThrownBy(() -> service.estornar(comandaId, req))
+        .isInstanceOf(ApiClientErrorException.class)
+        .hasMessageContaining("já usou 15 dos 40 pontos");
+    assertThat(transacao.getDeletedAt()).isNull();
+
+    req.aceitarSaldoNegativo = true;
     service.estornar(comandaId, req);
 
     // A Transacao original nunca some — vira soft delete para preservar auditoria.
@@ -1251,8 +1332,8 @@ class ServicoComandaTest {
             eq(BigDecimal.ONE),
             eq("Estorno de comanda: duplicidade"));
 
-    // Saldo de pontos nunca fica negativo: creditados 40, saldo atual 25 -> 0.
-    assertThat(cliente.getLoyaltyPoints()).isZero();
+    // O dono aceitou: creditados 40, saldo 25 -> -15 (a divida sai dos proximos pontos).
+    assertThat(cliente.getLoyaltyPoints()).isEqualTo(-15);
     assertThat(comanda.getStatus()).isEqualTo(Comanda.STATUS_ESTORNADA);
     assertThat(comanda.getEstornoMotivo()).isEqualTo("duplicidade");
     assertThat(comanda.getEstornadoPor()).isEqualTo(usuarioId);
@@ -1340,7 +1421,7 @@ class ServicoComandaTest {
         .thenReturn(Optional.of(cliente));
 
     ComandaDtos.ResgatarFidelidadeRequest req = new ComandaDtos.ResgatarFidelidadeRequest();
-    req.pontos = 3000;
+    req.pontos = java.math.BigDecimal.valueOf(3000);
 
     service.resgatarFidelidade(comandaId, req);
 
@@ -1371,7 +1452,7 @@ class ServicoComandaTest {
         .thenReturn(Optional.of(cliente));
 
     ComandaDtos.ResgatarFidelidadeRequest req = new ComandaDtos.ResgatarFidelidadeRequest();
-    req.pontos = 50000;
+    req.pontos = java.math.BigDecimal.valueOf(50000);
 
     // FIN-007: antes o desconto era cortado em R$ 20 e os 50000 pontos debitados mesmo assim.
     assertThatThrownBy(() -> service.resgatarFidelidade(comandaId, req))
@@ -1395,9 +1476,38 @@ class ServicoComandaTest {
     cliente.setLoyaltyPoints(saldo);
     when(clienteRepository.findByIdAndTenantId(eq(clientId), eq(tenantId))).thenReturn(Optional.of(cliente));
     ComandaDtos.ResgatarFidelidadeRequest req = new ComandaDtos.ResgatarFidelidadeRequest();
-    req.pontos = pontos;
+    req.pontos = java.math.BigDecimal.valueOf(pontos);
     service.resgatarFidelidade(comandaId, req);
     return cliente;
+  }
+
+  /** V178 (14/11): sem escolha, vencimento original; "novo" so para o dono ou com a opcao no perfil. */
+  @Test
+  void vencimentoNovoDosPontosDevolvidosPrecisaDePermissao() {
+    assertThat(service.vencimentoEscolhido(null)).isEqualTo(ServicoDePontos.VencimentoDaDevolucao.ORIGINAL);
+    assertThat(service.vencimentoEscolhido("original")).isEqualTo(ServicoDePontos.VencimentoDaDevolucao.ORIGINAL);
+    assertThatThrownBy(() -> service.vencimentoEscolhido("NOVO"))
+        .isInstanceOf(ApiClientErrorException.class).hasMessageContaining("não permite");
+    assertThatThrownBy(() -> service.vencimentoEscolhido("talvez")).hasMessageContaining("ORIGINAL ou NOVO");
+    when(permissionService.possuiPermissao("pos:points-expiry")).thenReturn(true);
+    assertThat(service.vencimentoEscolhido("novo")).isEqualTo(ServicoDePontos.VencimentoDaDevolucao.NOVO);
+  }
+
+  /** Etapa 4 (14/11): o caixa desfaz o resgate; os pontos voltam e o texto sai do motivo. */
+  @Test
+  void caixaDesfazOResgate() {
+    Comanda comanda = comanda(Comanda.STATUS_ABERTA);
+    comanda.setDescontoMotivo("aniversario");
+    Cliente cliente = resgatar(comanda, "200.00", 5000, 3000);
+    assertThat(cliente.getLoyaltyPoints()).isEqualTo(2000);
+
+    service.desfazerResgateNoCaixa(comandaId);
+
+    assertThat(cliente.getLoyaltyPoints()).isEqualTo(5000);
+    assertThat(comanda.getPontosFidelidadeResgatados()).isZero();
+    assertThat(comanda.getValorResgateFidelidade()).isEqualByComparingTo("0");
+    assertThat(comanda.getDescontoMotivo()).isEqualTo("aniversario");
+    assertThatThrownBy(() -> service.desfazerResgateNoCaixa(comandaId)).hasMessageContaining("não tem resgate");
   }
 
   @Test
@@ -1492,7 +1602,7 @@ class ServicoComandaTest {
         .thenReturn(Optional.of(cliente));
 
     ComandaDtos.ResgatarFidelidadeRequest req = new ComandaDtos.ResgatarFidelidadeRequest();
-    req.pontos = 500;
+    req.pontos = java.math.BigDecimal.valueOf(500);
 
     assertThatThrownBy(() -> service.resgatarFidelidade(comandaId, req))
         .isInstanceOf(IllegalArgumentException.class)
@@ -1507,11 +1617,11 @@ class ServicoComandaTest {
         .thenReturn(Optional.empty());
 
     ComandaDtos.ResgatarFidelidadeRequest req = new ComandaDtos.ResgatarFidelidadeRequest();
-    req.pontos = 100;
+    req.pontos = java.math.BigDecimal.valueOf(100);
 
     assertThatThrownBy(() -> service.resgatarFidelidade(comandaId, req))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Programa de fidelidade não esta ativo.");
+        .hasMessage("Programa de fidelidade não está ativo.");
   }
 
   // ─── Preco de tabela e trilha de auditoria (achados do E2E de 2026-09-16) ───
@@ -2090,7 +2200,7 @@ class ServicoComandaTest {
 
     assertThatThrownBy(() -> service.aplicarCobertura(comandaId, corte.getId(), coberturaDoPacote(esgotado)))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("não tem mais sessoes");
+        .hasMessageContaining("não tem mais sessões");
   }
 
   @Test
@@ -2193,7 +2303,7 @@ class ServicoComandaTest {
 
     assertThatThrownBy(() -> service.estornar(comandaId, req))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("já usou 2 sessoes");
+        .hasMessageContaining("já usou 2 sessões");
     verify(clientPackagePurchaseRepository, never()).delete(any());
   }
 

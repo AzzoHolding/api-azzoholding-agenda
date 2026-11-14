@@ -33,8 +33,9 @@ import jakarta.validation.Valid;
  * MIGRACAO-QUARKUS-SPRING.md):
  * <ul>
  *   <li>{@code /{id}/appointment-history} — modulo {@code scheduling};</li>
- *   <li>{@code /{id}/packages}, {@code /{id}/loyalty}, {@code /{id}/memberships} (GET e POST) —
- *       modulos {@code packages}, {@code settings} (loyalty) e {@code membership};</li>
+ *   <li>{@code /{id}/memberships} (GET e POST) — modulo {@code membership} (portado depois, em
+ *       MembershipPlansController). {@code /{id}/packages} e {@code /{id}/loyalty} foram portados em
+ *       14/11/2026 (relatorio de fidelidade e pacotes, Critico 3);</li>
  *   <li>{@code /{id}/avatar} (POST/DELETE/GET) e {@code /importacoes/*} — modulo {@code storage}
  *       (MinIO) + importacao assincrona.</li>
  * </ul>
@@ -45,9 +46,31 @@ import jakarta.validation.Valid;
 public class ClientesController {
 
   private final ClienteService clienteService;
+  private final br.com.phdigitalcode.azzo.agenda.pro.service.ServicoTenantLoyalty fidelidade;
+  private final br.com.phdigitalcode.azzo.agenda.pro.service.ServicoPackages pacotes;
 
-  public ClientesController(ClienteService clienteService) {
+  public ClientesController(ClienteService clienteService,
+      br.com.phdigitalcode.azzo.agenda.pro.service.ServicoTenantLoyalty fidelidade,
+      br.com.phdigitalcode.azzo.agenda.pro.service.ServicoPackages pacotes) {
     this.clienteService = clienteService;
+    this.fidelidade = fidelidade;
+    this.pacotes = pacotes;
+  }
+
+  /** Pontos da cliente: saldo, valor em reais, o que vence e o extrato (portado em 14/11). */
+  @GetMapping("/{id}/loyalty")
+  @RequiresPermission("appointment:read")
+  public br.com.phdigitalcode.azzo.agenda.pro.dto.TenantLoyaltyDtos.ClientLoyaltyResponse pontos(@PathVariable UUID id) {
+    clienteService.exigirFichaCompletaDe(id);
+    return fidelidade.obterSaldoCliente(id);
+  }
+
+  /** Pacotes da cliente: compras, saldo por servico e os atendimentos feitos (portado em 14/11). */
+  @GetMapping("/{id}/packages")
+  @RequiresPermission("appointment:read")
+  public List<br.com.phdigitalcode.azzo.agenda.pro.dto.PackageDtos.ClientPackagePurchaseResponse> pacotes(@PathVariable UUID id) {
+    clienteService.exigirFichaCompletaDe(id);
+    return pacotes.listarDoCliente(id);
   }
 
   @GetMapping

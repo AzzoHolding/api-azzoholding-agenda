@@ -22,4 +22,6 @@ public class ClienteListResponse {
   public BigDecimal totalSpent;
   public String lastVisit;
   public String createdAt;
+  /** Saldo de pontos de fidelidade (fica vazio para quem so ve nome e telefone). */
+  public Integer loyaltyPoints;
 }

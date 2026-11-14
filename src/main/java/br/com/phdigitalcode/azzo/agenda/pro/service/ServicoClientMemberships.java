@@ -117,7 +117,7 @@ public class ServicoClientMemberships {
             .orElseThrow(
                 () -> new ApiClientErrorException("Plano de assinatura não encontrado.", 404));
     if (!plano.isAtivo()) {
-      throw new IllegalArgumentException("Plano de assinatura não esta ativo.");
+      throw new IllegalArgumentException("Plano de assinatura não está ativo.");
     }
 
     if (request.customerCpfCnpj != null && !request.customerCpfCnpj.isBlank()) {
@@ -256,7 +256,7 @@ public class ServicoClientMemberships {
             .findByIdAndTenantId(membershipId, tenantId)
             .orElseThrow(() -> new ApiClientErrorException("Assinatura não encontrada.", 404));
     if (ClientMembership.STATUS_CANCELADA.equals(membership.getStatus())) {
-      throw new IllegalArgumentException("Assinatura já esta cancelada.");
+      throw new IllegalArgumentException("Assinatura já está cancelada.");
     }
 
     if (membership.getAsaasSubscriptionId() != null) {

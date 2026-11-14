@@ -54,6 +54,10 @@ public class ItemEstoque {
   @Column(name = "ativo", nullable = false)
   private Boolean ativo;
 
+  /** Preco de venda no PDV (V176). Vazio = insumo, nao aparece para venda. */
+  @Column(name = "preco_venda", precision = 12, scale = 2)
+  private BigDecimal precoVenda;
+
   @Column(name = "created_at", nullable = false)
   private Instant createdAt;
 

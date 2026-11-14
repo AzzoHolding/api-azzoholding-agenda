@@ -8,6 +8,7 @@ import java.util.UUID;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -116,4 +117,33 @@ public interface ClienteRepository extends JpaRepository<Cliente, UUID> {
     }
     return new ArrayList<>(List.of(phoneDigits));
   }
+
+  // ---- pontos de fidelidade (V175): o saldo so muda numa instrucao, nunca com ler-conferir-gravar ----
+  // A entidade Cliente nao grava loyalty_points (updatable=false): so estas instrucoes mexem nele.
+
+  /** Desconta so se houver saldo. 1 = descontou; 0 = sem pontos suficientes (ou cliente de outro salao). */
+  @Modifying(flushAutomatically = true)
+  @Query(value = "update clients set loyalty_points = loyalty_points - :pontos"
+      + " where id = :id and tenant_id = :tenantId and loyalty_points >= :pontos", nativeQuery = true)
+  int debitarPontosSeHouver(@Param("id") UUID id, @Param("tenantId") UUID tenantId, @Param("pontos") int pontos);
+
+  /** Soma (ou subtrai, com valor negativo) ao saldo. Pode deixar negativo: so o estorno aceito pelo dono usa. */
+  @Modifying(flushAutomatically = true)
+  @Query(value = "update clients set loyalty_points = loyalty_points + :pontos"
+      + " where id = :id and tenant_id = :tenantId", nativeQuery = true)
+  int somarPontos(@Param("id") UUID id, @Param("tenantId") UUID tenantId, @Param("pontos") int pontos);
+
+  /** Tira ate {@code pontos}, sem passar de zero. Devolve quantos de fato saíram so pela diferenca de saldo. */
+  @Modifying(flushAutomatically = true)
+  @Query(value = "update clients set loyalty_points = greatest(0, loyalty_points - :pontos)"
+      + " where id = :id and tenant_id = :tenantId", nativeQuery = true)
+  int tirarPontosAteZero(@Param("id") UUID id, @Param("tenantId") UUID tenantId, @Param("pontos") int pontos);
+
+  /** Trava o saldo da cliente ate o fim da transacao (expiracao x resgate ao mesmo tempo). */
+  @Query(value = "select loyalty_points from clients where id = :id and tenant_id = :tenantId for update", nativeQuery = true)
+  Integer travarSaldo(@Param("id") UUID id, @Param("tenantId") UUID tenantId);
+
+  /** O saldo de verdade, direto do banco (a entidade carregada pode estar desatualizada). */
+  @Query(value = "select loyalty_points from clients where id = :id and tenant_id = :tenantId", nativeQuery = true)
+  Integer saldoDePontos(@Param("id") UUID id, @Param("tenantId") UUID tenantId);
 }

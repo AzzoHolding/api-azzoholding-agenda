@@ -16,4 +16,6 @@ public interface ClientPackagePurchaseRepository extends JpaRepository<ClientPac
       UUID tenantId, UUID clientId);
 
   List<ClientPackagePurchase> findByTenantIdAndComandaId(UUID tenantId, UUID comandaId);
+
+  boolean existsByTenantIdAndPackageId(UUID tenantId, UUID packageId);
 }

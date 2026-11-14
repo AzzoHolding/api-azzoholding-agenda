@@ -81,6 +81,9 @@ public final class ComandaDtos {
   public static class CancelarComandaRequest {
     @NotBlank public String motivo;
 
+    /** Pontos resgatados voltam com o vencimento ORIGINAL (padrao) ou NOVO (dono ou permissao). */
+    public String vencimentoDosPontos;
+
     /**
      * O que ja foi pago volta para o cliente? {@code true}: nada entra no caixa. {@code false}: o
      * salao fica com o valor, que entra como receita. Obrigatorio quando ha pagamento confirmado.
@@ -90,10 +93,46 @@ public final class ComandaDtos {
 
   public static class EstornarComandaRequest {
     @NotBlank public String motivo;
+
+    /** Pontos resgatados voltam com o vencimento ORIGINAL (padrao) ou NOVO (dono ou permissao). */
+    public String vencimentoDosPontos;
+
+    /**
+     * O dono confirmou estornar mesmo com a cliente ja tendo usado pontos desta venda: o saldo dela
+     * fica negativo (a divida sai dos proximos pontos). Sem isso, o estorno nesse caso e recusado.
+     */
+    public Boolean aceitarSaldoNegativo;
+  }
+
+  /** Produto do estoque com preco de venda, para o PDV (etapa 4). */
+  public static class ProdutoAVendaResponse {
+    public String id;
+    public String nome;
+    public BigDecimal precoVenda;
+    public BigDecimal saldoAtual;
+    public String unidadeMedida;
+  }
+
+  /** O que o caixa precisa para o resgate de pontos numa comanda (etapa 4). */
+  public static class FidelidadeDaComandaResponse {
+    public boolean programaAtivo;
+    public boolean temCliente;
+    /** Saldo da cliente agora (pode ser negativo, depois de estorno aceito pelo dono). */
+    public int saldo;
+    public BigDecimal valorDoSaldo;
+    public BigDecimal pontosPorResgateReal;
+    public int resgatadosNaComanda;
+    public BigDecimal valorResgatado;
+  }
+
+  public static class DesfazerResgateRequest {
+    /** ORIGINAL (padrao) ou NOVO (so o dono ou quem tem a opcao no perfil). */
+    public String vencimentoDosPontos;
   }
 
   public static class ResgatarFidelidadeRequest {
-    @Min(1) public int pontos;
+    /** Numero (e nao int): 1,5 chega como 1,5 e e recusado, em vez de virar 1 em silencio. */
+    public java.math.BigDecimal pontos;
   }
 
   public static class ComandaItemResponse {
@@ -175,6 +214,11 @@ public final class ComandaDtos {
     public String cancelMotivo;
     public String estornoMotivo;
     public String estornadoEm;
+    /** Comanda fechada: quantos dos pontos que esta venda gerou a cliente ja usou (aviso do estorno). */
+    public Integer pontosJaUsadosDaVenda;
+    public Integer pontosCreditados;
+    /** Pontos resgatados nesta comanda (a tela oferece escolher o vencimento ao devolver). */
+    public Integer pontosResgatados;
     public String openedAt;
     public String closedAt;
     public List<ComandaItemResponse> itens = new ArrayList<>();
