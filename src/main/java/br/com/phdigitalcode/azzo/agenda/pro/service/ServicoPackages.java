@@ -68,6 +68,7 @@ public class ServicoPackages {
   @Transactional
   public PackageDtos.PackageResponse criar(PackageDtos.PackageRequest request) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    validar(tenantId, null, request);
     ServicePackage pacote = new ServicePackage();
     pacote.setTenantId(tenantId);
     aplicar(request, pacote);
@@ -80,6 +81,7 @@ public class ServicoPackages {
   public PackageDtos.PackageResponse atualizar(UUID id, PackageDtos.PackageRequest request) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     ServicePackage pacote = buscarOuFalhar(id, tenantId);
+    validar(tenantId, id, request);
     aplicar(request, pacote);
     // A composicao do pacote e regravada do zero, igual ao original
     // (`servicePackageItemRepository.delete("packageId", pacote.id)`).
@@ -102,8 +104,38 @@ public class ServicoPackages {
         .toList();
   }
 
+  /**
+   * Regras que a tela ja aplicava e a API nao (relatorio de 14/11, Medios 1 e 2): sem servico
+   * repetido, sem servico inativo, sem nome repetido entre os pacotes ativos.
+   */
+  private void validar(UUID tenantId, UUID idAtual, PackageDtos.PackageRequest request) {
+    java.util.Set<UUID> vistos = new java.util.HashSet<>();
+    for (PackageDtos.ItemRequest item : request.itens) {
+      UUID serviceId = idDoServico(item.serviceId);
+      if (!vistos.add(serviceId)) {
+        throw new IllegalArgumentException("O mesmo serviço aparece duas vezes no pacote: junte as sessões numa linha só.");
+      }
+      Servico servico = servicoRepository.findByIdAndTenantId(serviceId, tenantId)
+          .orElseThrow(() -> new ApiClientErrorException("Serviço não encontrado.", 404));
+      if (!servico.isActive()) {
+        throw new IllegalArgumentException("O serviço " + servico.getName() + " está inativo e não pode entrar no pacote.");
+      }
+    }
+    if (request.ativo && servicePackageRepository.existeAtivoComNome(tenantId, request.nome, idAtual)) {
+      throw new IllegalArgumentException("Já existe um pacote ativo com o nome \"" + request.nome.trim() + "\".");
+    }
+  }
+
+  private static UUID idDoServico(String id) {
+    try {
+      return UUID.fromString(id == null ? "" : id.trim());
+    } catch (IllegalArgumentException e) {
+      throw new IllegalArgumentException("Serviço inválido no pacote.");
+    }
+  }
+
   private void aplicar(PackageDtos.PackageRequest request, ServicePackage pacote) {
-    pacote.setNome(request.nome);
+    pacote.setNome(request.nome.trim());
     pacote.setDescricao(request.descricao);
     pacote.setPreco(request.preco);
     pacote.setAtivo(request.ativo);
@@ -111,7 +143,7 @@ public class ServicoPackages {
 
   private void aplicarItens(UUID tenantId, UUID packageId, List<PackageDtos.ItemRequest> itens) {
     for (PackageDtos.ItemRequest itemRequest : itens) {
-      UUID serviceId = UUID.fromString(itemRequest.serviceId);
+      UUID serviceId = idDoServico(itemRequest.serviceId);
       servicoRepository
           .findByIdAndTenantId(serviceId, tenantId)
           .orElseThrow(

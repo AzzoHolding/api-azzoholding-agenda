@@ -234,7 +234,7 @@ class ServicoClientMembershipsTest {
 
     assertThatThrownBy(() -> service.assinar(clientId, subscribeRequest(null)))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Plano de assinatura não esta ativo.");
+        .hasMessage("Plano de assinatura não está ativo.");
 
     verify(asaasClient, never()).createSubscription(anyString(), any());
     verify(clientMembershipRepository, never()).save(any());
@@ -315,7 +315,7 @@ class ServicoClientMembershipsTest {
 
     assertThatThrownBy(() -> service.cancelar(membershipId))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Assinatura já esta cancelada.");
+        .hasMessage("Assinatura já está cancelada.");
 
     verify(asaasClient, never()).cancelSubscription(anyString(), anyString());
   }

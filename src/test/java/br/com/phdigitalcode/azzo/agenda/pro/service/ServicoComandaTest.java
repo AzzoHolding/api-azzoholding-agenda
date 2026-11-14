@@ -557,7 +557,7 @@ class ServicoComandaTest {
 
     assertThatThrownBy(() -> service.adicionarItem(comandaId, req))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Comanda não esta aberta.");
+        .hasMessage("Comanda não está aberta.");
   }
 
   // ---------------------------------------------------------------- desconto
@@ -617,7 +617,7 @@ class ServicoComandaTest {
 
     assertThatThrownBy(() -> service.fechar(comandaId))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Comanda não esta quitada: pago 100.00, total com gorjeta 110.00.");
+        .hasMessage("Comanda não está quitada: pago 100.00, total com gorjeta 110.00.");
 
     verify(transacaoRepository, never()).save(any());
   }
@@ -633,7 +633,7 @@ class ServicoComandaTest {
 
     assertThatThrownBy(() -> service.fechar(comandaId))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Comanda não esta quitada: pago 0, total com gorjeta 100.00.");
+        .hasMessage("Comanda não está quitada: pago 0, total com gorjeta 100.00.");
   }
 
   // ─── FIN-003: troco e pagamento que nao cabe no saldo ───────────────────────────────────────
@@ -714,7 +714,7 @@ class ServicoComandaTest {
                 service.registrarPagamento(
                     comandaId, pedidoDePagamento(ComandaPagamento.MEIO_DINHEIRO, "80.00")))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Esta comanda já esta paga por inteiro: feche a comanda.");
+        .hasMessage("Esta comanda já está paga por inteiro: feche a comanda.");
 
     verify(comandaPagamentoRepository, never()).save(any());
   }
@@ -1252,7 +1252,7 @@ class ServicoComandaTest {
 
     assertThatThrownBy(() -> service.estornar(comandaId, req))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Comanda não esta fechada.");
+        .hasMessage("Comanda não está fechada.");
   }
 
   @Test
@@ -2136,7 +2136,7 @@ class ServicoComandaTest {
 
     assertThatThrownBy(() -> service.aplicarCobertura(comandaId, corte.getId(), coberturaDoPacote(esgotado)))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("não tem mais sessoes");
+        .hasMessageContaining("não tem mais sessões");
   }
 
   @Test
@@ -2239,7 +2239,7 @@ class ServicoComandaTest {
 
     assertThatThrownBy(() -> service.estornar(comandaId, req))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("já usou 2 sessoes");
+        .hasMessageContaining("já usou 2 sessões");
     verify(clientPackagePurchaseRepository, never()).delete(any());
   }
 

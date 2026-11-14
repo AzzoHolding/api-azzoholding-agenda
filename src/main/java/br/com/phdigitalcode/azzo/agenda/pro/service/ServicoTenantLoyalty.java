@@ -47,6 +47,13 @@ public class ServicoTenantLoyalty {
   @Transactional
   public TenantLoyaltyDtos.ConfigResponse atualizar(TenantLoyaltyDtos.UpdateRequest request) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    // Devolver mais do que a cliente gasta da prejuizo em toda venda (relatorio de 14/11, Medio 3).
+    java.math.BigDecimal devolucao = request.pontosPorReal.divide(request.pontosPorResgateReal, 4, java.math.RoundingMode.HALF_UP);
+    if (devolucao.compareTo(java.math.BigDecimal.ONE) > 0) {
+      throw new IllegalArgumentException("Com esses valores a cliente recebe de volta "
+          + devolucao.movePointRight(2).stripTrailingZeros().toPlainString()
+          + "% do que gasta. O máximo é 100%: aumente os pontos para R$ 1,00 ou diminua os pontos por real.");
+    }
     TenantLoyaltySettings config = findByTenantIdOrCreate(tenantId);
     config.setAtivo(request.ativo);
     config.setPontosPorReal(request.pontosPorReal);

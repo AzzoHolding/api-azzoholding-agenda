@@ -445,6 +445,10 @@ public class ServicoComanda {
           servicePackageRepository
               .findByIdAndTenantId(referenciaId, tenantId)
               .orElseThrow(() -> new ApiClientErrorException("Pacote não encontrado.", 404));
+      // A tela de Pacotes promete "inativo deixa de ser vendido" (relatorio de 14/11, Alto 1).
+      if (!pacote.isAtivo()) {
+        throw new IllegalArgumentException("Este pacote está inativo e não pode ser vendido.");
+      }
       // Pacote vende por inteiro: 0,5 ou 0,001 pacote nao existe, e o saldo de sessoes sobe com
       // CEILING (criarSaldoDePacoteVendido) — 0,001 pacote por centavos entregava o pacote todo.
       if (item.getQuantidade().compareTo(BigDecimal.ONE) < 0
@@ -617,14 +621,14 @@ public class ServicoComanda {
     Map<String, Object> antes = dadosDoItem(item);
 
     if (!ComandaItem.TIPO_SERVICO.equals(item.getTipo())) {
-      throw new IllegalArgumentException("So serviço pode sair de pacote ou assinatura.");
+      throw new IllegalArgumentException("Só serviço pode sair de pacote ou assinatura.");
     }
     if (comanda.getClientId() == null) {
       throw new IllegalArgumentException(
           "Comanda sem cliente não usa pacote nem assinatura: identifique o cliente primeiro.");
     }
     if (item.getCoberturaTipo() != null) {
-      throw new IllegalArgumentException("Este serviço já esta coberto. Retire a cobertura antes.");
+      throw new IllegalArgumentException("Este serviço já está coberto. Retire a cobertura antes.");
     }
 
     UUID saldoId = parseUuidOrThrow(request.saldoId, "saldoId invalido.");
@@ -676,12 +680,19 @@ public class ServicoComanda {
         .orElseThrow(() -> new ApiClientErrorException("Item não encontrado na comanda.", 404));
   }
 
+  /** "Restam 1 sessão de Corte no pacote; este item pede 4." (relatorio de 14/11, Baixo 3). */
+  static String mensagemDeSaldoDoPacote(String servico, int restam, int pede) {
+    if (restam <= 0) return "O pacote não tem mais sessões de " + servico + ".";
+    return "Restam " + restam + (restam == 1 ? " sessão" : " sessões") + " de " + servico + " no pacote; este item pede "
+        + pede + ".";
+  }
+
   /** Sessao e unidade inteira: 1,5 corte nao sai de pacote nenhum. */
   private int sessoesDoItem(ComandaItem item) {
     BigDecimal quantidade = item.getQuantidade() != null ? item.getQuantidade() : BigDecimal.ONE;
     if (quantidade.signum() <= 0 || quantidade.stripTrailingZeros().scale() > 0) {
       throw new IllegalArgumentException(
-          "So quantidade inteira de sessoes sai de pacote ou assinatura.");
+          "Só quantidade inteira de sessões sai de pacote ou assinatura.");
     }
     return quantidade.intValueExact();
   }
@@ -696,13 +707,13 @@ public class ServicoComanda {
       ClientPackageBalance saldo = saldoDePacoteDoCliente(tenantId, comanda, item);
       if (saldo.getSessoesTotais() - saldo.getSessoesUsadas() < sessoes) {
         throw new IllegalArgumentException(
-            "O pacote não tem mais sessoes de " + saldo.getServiceNome() + " para este serviço.");
+            mensagemDeSaldoDoPacote(saldo.getServiceNome(), saldo.getSessoesTotais() - saldo.getSessoesUsadas(), sessoes));
       }
     } else if (ComandaItem.COBERTURA_ASSINATURA.equals(item.getCoberturaTipo())) {
       ClientMembershipBalance saldo = saldoDeAssinaturaDoCliente(tenantId, comanda, item);
       if (saldo.getQuantidadeMensal() - saldo.getUsadasNoPeriodo() < sessoes) {
         throw new IllegalArgumentException(
-            "A assinatura já usou todas as sessoes de " + saldo.getServiceNome() + " deste período.");
+            "A assinatura já usou todas as sessões de " + saldo.getServiceNome() + " deste período.");
       }
     } else {
       throw new IllegalArgumentException("Tipo de cobertura inválido.");
@@ -743,7 +754,7 @@ public class ServicoComanda {
           "Esta assinatura não é do cliente da comanda ou não cobre este serviço.");
     }
     if (!assinaturaValeAgora(assinatura)) {
-      throw new IllegalArgumentException("A assinatura do cliente não esta valendo agora.");
+      throw new IllegalArgumentException("A assinatura do cliente não está valendo agora.");
     }
     return saldo;
   }
@@ -831,7 +842,7 @@ public class ServicoComanda {
         throw new IllegalArgumentException(
             "O cliente já usou "
                 + usadas
-                + (usadas == 1 ? " sessão" : " sessoes")
+                + (usadas == 1 ? " sessão" : " sessões")
                 + " do pacote "
                 + compra.getPackageNome()
                 + ": o estorno devolveria o valor inteiro. Estorne antes os atendimentos"
@@ -1063,7 +1074,7 @@ public class ServicoComanda {
     BigDecimal restante = NumericUtil.maxZero(NumericUtil.subtract(totalComGorjeta, confirmado));
 
     if (restante.signum() == 0) {
-      throw new IllegalArgumentException("Esta comanda já esta paga por inteiro: feche a comanda.");
+      throw new IllegalArgumentException("Esta comanda já está paga por inteiro: feche a comanda.");
     }
     if (!ComandaPagamento.MEIO_DINHEIRO.equals(request.meio)
         && request.valor.compareTo(restante) > 0) {
@@ -1270,7 +1281,7 @@ public class ServicoComanda {
     BigDecimal totalComGorjeta = NumericUtil.add(comanda.getTotal(), comanda.getGorjeta());
     if (totalConfirmado.compareTo(totalComGorjeta) < 0) {
       throw new IllegalArgumentException(
-          "Comanda não esta quitada: pago "
+          "Comanda não está quitada: pago "
               + totalConfirmado
               + ", total com gorjeta "
               + totalComGorjeta
@@ -2075,7 +2086,7 @@ public class ServicoComanda {
 
   void exigirAberta(Comanda comanda) {
     if (!Comanda.STATUS_ABERTA.equals(comanda.getStatus())) {
-      throw new IllegalArgumentException("Comanda não esta aberta.");
+      throw new IllegalArgumentException("Comanda não está aberta.");
     }
   }
 
@@ -2187,7 +2198,7 @@ public class ServicoComanda {
 
   void exigirFechada(Comanda comanda) {
     if (!Comanda.STATUS_FECHADA.equals(comanda.getStatus())) {
-      throw new IllegalArgumentException("Comanda não esta fechada.");
+      throw new IllegalArgumentException("Comanda não está fechada.");
     }
   }
 

@@ -6,6 +6,9 @@ import java.util.List;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Digits;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Size;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
@@ -22,15 +25,22 @@ public final class PackageDtos {
   public static class ItemRequest {
     @NotNull public String serviceId;
 
-    @Min(1) public int sessoes;
+    @Min(value = 1, message = "cada serviço precisa de pelo menos 1 sessão")
+    @Max(value = 999, message = "no máximo 999 sessões por serviço")
+    public int sessoes;
   }
 
   public static class PackageRequest {
-    @NotBlank public String nome;
+    @NotBlank
+    @Size(max = 80, message = "o nome tem no máximo 80 letras")
+    public String nome;
 
     public String descricao;
 
-    @NotNull @DecimalMin("0.01") public BigDecimal preco;
+    @NotNull
+    @DecimalMin("0.01")
+    @Digits(integer = 8, fraction = 2, message = "o preço tem no máximo 2 casas depois da vírgula")
+    public BigDecimal preco;
 
     public boolean ativo = true;
 
