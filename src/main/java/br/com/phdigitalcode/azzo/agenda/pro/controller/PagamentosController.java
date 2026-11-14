@@ -77,6 +77,24 @@ public class PagamentosController {
     return contas.testar(id);
   }
 
+  @GetMapping("/contas/{id}/terminais-na-operadora")
+  @PreAuthorize("hasRole('OWNER')")
+  public List<PagamentosDtos.Terminal> terminaisNaOperadora(@PathVariable UUID id) {
+    return contas.terminaisNaOperadora(id);
+  }
+
+  @PostMapping("/contas/{id}/terminais")
+  @PreAuthorize("hasRole('OWNER')")
+  public PagamentosDtos.Conta adicionarTerminal(@PathVariable UUID id, @RequestBody PagamentosDtos.TerminalRequest pedido) {
+    return contas.adicionarTerminal(id, pedido);
+  }
+
+  @DeleteMapping("/contas/{id}/terminais/{terminalId}")
+  @PreAuthorize("hasRole('OWNER')")
+  public PagamentosDtos.Conta removerTerminal(@PathVariable UUID id, @PathVariable UUID terminalId) {
+    return contas.removerTerminal(id, terminalId);
+  }
+
   /** R$ 1,00 por Pix ou link, para ver a conta funcionando de ponta a ponta. */
   @PostMapping("/cobrancas/teste")
   @PreAuthorize("hasRole('OWNER')")

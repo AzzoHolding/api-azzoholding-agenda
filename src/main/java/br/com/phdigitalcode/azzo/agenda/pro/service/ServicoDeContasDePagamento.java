@@ -74,6 +74,12 @@ public class ServicoDeContasDePagamento implements ApplicationRunner {
   }
 
   private final ContaDePagamentoRepository contas;
+  private br.com.phdigitalcode.azzo.agenda.pro.repository.TerminalDePagamentoRepository terminais;
+
+  @org.springframework.beans.factory.annotation.Autowired
+  void setTerminais(br.com.phdigitalcode.azzo.agenda.pro.repository.TerminalDePagamentoRepository terminais) {
+    this.terminais = terminais;
+  }
   private final TenantPaymentSettingsRepository configuracoesAntigas;
   private final Map<String, ProvedorDePagamento> provedores;
   private final EncryptionService cifra;
@@ -122,6 +128,7 @@ public class ServicoDeContasDePagamento implements ApplicationRunner {
           campo.chave = c.chave();
           campo.rotulo = c.rotulo();
           campo.secreto = c.secreto();
+          campo.obrigatorio = c.obrigatorio();
           return campo;
         }).toList();
       }
@@ -207,6 +214,74 @@ public class ServicoDeContasDePagamento implements ApplicationRunner {
     ContaDePagamento conta = doSalao(id, tenantId);
     conferirNaOperadora(conta, provedor(conta.getProvedor()), false);
     contas.save(conta);
+    return paraDto(conta);
+  }
+
+  // ---- maquininhas --------------------------------------------------------------------------
+
+  /** As maquininhas que a conta tem NA OPERADORA, para o dono escolher qual adicionar. */
+  @Transactional(readOnly = true)
+  public List<PagamentosDtos.Terminal> terminaisNaOperadora(UUID contaId) {
+    UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    ContaDePagamento conta = doSalao(contaId, tenantId);
+    try {
+      return provedor(conta.getProvedor()).terminais(abrir(conta)).stream().map(t -> {
+        PagamentosDtos.Terminal dto = new PagamentosDtos.Terminal();
+        dto.serial = t.serial();
+        dto.modelo = t.modelo();
+        dto.apelido = t.apelido();
+        return dto;
+      }).toList();
+    } catch (ProvedorDePagamento.FalhaNaOperadora e) {
+      throw new ApiClientErrorException(e.getMessage(), 502);
+    }
+  }
+
+  /** Adiciona a maquininha ao salao e a deixa pronta para receber cobranca pela API. */
+  @Transactional
+  public PagamentosDtos.Conta adicionarTerminal(UUID contaId, PagamentosDtos.TerminalRequest pedido) {
+    UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    ContaDePagamento conta = doSalao(contaId, tenantId);
+    if (pedido == null || pedido.serial == null || pedido.serial.isBlank()) {
+      throw new ApiClientErrorException("Escolha a maquininha.", 400);
+    }
+    ProvedorDePagamento provedor = provedor(conta.getProvedor());
+    if (!provedor.capacidades().contains(ProvedorDePagamento.Capacidade.MAQUININHA_NUVEM)) {
+      throw new ApiClientErrorException(provedor.nome() + " ainda não tem maquininha integrada pelo Azzo.", 400);
+    }
+    String serial = pedido.serial.trim();
+    try {
+      provedor.prepararTerminal(abrir(conta), serial);
+    } catch (ProvedorDePagamento.FalhaNaOperadora e) {
+      throw new ApiClientErrorException(e.getMessage(), 502);
+    }
+    br.com.phdigitalcode.azzo.agenda.pro.entity.TerminalDePagamento terminal =
+        terminais.findByContaIdAndSerial(conta.getId(), serial).orElseGet(() -> {
+          var novo = new br.com.phdigitalcode.azzo.agenda.pro.entity.TerminalDePagamento();
+          novo.setTenantId(tenantId);
+          novo.setContaId(conta.getId());
+          novo.setSerial(serial);
+          return novo;
+        });
+    terminal.setModelo(limitar(pedido.modelo, 60));
+    terminal.setApelido(limitar(pedido.apelido == null || pedido.apelido.isBlank() ? "Maquininha" : pedido.apelido.trim(), 60));
+    terminal.setAtivo(true);
+    terminais.save(terminal);
+    auditar(tenantId, "PAGAMENTO_MAQUININHA_ADICIONADA", conta, null);
+    return paraDto(conta);
+  }
+
+  @Transactional
+  public PagamentosDtos.Conta removerTerminal(UUID contaId, UUID terminalId) {
+    UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    ContaDePagamento conta = doSalao(contaId, tenantId);
+    terminais.findByIdAndTenantIdAndAtivoTrue(terminalId, tenantId)
+        .filter(t -> t.getContaId().equals(conta.getId()))
+        .ifPresent(t -> {
+          t.setAtivo(false);
+          terminais.save(t);
+        });
+    auditar(tenantId, "PAGAMENTO_MAQUININHA_REMOVIDA", conta, null);
     return paraDto(conta);
   }
 
@@ -311,6 +386,7 @@ public class ServicoDeContasDePagamento implements ApplicationRunner {
   private void exigirCampos(ProvedorDePagamento provedor, Map<String, String> credenciais, String ignorar) {
     List<String> faltando = provedor.camposDeCredencial().stream()
         .filter(c -> !c.chave().equals(ignorar))
+        .filter(CampoDeCredencial::obrigatorio)
         .filter(c -> credenciais.get(c.chave()) == null || credenciais.get(c.chave()).isBlank())
         .map(CampoDeCredencial::rotulo).toList();
     if (!faltando.isEmpty()) throw new ApiClientErrorException("Preencha: " + String.join(", ", faltando) + ".", 400);
@@ -365,6 +441,16 @@ public class ServicoDeContasDePagamento implements ApplicationRunner {
     dto.urlDeAviso = urlDeAviso(conta);
     ProvedorDePagamento p = provedores.get(conta.getProvedor());
     dto.capacidades = p == null ? List.of() : p.capacidades().stream().map(Enum::name).sorted().toList();
+    if (terminais != null) {
+      dto.terminais = terminais.findByTenantIdAndContaIdAndAtivoTrue(conta.getTenantId(), conta.getId()).stream().map(t -> {
+        PagamentosDtos.Terminal td = new PagamentosDtos.Terminal();
+        td.id = t.getId().toString();
+        td.serial = t.getSerial();
+        td.modelo = t.getModelo();
+        td.apelido = t.getApelido();
+        return td;
+      }).toList();
+    }
     return dto;
   }
 

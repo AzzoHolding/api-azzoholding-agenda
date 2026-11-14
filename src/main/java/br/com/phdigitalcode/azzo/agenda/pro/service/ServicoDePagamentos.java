@@ -220,6 +220,12 @@ public class ServicoDePagamentos {
       throw new ApiClientErrorException("O estorno precisa ficar entre R$ 0,01 e o que falta estornar.", 400);
     }
     ContaDePagamento conta = contas.findById(cobranca.getContaId()).orElseThrow();
+    ProvedorDePagamento provedorDaCobranca = servicoDeContas.provedor(conta.getProvedor());
+    boolean parcial = valor != null && valor.compareTo(restante) < 0;
+    if (parcial && !provedorDaCobranca.capacidades().contains(Capacidade.ESTORNO_PARCIAL)) {
+      throw new ApiClientErrorException(provedorDaCobranca.nome() + " só estorna o valor inteiro pelo Azzo.", 400);
+    }
+    if (!parcial) valor = null;
     StatusNaOperadora resultado;
     try {
       resultado = servicoDeContas.provedor(conta.getProvedor())

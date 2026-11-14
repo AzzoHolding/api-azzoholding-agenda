@@ -24,6 +24,7 @@ public final class PagamentosDtos {
     public String chave;
     public String rotulo;
     public boolean secreto;
+    public boolean obrigatorio = true;
   }
 
   public static class ContaRequest {
@@ -49,6 +50,23 @@ public final class PagamentosDtos {
     public String ultimoErro;
     /** Para colar no painel da operadora, quando ela pede a URL de aviso. */
     public String urlDeAviso;
+    /** As maquininhas desta conta ja adicionadas ao salao. */
+    public List<Terminal> terminais = new ArrayList<>();
+  }
+
+  public static class Terminal {
+    /** Id do terminal na conta da operadora (na Point: "MODELO__SERIAL"). */
+    public String serial;
+    public String modelo;
+    public String apelido;
+    /** So nos ja adicionados ao salao. */
+    public String id;
+  }
+
+  public static class TerminalRequest {
+    public String serial;
+    public String modelo;
+    public String apelido;
   }
 
   public static class Cobranca {

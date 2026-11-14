@@ -59,13 +59,21 @@ public interface ProvedorDePagamento {
     return List.of();
   }
 
+  /** Deixa a maquininha pronta para receber cobranca pela API (ex.: modo PDV na Point). */
+  default void prepararTerminal(Conta conta, String serial) {}
+
   // ---- tipos ---------------------------------------------------------------------------------
 
   enum Capacidade { PIX, LINK, CARTAO_ONLINE, MAQUININHA_NUVEM, RECORRENTE, ESTORNO, ESTORNO_PARCIAL }
 
   enum Status { CRIADA, AGUARDANDO, PAGA, RECUSADA, CANCELADA, EXPIRADA, ESTORNADA, ESTORNO_PARCIAL }
 
-  record CampoDeCredencial(String chave, String rotulo, boolean secreto) {}
+  /** {@code obrigatorio=false}: a tela mostra, mas conecta sem ele (ex.: chave secreta do aviso). */
+  record CampoDeCredencial(String chave, String rotulo, boolean secreto, boolean obrigatorio) {
+    public CampoDeCredencial(String chave, String rotulo, boolean secreto) {
+      this(chave, rotulo, secreto, true);
+    }
+  }
 
   /** A conta do salao, ja com as credenciais abertas (so em memoria, so durante a chamada). */
   record Conta(String id, String tenantId, String ambiente, Map<String, String> credenciais, String urlDeAviso) {
