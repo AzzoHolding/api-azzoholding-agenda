@@ -93,7 +93,8 @@ public final class ComandaDtos {
   }
 
   public static class ResgatarFidelidadeRequest {
-    @Min(1) public int pontos;
+    /** Numero (e nao int): 1,5 chega como 1,5 e e recusado, em vez de virar 1 em silencio. */
+    public java.math.BigDecimal pontos;
   }
 
   public static class ComandaItemResponse {

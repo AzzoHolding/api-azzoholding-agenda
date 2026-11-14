@@ -236,6 +236,52 @@ class ServicoComandaTest {
             clientMembershipRepository,
             clientMembershipBalanceRepository,
             permissionService);
+    service.setServicoDePontos(new PontosEmMemoria());
+  }
+
+  /**
+   * O ServicoDePontos de verdade muda o saldo por instrucao no banco; aqui imita isso no objeto da
+   * cliente que o repositorio falso devolve, para os testes conferirem o saldo como antes.
+   */
+  private class PontosEmMemoria extends ServicoDePontos {
+    PontosEmMemoria() {
+      super(null, null, null);
+    }
+
+    private Optional<Cliente> cliente(UUID tenant, UUID clientId) {
+      return clienteRepository.findByIdAndTenantId(clientId, tenant);
+    }
+
+    @Override
+    public int saldo(UUID tenant, UUID clientId) {
+      return cliente(tenant, clientId).map(Cliente::getLoyaltyPoints).orElse(0);
+    }
+
+    @Override
+    public void debitarResgate(UUID tenant, UUID clientId, UUID comanda, int pontos) {
+      Cliente c = cliente(tenant, clientId).orElseThrow();
+      if (c.getLoyaltyPoints() < pontos) {
+        throw new IllegalArgumentException("Cliente não possui pontos suficientes (saldo: " + c.getLoyaltyPoints() + ").");
+      }
+      c.setLoyaltyPoints(c.getLoyaltyPoints() - pontos);
+    }
+
+    @Override
+    public void devolverResgate(UUID tenant, UUID clientId, UUID comanda, int pontos, Integer validade, String motivo) {
+      cliente(tenant, clientId).ifPresent(c -> c.setLoyaltyPoints(c.getLoyaltyPoints() + pontos));
+    }
+
+    @Override
+    public void creditarVenda(UUID tenant, UUID clientId, UUID comanda, int pontos, Integer validade) {
+      cliente(tenant, clientId).ifPresent(c -> c.setLoyaltyPoints(c.getLoyaltyPoints() + pontos));
+    }
+
+    @Override
+    public void estornarCreditoDaVenda(UUID tenant, UUID clientId, UUID comanda, int creditados, ModoDeEstorno modo) {
+      cliente(tenant, clientId).ifPresent(c -> c.setLoyaltyPoints(
+          modo == ModoDeEstorno.SALDO_NEGATIVO ? c.getLoyaltyPoints() - creditados
+              : Math.max(0, c.getLoyaltyPoints() - creditados)));
+    }
   }
 
   // ---------------------------------------------------------------- helpers
@@ -1340,7 +1386,7 @@ class ServicoComandaTest {
         .thenReturn(Optional.of(cliente));
 
     ComandaDtos.ResgatarFidelidadeRequest req = new ComandaDtos.ResgatarFidelidadeRequest();
-    req.pontos = 3000;
+    req.pontos = java.math.BigDecimal.valueOf(3000);
 
     service.resgatarFidelidade(comandaId, req);
 
@@ -1371,7 +1417,7 @@ class ServicoComandaTest {
         .thenReturn(Optional.of(cliente));
 
     ComandaDtos.ResgatarFidelidadeRequest req = new ComandaDtos.ResgatarFidelidadeRequest();
-    req.pontos = 50000;
+    req.pontos = java.math.BigDecimal.valueOf(50000);
 
     // FIN-007: antes o desconto era cortado em R$ 20 e os 50000 pontos debitados mesmo assim.
     assertThatThrownBy(() -> service.resgatarFidelidade(comandaId, req))
@@ -1395,7 +1441,7 @@ class ServicoComandaTest {
     cliente.setLoyaltyPoints(saldo);
     when(clienteRepository.findByIdAndTenantId(eq(clientId), eq(tenantId))).thenReturn(Optional.of(cliente));
     ComandaDtos.ResgatarFidelidadeRequest req = new ComandaDtos.ResgatarFidelidadeRequest();
-    req.pontos = pontos;
+    req.pontos = java.math.BigDecimal.valueOf(pontos);
     service.resgatarFidelidade(comandaId, req);
     return cliente;
   }
@@ -1492,7 +1538,7 @@ class ServicoComandaTest {
         .thenReturn(Optional.of(cliente));
 
     ComandaDtos.ResgatarFidelidadeRequest req = new ComandaDtos.ResgatarFidelidadeRequest();
-    req.pontos = 500;
+    req.pontos = java.math.BigDecimal.valueOf(500);
 
     assertThatThrownBy(() -> service.resgatarFidelidade(comandaId, req))
         .isInstanceOf(IllegalArgumentException.class)
@@ -1507,11 +1553,11 @@ class ServicoComandaTest {
         .thenReturn(Optional.empty());
 
     ComandaDtos.ResgatarFidelidadeRequest req = new ComandaDtos.ResgatarFidelidadeRequest();
-    req.pontos = 100;
+    req.pontos = java.math.BigDecimal.valueOf(100);
 
     assertThatThrownBy(() -> service.resgatarFidelidade(comandaId, req))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Programa de fidelidade não esta ativo.");
+        .hasMessage("Programa de fidelidade não está ativo.");
   }
 
   // ─── Preco de tabela e trilha de auditoria (achados do E2E de 2026-09-16) ───

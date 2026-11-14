@@ -128,6 +128,14 @@ public class ServicoComanda {
   private br.com.phdigitalcode.azzo.agenda.pro.repository.CobrancaRepository cobrancaRepository;
   private br.com.phdigitalcode.azzo.agenda.pro.repository.TerminalDePagamentoRepository terminaisDePagamento;
 
+  /** Pontos de fidelidade (V175): todo movimento de saldo passa por aqui. */
+  private ServicoDePontos servicoDePontos;
+
+  @org.springframework.beans.factory.annotation.Autowired
+  void setServicoDePontos(ServicoDePontos servicoDePontos) {
+    this.servicoDePontos = servicoDePontos;
+  }
+
   @org.springframework.beans.factory.annotation.Autowired(required = false)
   void setPagamentosIntegrados(
       ServicoDePagamentos servicoDePagamentos,
@@ -917,12 +925,7 @@ public class ServicoComanda {
     }
     comanda.setDesconto(
         subtotal.min(NumericUtil.add(descontoPercentual, comanda.getValorResgateFidelidade())));
-    comanda.setDescontoMotivo(
-        comanda.getPontosFidelidadeResgatados() > 0
-            ? concatenarMotivo(
-                request.motivo.trim(),
-                "Resgate de " + comanda.getPontosFidelidadeResgatados() + " pontos de fidelidade")
-            : request.motivo.trim());
+    comanda.setDescontoMotivo(motivoComResgate(request.motivo.trim(), comanda.getPontosFidelidadeResgatados()));
     comanda.setTotal(NumericUtil.maxZero(NumericUtil.subtract(subtotal, comanda.getDesconto())));
 
     auditar(tenantId, "POS_DISCOUNT_APPLY", comanda, antesDoDesconto, dadosDoDesconto(comanda));
@@ -1400,11 +1403,8 @@ public class ServicoComanda {
             .intValue();
     if (pontos <= 0) return 0;
 
-    Cliente cliente =
-        clienteRepository.findByIdAndTenantId(comanda.getClientId(), tenantId).orElse(null);
-    if (cliente != null) {
-      cliente.setLoyaltyPoints(cliente.getLoyaltyPoints() + pontos);
-    }
+    if (clienteRepository.findByIdAndTenantId(comanda.getClientId(), tenantId).isEmpty()) return 0;
+    servicoDePontos.creditarVenda(tenantId, comanda.getClientId(), comanda.getId(), pontos, config.getValidadeDias());
     return pontos;
   }
 
@@ -1884,14 +1884,8 @@ public class ServicoComanda {
     }
 
     if (comanda.getPontosFidelidadeCreditados() > 0 && comanda.getClientId() != null) {
-      clienteRepository
-          .findByIdAndTenantId(comanda.getClientId(), tenantId)
-          .ifPresent(
-              cliente ->
-                  cliente.setLoyaltyPoints(
-                      Math.max(
-                          0,
-                          cliente.getLoyaltyPoints() - comanda.getPontosFidelidadeCreditados())));
+      servicoDePontos.estornarCreditoDaVenda(tenantId, comanda.getClientId(), comanda.getId(),
+          comanda.getPontosFidelidadeCreditados(), ServicoDePontos.ModoDeEstorno.ATE_ZERO);
     }
 
     // FIN-007: o estorno revertia so os pontos CREDITADOS pela venda; os RESGATADOS nela se perdiam.
@@ -1962,44 +1956,53 @@ public class ServicoComanda {
     TenantLoyaltySettings config =
         tenantLoyaltySettingsRepository.findByTenantId(tenantId).orElse(null);
     if (config == null || !config.isAtivo()) {
-      throw new IllegalArgumentException("Programa de fidelidade não esta ativo.");
+      throw new IllegalArgumentException("Programa de fidelidade não está ativo.");
     }
-    Cliente cliente =
-        clienteRepository
-            .findByIdAndTenantId(comanda.getClientId(), tenantId)
-            .orElseThrow(() -> new ApiClientErrorException("Cliente não encontrado.", 404));
-    if (cliente.getLoyaltyPoints() < request.pontos) {
-      throw new IllegalArgumentException(
-          "Cliente não possui pontos suficientes (saldo: " + cliente.getLoyaltyPoints() + ").");
+    clienteRepository
+        .findByIdAndTenantId(comanda.getClientId(), tenantId)
+        .orElseThrow(() -> new ApiClientErrorException("Cliente não encontrado.", 404));
+    int pontos = pontosInteiros(request.pontos);
+    // Conferencia antecipada so para a mensagem certa; quem garante o saldo e o debito condicional abaixo.
+    int saldo = servicoDePontos.saldo(tenantId, comanda.getClientId());
+    if (saldo < pontos) {
+      throw new IllegalArgumentException("Cliente não possui pontos suficientes (saldo: " + saldo + ").");
     }
 
-    BigDecimal valorResgate =
-        BigDecimal.valueOf(request.pontos)
-            .divide(config.getPontosPorResgateReal(), 2, RoundingMode.HALF_UP);
+    // O valor vale para o TOTAL de pontos resgatados na comanda, sempre arredondado para baixo:
+    // resgatar de pouco em pouco nao rende mais que resgatar tudo de uma vez (relatorio de 14/11, Alto 2).
+    BigDecimal ppr = config.getPontosPorResgateReal();
+    int totalDePontos = comanda.getPontosFidelidadeResgatados() + pontos;
+    BigDecimal valorAtual = comanda.getValorResgateFidelidade();
+    BigDecimal valorNovo = ServicoDePontos.valorEmReais(totalDePontos, ppr);
+    BigDecimal valorResgate = valorNovo.subtract(valorAtual);
+    if (valorResgate.signum() <= 0) {
+      int minimo = ServicoDePontos.menorTotalQueValeMais(valorAtual, ppr) - comanda.getPontosFidelidadeResgatados();
+      throw new IllegalArgumentException(
+          pontos + " pontos valem menos de R$ 0,01. Resgate pelo menos " + minimo + " pontos.");
+    }
     List<ComandaItem> itens = comandaItemRepository.findByComandaIdOrderByCreatedAt(comanda.getId());
     BigDecimal subtotal = somarItens(itens);
     // FIN-007: o excedente acima do total era descartado e os pontos debitados mesmo assim.
     BigDecimal restante = NumericUtil.maxZero(NumericUtil.subtract(subtotal, comanda.getDesconto()));
     if (valorResgate.compareTo(restante) > 0) {
-      int maximo =
-          restante.multiply(config.getPontosPorResgateReal()).setScale(0, RoundingMode.DOWN).intValue();
+      int maximo = ServicoDePontos.maiorTotalAte(valorAtual.add(restante), ppr) - comanda.getPontosFidelidadeResgatados();
       throw new IllegalArgumentException(
           "O resgate (R$ " + valorResgate + ") passa do que falta pagar na comanda (R$ " + restante
-              + "). Use no máximo " + maximo + " pontos.");
+              + "). Use no máximo " + Math.max(0, maximo) + " pontos.");
     }
+    // Desconta no banco so se houver saldo: dois resgates ao mesmo tempo nao gastam os mesmos pontos
+    // (relatorio de 14/11, Critico 1). Falhando, nada da comanda mudou.
+    servicoDePontos.debitarResgate(tenantId, comanda.getClientId(), comanda.getId(), pontos);
+
     comanda.setDesconto(NumericUtil.add(comanda.getDesconto(), valorResgate));
-    comanda.setPontosFidelidadeResgatados(comanda.getPontosFidelidadeResgatados() + request.pontos);
-    comanda.setValorResgateFidelidade(NumericUtil.add(comanda.getValorResgateFidelidade(), valorResgate));
-    comanda.setDescontoMotivo(
-        concatenarMotivo(
-            comanda.getDescontoMotivo(),
-            "Resgate de " + request.pontos + " pontos de fidelidade"));
+    comanda.setPontosFidelidadeResgatados(totalDePontos);
+    comanda.setValorResgateFidelidade(valorNovo);
+    comanda.setDescontoMotivo(motivoComResgate(comanda.getDescontoMotivo(), totalDePontos));
     comanda.setTotal(NumericUtil.maxZero(NumericUtil.subtract(subtotal, comanda.getDesconto())));
 
-    cliente.setLoyaltyPoints(cliente.getLoyaltyPoints() - request.pontos);
-
     Map<String, Object> resgate = new HashMap<>();
-    resgate.put("pontos", request.pontos);
+    resgate.put("pontos", pontos);
+    resgate.put("totalNaComanda", totalDePontos);
     resgate.put("valorResgate", valorResgate);
     resgate.put("clientId", comanda.getClientId().toString());
     auditar(tenantId, "POS_LOYALTY_REDEEM", comanda, null, resgate);
@@ -2013,9 +2016,10 @@ public class ServicoComanda {
   private void devolverPontosResgatados(UUID tenantId, Comanda comanda, String motivo) {
     int pontos = comanda.getPontosFidelidadeResgatados();
     if (pontos <= 0 || comanda.getClientId() == null) return;
-    clienteRepository
-        .findByIdAndTenantId(comanda.getClientId(), tenantId)
-        .ifPresent(cliente -> cliente.setLoyaltyPoints(cliente.getLoyaltyPoints() + pontos));
+    if (clienteRepository.findByIdAndTenantId(comanda.getClientId(), tenantId).isEmpty()) return;
+    Integer validade = tenantLoyaltySettingsRepository.findByTenantId(tenantId)
+        .map(TenantLoyaltySettings::getValidadeDias).orElse(null);
+    servicoDePontos.devolverResgate(tenantId, comanda.getClientId(), comanda.getId(), pontos, validade, motivo);
     Map<String, Object> devolucao = new HashMap<>();
     devolucao.put("pontos", pontos);
     devolucao.put("valorResgate", comanda.getValorResgateFidelidade());
@@ -2035,11 +2039,32 @@ public class ServicoComanda {
         NumericUtil.maxZero(NumericUtil.subtract(comanda.getDesconto(), comanda.getValorResgateFidelidade())));
     comanda.setPontosFidelidadeResgatados(0);
     comanda.setValorResgateFidelidade(BigDecimal.ZERO);
+    comanda.setDescontoMotivo(motivoComResgate(comanda.getDescontoMotivo(), 0));
   }
 
-  private String concatenarMotivo(String motivoAtual, String novoMotivo) {
-    if (motivoAtual == null || motivoAtual.isBlank()) return novoMotivo;
-    return motivoAtual + "; " + novoMotivo;
+  private static final java.util.regex.Pattern TEXTO_DO_RESGATE =
+      java.util.regex.Pattern.compile("\\s*;?\\s*Resgate de \\d+ pontos de fidelidade");
+
+  /**
+   * O motivo do desconto com UM texto de resgate, com o total atual da comanda (Medio 5: resgatar,
+   * desfazer e resgatar de novo deixava o texto repetido). {@code pontos} 0 tira o texto.
+   */
+  static String motivoComResgate(String motivo, int pontos) {
+    String semResgate = motivo == null ? "" : TEXTO_DO_RESGATE.matcher(motivo).replaceAll("").trim();
+    if (semResgate.startsWith(";")) semResgate = semResgate.substring(1).trim();
+    if (pontos <= 0) return semResgate.isEmpty() ? null : semResgate;
+    String resgate = "Resgate de " + pontos + " pontos de fidelidade";
+    return semResgate.isEmpty() ? resgate : semResgate + "; " + resgate;
+  }
+
+  /** Pontos sao inteiros: 1,5 ponto e recusado, e nao arredondado em silencio (Baixo 2). */
+  static int pontosInteiros(BigDecimal pontos) {
+    if (pontos == null) throw new IllegalArgumentException("Informe quantos pontos resgatar.");
+    BigDecimal p = pontos.stripTrailingZeros();
+    if (p.scale() > 0) throw new IllegalArgumentException("Pontos são inteiros: informe um número sem vírgula.");
+    if (p.signum() <= 0) throw new IllegalArgumentException("Informe quantos pontos resgatar.");
+    if (p.compareTo(BigDecimal.valueOf(100_000_000)) > 0) throw new IllegalArgumentException("Quantidade de pontos inválida.");
+    return p.intValueExact();
   }
 
   Comanda buscarOuFalhar(UUID id, UUID tenantId) {
