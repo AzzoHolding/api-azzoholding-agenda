@@ -34,6 +34,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditConstants;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditEventCommand;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditService;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.pagamentos.ProvedorDePagamento;
+import br.com.phdigitalcode.azzo.agenda.pro.integration.pagamentos.pixchave.PixNaChaveProvedor;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.pagamentos.ProvedorDePagamento.CampoDeCredencial;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.pagamentos.ProvedorDePagamento.ResultadoValidacao;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.ContaDePagamentoRepository;
@@ -71,6 +72,8 @@ public class ServicoDeContasDePagamento implements ApplicationRunner {
     OPERADORAS_DO_PLANO.put("REDE", "Rede");
     OPERADORAS_DO_PLANO.put("GETNET", "Getnet");
     OPERADORAS_DO_PLANO.put("ASAAS", "Asaas");
+    // Pix estatico na chave do proprio salao: sem operadora, o caixa confirma o recebimento.
+    OPERADORAS_DO_PLANO.put("PIX_CHAVE", "Pix na minha chave");
   }
 
   private final ContaDePagamentoRepository contas;
@@ -226,8 +229,9 @@ public class ServicoDeContasDePagamento implements ApplicationRunner {
       ProvedorDePagamento p = provedores.get(c.getProvedor());
       d.pix = p != null && p.capacidades().contains(ProvedorDePagamento.Capacidade.PIX);
       d.operadoraDoPix = OPERADORAS_DO_PLANO.getOrDefault(c.getProvedor(), c.getProvedor());
-      // So o Mercado Pago emite Pix sem CPF/CNPJ de quem paga; as outras pedem o cliente cadastrado.
-      d.pixExigeCliente = !"MERCADO_PAGO".equals(c.getProvedor());
+      // So o Mercado Pago (e o Pix na chave do salao) emite Pix sem CPF/CNPJ de quem paga.
+      d.pixExigeCliente = !"MERCADO_PAGO".equals(c.getProvedor()) && !PixNaChaveProvedor.CODIGO.equals(c.getProvedor());
+      d.pixConfirmacaoManual = PixNaChaveProvedor.CODIGO.equals(c.getProvedor());
     });
     d.recorrente = contas.findByTenantIdAndAtivoTrueOrderByCreatedAtAsc(tenantId).stream()
         .map(c -> provedores.get(c.getProvedor()))
@@ -329,8 +333,10 @@ public class ServicoDeContasDePagamento implements ApplicationRunner {
   public ProvedorDePagamento.Conta abrir(ContaDePagamento conta) {
     Map<String, String> credenciais = new LinkedHashMap<>(credenciais(conta));
     credenciais.put("webhookToken", conta.getWebhookToken());
+    // Ao conectar, a conta e conferida na operadora ANTES de ser gravada: ainda nao tem id.
     return new ProvedorDePagamento.Conta(
-        conta.getId().toString(), conta.getTenantId().toString(), conta.getAmbiente(), credenciais, urlDeAviso(conta));
+        conta.getId() == null ? null : conta.getId().toString(), conta.getTenantId().toString(), conta.getAmbiente(),
+        credenciais, urlDeAviso(conta));
   }
 
   public ProvedorDePagamento provedor(String codigo) {
@@ -411,6 +417,8 @@ public class ServicoDeContasDePagamento implements ApplicationRunner {
     String secreta = provedor.camposDeCredencial().stream().filter(CampoDeCredencial::secreto)
         .map(c -> credenciais.get(c.chave())).filter(v -> v != null && !v.isBlank()).findFirst().orElse(null);
     conta.setCredenciaisMascara(secreta == null ? null : "••••" + secreta.substring(Math.max(0, secreta.length() - 4)));
+    // Pix na chave: nada e secreto (a chave aparece no Pix de toda cliente), mas a tela mostra so o final.
+    if (PixNaChaveProvedor.CODIGO.equals(provedor.codigo())) conta.setCredenciaisMascara(PixNaChaveProvedor.mascara(credenciais));
   }
 
   Map<String, String> credenciais(ContaDePagamento conta) {

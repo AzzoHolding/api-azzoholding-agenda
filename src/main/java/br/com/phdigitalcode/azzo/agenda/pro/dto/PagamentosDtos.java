@@ -83,6 +83,8 @@ public final class PagamentosDtos {
     public String operadoraDoPix;
     /** O Pix desta operadora exige cliente com CPF/CNPJ na comanda. */
     public boolean pixExigeCliente;
+    /** Pix na chave do salao: o Azzo nao recebe aviso, o caixa confirma ("Recebi"). */
+    public boolean pixConfirmacaoManual;
     /** Ha conta conectada que cobra assinatura no cartao recorrente (clube, Fase 7). */
     public boolean recorrente;
     public List<Terminal> maquininhas = new ArrayList<>();

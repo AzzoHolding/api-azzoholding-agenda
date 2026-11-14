@@ -87,7 +87,7 @@ public class RedeProvedor implements ProvedorDePagamento {
   @Override
   public ResultadoValidacao validarCredenciais(Conta conta) {
     try {
-      tokens.remove(conta.id());
+      tokens.remove(chaveDoToken(conta));
       token(conta);
       return new ResultadoValidacao(true, "Conta Rede conectada.");
     } catch (RestClientResponseException e) {
@@ -228,8 +228,16 @@ public class RedeProvedor implements ProvedorDePagamento {
         .defaultHeader("Authorization", "Bearer " + token(conta)).build();
   }
 
+  /**
+   * O token vale para o PV no ambiente — e nao para o id da conta, que ainda nao existe quando a
+   * conta e conferida antes de ser gravada.
+   */
+  private static String chaveDoToken(Conta conta) {
+    return conta.ambiente() + ":" + valorOuVazio(conta.credencial("pv"));
+  }
+
   private String token(Conta conta) {
-    Token atual = tokens.get(conta.id());
+    Token atual = tokens.get(chaveDoToken(conta));
     if (atual != null && atual.expiraEm().isAfter(Instant.now().plusSeconds(60))) return atual.valor();
     String url = conta.producao() ? "https://api.userede.com.br/redelabs/oauth2/token"
         : "https://rl7-sandbox-api.useredecloud.com.br/oauth2/token";
@@ -243,7 +251,7 @@ public class RedeProvedor implements ProvedorDePagamento {
     String valor = texto(r, "access_token");
     if (valor == null) throw new FalhaNaOperadora("A Rede não devolveu o token de acesso.", null);
     long segundos = r.path("expires_in").asLong(1440);
-    tokens.put(conta.id(), new Token(valor, Instant.now().plusSeconds(segundos)));
+    tokens.put(chaveDoToken(conta), new Token(valor, Instant.now().plusSeconds(segundos)));
     return valor;
   }
 

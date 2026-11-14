@@ -123,6 +123,13 @@ public class PagamentosController {
     return pagamentos.cancelar(id);
   }
 
+  /** Pix na chave do salao: o caixa confirma que o dinheiro chegou (nao ha aviso de operadora). */
+  @PostMapping("/cobrancas/{id}/confirmar-recebimento")
+  @RequiresPermission("finance:view")
+  public PagamentosDtos.Cobranca confirmarRecebimento(@PathVariable UUID id) {
+    return pagamentos.confirmarRecebimento(id);
+  }
+
   @PostMapping("/cobrancas/{id}/estornar")
   @PreAuthorize("hasRole('OWNER')")
   public PagamentosDtos.Cobranca estornar(@PathVariable UUID id, @RequestBody(required = false) PagamentosDtos.EstornoRequest pedido) {

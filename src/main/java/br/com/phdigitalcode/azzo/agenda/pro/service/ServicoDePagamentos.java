@@ -30,6 +30,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditConstants;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditEventCommand;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditService;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.pagamentos.ProvedorDePagamento;
+import br.com.phdigitalcode.azzo.agenda.pro.integration.pagamentos.pixchave.PixNaChaveProvedor;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.pagamentos.ProvedorDePagamento.AvisoDaOperadora;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.pagamentos.ProvedorDePagamento.Capacidade;
 import br.com.phdigitalcode.azzo.agenda.pro.integration.pagamentos.ProvedorDePagamento.CobrancaCriada;
@@ -212,6 +213,31 @@ public class ServicoDePagamentos {
     }
     return paraDto(aplicar(cobranca.getId(), StatusNaOperadora.so(ProvedorDePagamento.Status.CANCELADA), "MANUAL", "CANCELAR",
         "cancelar:" + cobranca.getId(), null));
+  }
+
+  /**
+   * Pix na chave do salao: o caixa viu o dinheiro no aplicativo do banco e confirma. Sem operadora,
+   * e a unica forma de a cobranca ficar paga — por isso so vale para essa conta e fica na auditoria
+   * com quem confirmou.
+   */
+  public PagamentosDtos.Cobranca confirmarRecebimento(UUID id) {
+    return confirmarRecebimento(contextoTenant.obterTenantIdOuFalhar(), id);
+  }
+
+  PagamentosDtos.Cobranca confirmarRecebimento(UUID tenantId, UUID id) {
+    Cobranca cobranca = cobrancas.findByIdAndTenantId(id, tenantId)
+        .orElseThrow(() -> new ApiClientErrorException("Cobrança não encontrada.", 404));
+    if (!PixNaChaveProvedor.CODIGO.equals(cobranca.getProvedor())) {
+      throw new ApiClientErrorException("Esta cobrança é confirmada pela operadora, não pelo caixa.", 409);
+    }
+    if ("PAGA".equals(cobranca.getStatus())) return paraDto(cobranca);
+    if (!"CRIADA".equals(cobranca.getStatus()) && !"AGUARDANDO".equals(cobranca.getStatus())) {
+      throw new ApiClientErrorException("Esta cobrança já foi encerrada.", 409);
+    }
+    Cobranca paga = aplicar(cobranca.getId(), StatusNaOperadora.so(ProvedorDePagamento.Status.PAGA), "MANUAL",
+        "CONFIRMADO_PELO_CAIXA", "confirmar:" + cobranca.getId(), null);
+    auditar(tenantId, "PAGAMENTO_PIX_CONFIRMADO_PELO_CAIXA", paga);
+    return paraDto(paga);
   }
 
   /** Estorno total (valor nulo) ou parcial, na operadora. So cobranca PAGA (ou ja parcialmente estornada). */

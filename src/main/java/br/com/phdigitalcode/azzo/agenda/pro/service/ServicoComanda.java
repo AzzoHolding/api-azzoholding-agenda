@@ -2254,6 +2254,7 @@ public class ServicoComanda {
           r.parcelas = c.getParcelas();
           r.motivoRecusa = c.getMotivoRecusa();
           r.comprovante = c.getComprovanteCliente();
+          r.confirmacaoManual = "PIX_CHAVE".equals(c.getProvedor());
           if (r.pixPayload == null) r.pixPayload = c.getPixCopiaECola();
         });
       }

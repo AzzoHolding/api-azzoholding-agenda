@@ -157,6 +157,8 @@ public final class ComandaDtos {
     public String motivoRecusa;
     /** TEF: a via do cliente do comprovante, para reimprimir. */
     public String comprovante;
+    /** Pix na chave do salao: o caixa confirma o recebimento ("Recebi"); nao vem aviso. */
+    public boolean confirmacaoManual;
   }
 
   public static class ComandaResponse {

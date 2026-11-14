@@ -140,6 +140,7 @@ class PagamentosIntegrationTest {
   @Autowired private Ouvinte ouvinte;
   @Autowired private JdbcTemplate jdbc;
   @Autowired private ServicoDoConectorTef conector;
+  @Autowired private ServicoDeContasDePagamento contasDoSalao;
   @Autowired private br.com.phdigitalcode.azzo.agenda.pro.repository.CobrancaRepository cobrancas;
 
   private ServicoDePagamentos.NovaCobranca pix(String chave) {
@@ -354,6 +355,90 @@ class PagamentosIntegrationTest {
     jdbc.update("UPDATE cobrancas SET created_at = now() - interval '11 minutes' WHERE id = ?::uuid", parada.id);
     assertThat(conector.expirarSemResposta()).isGreaterThanOrEqualTo(1);
     assertThat(jdbc.queryForObject("SELECT status FROM cobrancas WHERE id = ?::uuid", String.class, parada.id)).isEqualTo("EXPIRADA");
+  }
+
+  @Test
+  void pixNaChaveDoSalaoGeraOQrComOValorESoOCaixaConfirma() {
+    UUID tenant = criarTenant();
+    ContaDePagamento conta = new ContaDePagamento();
+    conta.setTenantId(tenant);
+    conta.setProvedor("PIX_CHAVE");
+    conta.setApelido("Pix na minha chave");
+    conta.setAmbiente("PROD");
+    conta.setCredenciaisEnc(cifra.encrypt(
+        "{\"tipoDaChave\":\"CPF\",\"chave\":\"123.456.789-09\",\"nome\":\"Salão da Ana\",\"cidade\":\"Campinas\"}"));
+    conta.setWebhookToken("token-" + UUID.randomUUID());
+    conta.setPadraoPara("PIX");
+    contas.save(conta);
+
+    // Sem cliente: o Pix na chave nao pede CPF de quem paga.
+    var cobranca = pagamentos.criar(tenant, new ServicoDePagamentos.NovaCobranca("TESTE", null, "PIX", new BigDecimal("42.50"), 1,
+        "Comanda", null, null, null, null, null, "pix-chave-" + tenant));
+    assertThat(cobranca.status).isEqualTo("AGUARDANDO");
+    assertThat(cobranca.pixCopiaECola).startsWith("000201").contains("br.gov.bcb.pix0111" + "12345678909")
+        .contains("540542.50").contains("Salao da Ana");
+
+    // A consulta de reserva nao inventa pagamento.
+    pagamentos.consultarPendentes();
+    assertThat(jdbc.queryForObject("SELECT status FROM cobrancas WHERE id = ?::uuid", String.class, cobranca.id)).isEqualTo("AGUARDANDO");
+
+    // Outro salao nao confirma; o caixa confirma uma vez (repetir nao duplica o evento).
+    assertThatThrownBy(() -> pagamentos.confirmarRecebimento(criarTenant(), UUID.fromString(cobranca.id)))
+        .isInstanceOf(ApiClientErrorException.class);
+    assertThat(pagamentos.confirmarRecebimento(tenant, UUID.fromString(cobranca.id)).status).isEqualTo("PAGA");
+    assertThat(pagamentos.confirmarRecebimento(tenant, UUID.fromString(cobranca.id)).status).isEqualTo("PAGA");
+    assertThat(jdbc.queryForObject("SELECT count(*) FROM eventos_de_cobranca WHERE cobranca_id = ?::uuid AND tipo = 'CONFIRMADO_PELO_CAIXA'",
+        Integer.class, cobranca.id)).isEqualTo(1);
+    assertThat(ouvinte.recebidos).anyMatch(e -> e.cobrancaId().toString().equals(cobranca.id) && "PAGA".equals(e.statusNovo()));
+
+    // Cobranca de operadora nao se confirma pelo caixa.
+    ContaDePagamento outra = new ContaDePagamento();
+    outra.setTenantId(tenant);
+    outra.setProvedor("GETNET");
+    outra.setApelido("Operadora");
+    outra.setAmbiente("SANDBOX");
+    outra.setCredenciaisEnc(cifra.encrypt("{\"apiKey\":\"k\"}"));
+    outra.setWebhookToken("token-" + UUID.randomUUID());
+    contas.save(outra);
+    var daOperadora = pagamentos.criar(tenant, new ServicoDePagamentos.NovaCobranca("TESTE", null, "PIX", BigDecimal.TEN, 1, "x",
+        new ProvedorDePagamento.Pagador(null, "Ana", null, null, null), outra.getId(), null, null, null, "op-" + tenant));
+    assertThatThrownBy(() -> pagamentos.confirmarRecebimento(tenant, UUID.fromString(daOperadora.id)))
+        .isInstanceOf(ApiClientErrorException.class).hasMessageContaining("operadora");
+  }
+
+  /**
+   * Conectar pelo caminho da tela: a conta e conferida ANTES de ser gravada (sem id ainda). Antes
+   * da correcao de 14/11, isso dava NullPointerException em qualquer operadora.
+   */
+  @Test
+  void conectarPixNaChaveConfereAntesDeGravarEMascaraAChave() {
+    UUID tenant = criarTenant();
+    var requisicao = new org.springframework.mock.web.MockHttpServletRequest();
+    requisicao.setAttribute(br.com.phdigitalcode.azzo.agenda.pro.security.InternalApiKeyFilter.ATRIBUTO_CHAMADA_INTERNA, Boolean.TRUE);
+    requisicao.addHeader("X-Tenant-Id", tenant.toString());
+    org.springframework.web.context.request.RequestContextHolder.setRequestAttributes(
+        new org.springframework.web.context.request.ServletRequestAttributes(requisicao));
+    try {
+      var pedido = new PagamentosDtos.ContaRequest();
+      pedido.provedor = "PIX_CHAVE";
+      pedido.credenciais = new java.util.HashMap<>(Map.of("tipoDaChave", "CNPJ", "chave", "11.222.333/0001-82",
+          "nome", "Salão Teste", "cidade", "Campinas"));
+      pedido.padraoPara = List.of("PIX");
+      assertThatThrownBy(() -> contasDoSalao.conectar(pedido)).isInstanceOf(ApiClientErrorException.class)
+          .hasMessageContaining("CNPJ inválido");
+
+      pedido.credenciais.put("chave", "11.222.333/0001-81");
+      PagamentosDtos.Conta conta = contasDoSalao.conectar(pedido);
+      assertThat(conta.id).isNotBlank();
+      assertThat(conta.credenciaisMascara).isEqualTo("CNPJ ••••0181");
+      assertThat(conta.padraoPara).containsExactly("PIX");
+      PagamentosDtos.Disponiveis disponiveis = contasDoSalao.disponiveis();
+      assertThat(disponiveis.pix).isTrue();
+      assertThat(disponiveis.pixExigeCliente).isFalse();
+      assertThat(disponiveis.pixConfirmacaoManual).isTrue();
+    } finally {
+      org.springframework.web.context.request.RequestContextHolder.resetRequestAttributes();
+    }
   }
 
   @Test
