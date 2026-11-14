@@ -45,7 +45,31 @@ public final class TenantLoyaltyDtos {
     public BigDecimal pontosPorResgateReal;
   }
 
+  /** Os pontos da cliente, para a ficha (relatorio de 14/11, Critico 3). */
   public static class ClientLoyaltyResponse {
+    /** Pode ser negativo: estorno aceito pelo dono depois que a cliente gastou os pontos. */
     public int saldo;
+    public java.math.BigDecimal valorEmReais;
+    public boolean programaAtivo;
+    /** Validade definida pelo dono do salao; vazio = nao vence. */
+    public Integer validadeDias;
+    public java.util.List<Vencimento> aVencer = new java.util.ArrayList<>();
+    public java.util.List<Movimento> extrato = new java.util.ArrayList<>();
+  }
+
+  public static class Vencimento {
+    public int pontos;
+    public String expiraEm;
+  }
+
+  public static class Movimento {
+    /** SALDO_INICIAL, CREDITO, RESGATE, DEVOLUCAO, ESTORNO, EXPIRACAO, AJUSTE. */
+    public String tipo;
+    public int pontos;
+    public int saldoApos;
+    public String comandaId;
+    public String motivo;
+    public String expiraEm;
+    public String createdAt;
   }
 }

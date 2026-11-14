@@ -158,6 +158,14 @@ public class ServicoPackages {
     }
   }
 
+  /** Setter: os testes que montam o servico a mao seguem sem os usos. */
+  private br.com.phdigitalcode.azzo.agenda.pro.repository.ComandaItemRepository comandaItemRepository;
+
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setComandaItemRepository(br.com.phdigitalcode.azzo.agenda.pro.repository.ComandaItemRepository repo) {
+    this.comandaItemRepository = repo;
+  }
+
   ServicePackage buscarOuFalhar(UUID id, UUID tenantId) {
     return servicePackageRepository
         .findByIdAndTenantId(id, tenantId)
@@ -187,6 +195,24 @@ public class ServicoPackages {
     return r;
   }
 
+  private java.util.Map<UUID, List<PackageDtos.UsoDoPacote>> usosPorSaldo(
+      UUID tenantId, List<br.com.phdigitalcode.azzo.agenda.pro.entity.ClientPackageBalance> saldos) {
+    java.util.Map<UUID, List<PackageDtos.UsoDoPacote>> usos = new java.util.HashMap<>();
+    if (comandaItemRepository == null || saldos.isEmpty() || tenantId == null) return usos;
+    var ids = saldos.stream().map(br.com.phdigitalcode.azzo.agenda.pro.entity.ClientPackageBalance::getId).toList();
+    for (Object[] linha : comandaItemRepository.usosDePacote(tenantId, ids)) {
+      var item = (br.com.phdigitalcode.azzo.agenda.pro.entity.ComandaItem) linha[0];
+      java.time.Instant fechada = (java.time.Instant) linha[1];
+      PackageDtos.UsoDoPacote uso = new PackageDtos.UsoDoPacote();
+      uso.data = fechada == null ? null : fechada.toString();
+      uso.servico = item.getDescricao();
+      uso.sessoes = item.getQuantidade() == null ? 1 : item.getQuantidade().intValue();
+      uso.comandaId = item.getComandaId().toString();
+      usos.computeIfAbsent(item.getCoberturaSaldoId(), k -> new java.util.ArrayList<>()).add(uso);
+    }
+    return usos;
+  }
+
   private PackageDtos.ClientPackagePurchaseResponse toPurchaseResponse(ClientPackagePurchase compra) {
     PackageDtos.ClientPackagePurchaseResponse r = new PackageDtos.ClientPackagePurchaseResponse();
     r.id = compra.getId().toString();
@@ -194,12 +220,16 @@ public class ServicoPackages {
     r.packageNome = compra.getPackageNome();
     r.precoPago = compra.getPrecoPago();
     r.createdAt = compra.getCreatedAt() != null ? compra.getCreatedAt().toString() : null;
+    var saldosDaCompra = clientPackageBalanceRepository.findByPurchaseId(compra.getId());
+    java.util.Map<UUID, List<PackageDtos.UsoDoPacote>> usos = usosPorSaldo(compra.getTenantId(), saldosDaCompra);
     r.saldos =
-        clientPackageBalanceRepository.findByPurchaseId(compra.getId()).stream()
+        saldosDaCompra.stream()
             .map(
                 saldo -> {
                   PackageDtos.ClientPackageBalanceResponse saldoResponse =
                       new PackageDtos.ClientPackageBalanceResponse();
+                  saldoResponse.id = saldo.getId() == null ? null : saldo.getId().toString();
+                  saldoResponse.usos = usos.getOrDefault(saldo.getId(), List.of());
                   saldoResponse.serviceId = saldo.getServiceId().toString();
                   saldoResponse.serviceNome = saldo.getServiceNome();
                   saldoResponse.sessoesTotais = saldo.getSessoesTotais();

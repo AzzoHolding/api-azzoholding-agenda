@@ -20,6 +20,9 @@ public interface MovimentoDePontosRepository extends JpaRepository<MovimentoDePo
       + " order by case when m.expiraEm is null then 1 else 0 end, m.expiraEm, m.createdAt")
   List<MovimentoDePontos> creditosComSaldo(@Param("tenantId") UUID tenantId, @Param("clientId") UUID clientId);
 
+  /** Extrato da ficha: os ultimos movimentos. */
+  List<MovimentoDePontos> findTop50ByTenantIdAndClientIdOrderByCreatedAtDesc(UUID tenantId, UUID clientId);
+
   /** O credito que uma venda gerou (para o estorno saber quanto dele ja foi usado). */
   Optional<MovimentoDePontos> findFirstByTenantIdAndComandaIdAndTipo(UUID tenantId, UUID comandaId, String tipo);
 }

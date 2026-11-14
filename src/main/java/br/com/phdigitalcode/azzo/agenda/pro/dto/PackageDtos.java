@@ -64,11 +64,21 @@ public final class PackageDtos {
   }
 
   public static class ClientPackageBalanceResponse {
+    public String id;
     public String serviceId;
     public String serviceNome;
     public int sessoesTotais;
     public int sessoesUsadas;
     public int sessoesDisponiveis;
+    /** Atendimentos feitos com este saldo (comandas fechadas), do mais recente ao mais antigo. */
+    public List<UsoDoPacote> usos = new ArrayList<>();
+  }
+
+  public static class UsoDoPacote {
+    public String data;
+    public String servico;
+    public int sessoes;
+    public String comandaId;
   }
 
   public static class ClientPackagePurchaseResponse {
