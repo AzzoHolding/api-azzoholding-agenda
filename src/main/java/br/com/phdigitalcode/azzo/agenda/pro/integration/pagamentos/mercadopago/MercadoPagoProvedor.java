@@ -73,7 +73,7 @@ public class MercadoPagoProvedor implements ProvedorDePagamento {
 
   @Override
   public Set<Capacidade> capacidades() {
-    return EnumSet.of(Capacidade.PIX, Capacidade.LINK, Capacidade.MAQUININHA_NUVEM, Capacidade.ESTORNO);
+    return EnumSet.of(Capacidade.PIX, Capacidade.LINK, Capacidade.MAQUININHA_NUVEM, Capacidade.ESTORNO, Capacidade.RECORRENTE);
   }
 
   @Override
@@ -185,6 +185,14 @@ public class MercadoPagoProvedor implements ProvedorDePagamento {
     if (segredo != null && !segredo.isBlank()) {
       conferirAssinatura(segredo, cabecalhos.get("x-signature"), cabecalhos.get("x-request-id"), idDaOrder);
     }
+    String tipoDoAviso = primeiroNaoVazio(texto(raiz, "type"), cabecalhos.get("query.type"));
+    if (tipoDoAviso != null && tipoDoAviso.startsWith("subscription_")) {
+      // Assinatura: o mesmo "updated" chega a cada mudanca; aplicar e idempotente (contador de
+      // cobrancas), entao cada aviso vale como evento proprio.
+      return new AvisoDaOperadora(tipoDoAviso + ":" + idDaOrder + ":"
+          + primeiroNaoVazio(cabecalhos.get("x-request-id"), texto(raiz, "id"), String.valueOf(System.nanoTime())),
+          tipoDoAviso, null, null);
+    }
     if (!"order".equals(texto(raiz, "type")) && !"order".equals(cabecalhos.get("query.type"))) {
       // Outros temas (reclamacoes, vinculacao...) nao mudam cobranca: guardados e ignorados.
       return new AvisoDaOperadora(texto(raiz, "action") + ":" + idDaOrder, texto(raiz, "action"), null, null);
@@ -225,6 +233,113 @@ public class MercadoPagoProvedor implements ProvedorDePagamento {
     } catch (RestClientResponseException e) {
       throw new FalhaNaOperadora(mensagem(e, "colocar a maquininha em modo integrado (PDV)"), e);
     }
+  }
+
+  // ---- assinatura no cartao (Fase 7): preapproval sem plano ----------------------------------
+
+  /**
+   * {@code POST /preapproval} com status {@code pending}: o Mercado Pago devolve o
+   * {@code init_point}, onde a cliente entra com o cartao. A partir dai, ele cobra todo mes.
+   */
+  @Override
+  public AssinaturaCriada criarAssinatura(Conta conta, PedidoDeAssinatura pedido) {
+    try {
+      JsonNode r = cliente(conta).post().uri("/preapproval")
+          .header("X-Idempotency-Key", "assinatura-" + pedido.referencia())
+          .contentType(MediaType.APPLICATION_JSON).body(preapproval(pedido)).retrieve().body(JsonNode.class);
+      String link = primeiroNaoVazio(texto(r, "init_point"), texto(r, "sandbox_init_point"));
+      if (texto(r, "id") == null || link == null) {
+        throw new FalhaNaOperadora("O Mercado Pago não devolveu o link para cadastrar o cartão.", null);
+      }
+      return new AssinaturaCriada(texto(r, "id"), link);
+    } catch (RestClientResponseException e) {
+      throw new FalhaNaOperadora(mensagem(e, "criar a assinatura"), e);
+    } catch (RestClientException e) {
+      throw new FalhaNaOperadora("Não foi possível falar com o Mercado Pago agora. Tente de novo em instantes.", e);
+    }
+  }
+
+  @Override
+  public SituacaoDaAssinatura consultarAssinatura(Conta conta, String idNaOperadora) {
+    try {
+      return situacao(cliente(conta).get().uri("/preapproval/{id}", idNaOperadora).retrieve().body(JsonNode.class));
+    } catch (RestClientException e) {
+      throw new FalhaNaOperadora("Não foi possível consultar a assinatura no Mercado Pago agora.", e);
+    }
+  }
+
+  @Override
+  public void cancelarAssinatura(Conta conta, String idNaOperadora) {
+    try {
+      cliente(conta).put().uri("/preapproval/{id}", idNaOperadora).contentType(MediaType.APPLICATION_JSON)
+          .body(Map.of("status", "cancelled")).retrieve().toBodilessEntity();
+    } catch (RestClientResponseException e) {
+      throw new FalhaNaOperadora(mensagem(e, "cancelar a assinatura"), e);
+    }
+  }
+
+  /**
+   * Avisos de assinatura: {@code subscription_preapproval} (o {@code data.id} e a assinatura) e
+   * {@code subscription_authorized_payment} (o {@code data.id} e a fatura, que aponta para a
+   * assinatura em {@code preapproval_id}).
+   */
+  @Override
+  public String assinaturaDoAviso(Conta conta, Map<String, String> cabecalhos, String corpo) {
+    JsonNode raiz;
+    try {
+      raiz = json.readTree(corpo);
+    } catch (Exception e) {
+      return null;
+    }
+    String tipo = primeiroNaoVazio(texto(raiz, "type"), cabecalhos.get("query.type"), cabecalhos.get("query.topic"));
+    String id = primeiroNaoVazio(cabecalhos.get("query.data.id"), texto(raiz.path("data"), "id"), cabecalhos.get("query.id"));
+    if (tipo == null || id == null) return null;
+    if (tipo.equals("subscription_preapproval")) return id;
+    if (tipo.equals("subscription_authorized_payment")) {
+      try {
+        return texto(cliente(conta).get().uri("/authorized_payments/{id}", id).retrieve().body(JsonNode.class), "preapproval_id");
+      } catch (RestClientException e) {
+        throw new FalhaNaOperadora("Não foi possível consultar a fatura da assinatura no Mercado Pago agora.", e);
+      }
+    }
+    return null;
+  }
+
+  static Map<String, Object> preapproval(PedidoDeAssinatura pedido) {
+    Map<String, Object> recorrencia = new LinkedHashMap<>();
+    recorrencia.put("frequency", 1);
+    recorrencia.put("frequency_type", "months");
+    recorrencia.put("transaction_amount", pedido.valorMensal().setScale(2, RoundingMode.HALF_UP));
+    recorrencia.put("currency_id", "BRL");
+    Map<String, Object> corpo = new LinkedHashMap<>();
+    corpo.put("reason", limitar(pedido.descricao(), 120));
+    corpo.put("external_reference", pedido.referencia());
+    corpo.put("payer_email", pedido.emailDoPagador() == null || pedido.emailDoPagador().isBlank()
+        ? "assinatura-" + pedido.referencia().substring(0, 8) + "@clientes.azzoholding.com.br"
+        : pedido.emailDoPagador().trim());
+    corpo.put("auto_recurring", recorrencia);
+    corpo.put("back_url", pedido.voltarPara());
+    corpo.put("status", "pending");
+    return corpo;
+  }
+
+  /**
+   * {@code pending} = sem cartao ainda; {@code authorized} = ativa; {@code paused}, {@code cancelled}.
+   * As cobrancas pagas vem de {@code summarized.charged_quantity}; o semaforo vermelho (ou
+   * amarelo) diz que a ultima cobranca falhou.
+   */
+  static SituacaoDaAssinatura situacao(JsonNode p) {
+    String s = texto(p, "status");
+    SituacaoDeAssinatura situacao = switch (s == null ? "" : s) {
+      case "authorized" -> SituacaoDeAssinatura.ATIVA;
+      case "paused" -> SituacaoDeAssinatura.PAUSADA;
+      case "cancelled", "canceled" -> SituacaoDeAssinatura.CANCELADA;
+      default -> SituacaoDeAssinatura.AGUARDANDO_CARTAO;
+    };
+    JsonNode resumo = p.path("summarized");
+    int pagas = resumo.path("charged_quantity").asInt(0);
+    String semaforo = texto(resumo, "semaphore");
+    return new SituacaoDaAssinatura(situacao, pagas, "red".equals(semaforo) || "yellow".equals(semaforo));
   }
 
   // ---- corpos das orders ---------------------------------------------------------------------

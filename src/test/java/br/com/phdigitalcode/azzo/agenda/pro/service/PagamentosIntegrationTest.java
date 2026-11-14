@@ -90,7 +90,20 @@ class PagamentosIntegrationTest {
 
     public String codigo() { return "GETNET"; }
     public String nome() { return "Operadora de teste"; }
-    public Set<Capacidade> capacidades() { return EnumSet.of(Capacidade.PIX, Capacidade.ESTORNO); }
+    public Set<Capacidade> capacidades() { return EnumSet.of(Capacidade.PIX, Capacidade.ESTORNO, Capacidade.RECORRENTE); }
+
+    volatile SituacaoDaAssinatura situacaoDaAssinatura = new SituacaoDaAssinatura(SituacaoDeAssinatura.AGUARDANDO_CARTAO, 0, false);
+
+    public SituacaoDaAssinatura consultarAssinatura(Conta conta, String id) { return situacaoDaAssinatura; }
+
+    public String assinaturaDoAviso(Conta conta, Map<String, String> cabecalhos, String corpo) {
+      try {
+        String a = new ObjectMapper().readTree(corpo).path("assinatura").asText("");
+        return a.isBlank() ? null : a;
+      } catch (Exception e) {
+        return null;
+      }
+    }
     public List<CampoDeCredencial> camposDeCredencial() { return List.of(new CampoDeCredencial("apiKey", "Chave", true)); }
     public ResultadoValidacao validarCredenciais(Conta conta) { return new ResultadoValidacao(true, "ok"); }
 
@@ -108,6 +121,7 @@ class PagamentosIntegrationTest {
     public AvisoDaOperadora lerAviso(Conta conta, Map<String, String> cabecalhos, String corpo) {
       try {
         JsonNode n = new ObjectMapper().readTree(corpo);
+        if (n.has("assinatura")) return new AvisoDaOperadora(n.path("evento").asText(), "assinatura", null, null);
         boolean semTaxa = n.path("semTaxa").asBoolean(false);
         return new AvisoDaOperadora(n.path("evento").asText(), "pagamento", n.path("cobranca").asText(),
             new StatusNaOperadora(Status.valueOf(n.path("status").asText()), BigDecimal.TEN,
@@ -221,6 +235,43 @@ class PagamentosIntegrationTest {
     assertThat(linha.get("previsao_recebimento").toString()).isEqualTo(hoje.plusDays(2).toString());
     assertThat(cobrancas.recebiveis(tenant, hoje, hoje.plusDays(5))).extracting(c -> c.getId().toString()).containsExactly(criada.id);
     assertThat(cobrancas.pagasSemPrevisao(tenant)).isZero();
+  }
+
+  /** Fase 7: o aviso de assinatura leva a operadora a ser consultada; a mensalidade paga ativa o clube. */
+  @Test
+  void avisoDeAssinaturaPagaAtivaOClubeUmaVezSo() {
+    UUID tenant = criarTenant();
+    ContaDePagamento conta = new ContaDePagamento();
+    conta.setTenantId(tenant);
+    conta.setProvedor("GETNET");
+    conta.setApelido("Online");
+    conta.setAmbiente("SANDBOX");
+    conta.setCredenciaisEnc(cifra.encrypt("{\"apiKey\":\"chave-de-teste\"}"));
+    conta.setWebhookToken("token-" + UUID.randomUUID());
+    conta.setPadraoPara("ONLINE");
+    contas.save(conta);
+    UUID cliente = UUID.randomUUID();
+    jdbc.update("INSERT INTO clients (id, tenant_id, name) VALUES (?, ?, 'Ana')", cliente, tenant);
+    UUID membership = UUID.randomUUID();
+    String assinatura = "sub-" + membership.toString().substring(0, 8);
+    jdbc.update("INSERT INTO client_memberships (id, tenant_id, client_id, plan_nome, preco_mensal, status, period_start, period_end, "
+        + "conta_pagamento_id, provedor_recorrencia, assinatura_na_operadora, link_do_cartao, created_at, updated_at) "
+        + "VALUES (?, ?, ?, 'Clube', 89.90, 'AGUARDANDO_CARTAO', now(), now(), ?, 'GETNET', ?, 'https://op/cartao', now(), now())",
+        membership, tenant, cliente, conta.getId(), assinatura);
+
+    // Cartao cadastrado e primeira mensalidade paga: o aviso chega, a operadora e consultada.
+    operadora.situacaoDaAssinatura = new ProvedorDePagamento.SituacaoDaAssinatura(ProvedorDePagamento.SituacaoDeAssinatura.ATIVA, 1, false);
+    pagamentos.receberAviso("getnet", conta.getWebhookToken(), Map.of(),
+        "{\"evento\":\"sub-evt-1\",\"assinatura\":\"" + assinatura + "\"}");
+    Map<String, Object> linha = jdbc.queryForMap("SELECT * FROM client_memberships WHERE id = ?", membership);
+    assertThat(linha.get("status")).isEqualTo("ATIVA");
+    assertThat(linha.get("cobrancas_pagas_na_operadora")).isEqualTo(1);
+    Object fim = linha.get("period_end");
+
+    // Outro aviso sem cobranca nova: nao renova de novo.
+    pagamentos.receberAviso("getnet", conta.getWebhookToken(), Map.of(),
+        "{\"evento\":\"sub-evt-2\",\"assinatura\":\"" + assinatura + "\"}");
+    assertThat(jdbc.queryForObject("SELECT period_end FROM client_memberships WHERE id = ?", Object.class, membership)).isEqualTo(fim);
   }
 
   @Test

@@ -272,6 +272,15 @@ public class ServicoDePagamentos {
     String chave = conta.getProvedor() + ":" + aviso.idDoEvento();
     if (eventos.existsByIdempotencyKey(chave)) return;
 
+    // Fase 7: aviso de assinatura no cartao (nao de cobranca) — o clube reconsulta e aplica.
+    String assinatura = aviso.idNaOperadora() == null ? provedor.assinaturaDoAviso(servicoDeContas.abrir(conta), cabecalhos, corpo) : null;
+    if (assinatura != null) {
+      transacao.executeWithoutResult(s -> eventos.save(evento(conta, null, "WEBHOOK", "ASSINATURA", aviso.status(), chave, corpo, true,
+          "Assinatura " + assinatura)));
+      publicador.publishEvent(new ServicoDeAssinaturasNoCartao.AssinaturaAvisada(conta.getTenantId(), conta.getProvedor(), assinatura));
+      return;
+    }
+
     Optional<Cobranca> cobranca = aviso.idNaOperadora() == null ? Optional.empty()
         : cobrancas.findByProvedorAndIdNaOperadora(conta.getProvedor(), aviso.idNaOperadora())
             .filter(c -> c.getTenantId().equals(conta.getTenantId()));

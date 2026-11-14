@@ -27,6 +27,8 @@ public class ClientMembership {
   public static final String STATUS_INADIMPLENTE = "INADIMPLENTE";
   public static final String STATUS_SUSPENSA = "SUSPENSA";
   public static final String STATUS_CANCELADA = "CANCELADA";
+  /** Criada na operadora, esperando a cliente cadastrar o cartao (V170). Beneficios ainda nao valem. */
+  public static final String STATUS_AGUARDANDO_CARTAO = "AGUARDANDO_CARTAO";
 
   @Id
   @Column(name = "id", nullable = false)
@@ -53,6 +55,24 @@ public class ClientMembership {
 
   @Column(name = "asaas_subscription_id")
   private String asaasSubscriptionId;
+
+  /** Cartao recorrente (V170): a conta conectada, a operadora e o id da assinatura la. */
+  @Column(name = "conta_pagamento_id")
+  private UUID contaPagamentoId;
+
+  @Column(name = "provedor_recorrencia")
+  private String provedorRecorrencia;
+
+  @Column(name = "assinatura_na_operadora")
+  private String assinaturaNaOperadora;
+
+  /** Pagina da operadora onde a cliente cadastra o cartao. */
+  @Column(name = "link_do_cartao", columnDefinition = "TEXT")
+  private String linkDoCartao;
+
+  /** Quantas mensalidades a operadora ja cobrou e o Azzo ja aplicou (renova uma vez por cobranca). */
+  @Column(name = "cobrancas_pagas_na_operadora", nullable = false)
+  private int cobrancasPagasNaOperadora;
 
   @Column(name = "status", nullable = false)
   private String status = STATUS_ATIVA;

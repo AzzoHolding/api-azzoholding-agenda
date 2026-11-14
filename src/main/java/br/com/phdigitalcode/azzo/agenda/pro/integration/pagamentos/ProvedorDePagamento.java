@@ -62,6 +62,32 @@ public interface ProvedorDePagamento {
   /** Deixa a maquininha pronta para receber cobranca pela API (ex.: modo PDV na Point). */
   default void prepararTerminal(Conta conta, String serial) {}
 
+  // ---- assinatura no cartao recorrente (Fase 7) -----------------------------------------------
+
+  /**
+   * Cria a assinatura mensal na operadora. A cliente cadastra o cartao no {@code linkDoCartao}
+   * (pagina da operadora): o cartao nunca passa pelo Azzo.
+   */
+  default AssinaturaCriada criarAssinatura(Conta conta, PedidoDeAssinatura pedido) {
+    throw new NaoSuportado(codigo(), "assinatura no cartão");
+  }
+
+  default SituacaoDaAssinatura consultarAssinatura(Conta conta, String idNaOperadora) {
+    throw new NaoSuportado(codigo(), "assinatura no cartão");
+  }
+
+  default void cancelarAssinatura(Conta conta, String idNaOperadora) {
+    throw new NaoSuportado(codigo(), "assinatura no cartão");
+  }
+
+  /**
+   * O aviso e de assinatura (e nao de cobranca)? Devolve o id da assinatura na operadora, para o
+   * Azzo reconsultar, ou {@code null}. Chamado depois de {@link #lerAviso} (assinatura ja conferida).
+   */
+  default String assinaturaDoAviso(Conta conta, Map<String, String> cabecalhos, String corpo) {
+    return null;
+  }
+
   // ---- tipos ---------------------------------------------------------------------------------
 
   enum Capacidade { PIX, LINK, CARTAO_ONLINE, MAQUININHA_NUVEM, RECORRENTE, ESTORNO, ESTORNO_PARCIAL }
@@ -124,6 +150,20 @@ public interface ProvedorDePagamento {
   record AvisoDaOperadora(String idDoEvento, String tipo, String idNaOperadora, StatusNaOperadora status) {}
 
   record ResultadoValidacao(boolean valida, String mensagem) {}
+
+  /** {@code referencia}: o id da assinatura no Azzo. {@code voltarPara}: pagina depois do cartao. */
+  record PedidoDeAssinatura(String referencia, String descricao, BigDecimal valorMensal, String emailDoPagador, String voltarPara) {}
+
+  record AssinaturaCriada(String idNaOperadora, String linkDoCartao) {}
+
+  enum SituacaoDeAssinatura { AGUARDANDO_CARTAO, ATIVA, PAUSADA, CANCELADA }
+
+  /**
+   * {@code cobrancasPagas}: quantas mensalidades a operadora ja cobrou com sucesso — o Azzo renova
+   * uma vez por cobranca nova (idempotente: aviso repetido nao renova duas vezes).
+   * {@code emAtraso}: a ultima cobranca falhou.
+   */
+  record SituacaoDaAssinatura(SituacaoDeAssinatura situacao, int cobrancasPagas, boolean emAtraso) {}
 
   record Terminal(String serial, String modelo, String apelido) {}
 

@@ -116,4 +116,41 @@ class MercadoPagoProvedorTest {
     assertThatThrownBy(() -> mp.criarCobranca(conta(null), semTerminal)).isInstanceOf(ProvedorDePagamento.NaoSuportado.class);
     assertThatThrownBy(() -> mp.estornar(conta(null), "ORD1", BigDecimal.ONE)).isInstanceOf(ProvedorDePagamento.NaoSuportado.class);
   }
+
+  @Test
+  void assinaturaNoCartaoPendenteComValorMensalEReferencia() {
+    var corpo = MercadoPagoProvedor.preapproval(new ProvedorDePagamento.PedidoDeAssinatura(
+        "11111111-2222-3333-4444-555555555555", "Assinatura - Clube Ouro", new BigDecimal("89.9"), null, "https://salao.exemplo"));
+    assertThat(corpo).containsEntry("status", "pending").containsEntry("external_reference", "11111111-2222-3333-4444-555555555555")
+        .containsEntry("back_url", "https://salao.exemplo");
+    assertThat(corpo.get("auto_recurring").toString()).contains("frequency=1").contains("frequency_type=months")
+        .contains("transaction_amount=89.90").contains("currency_id=BRL");
+    assertThat(corpo.get("payer_email").toString()).endsWith("@clientes.azzoholding.com.br");
+  }
+
+  @Test
+  void situacaoDaAssinatura() throws Exception {
+    var ativa = MercadoPagoProvedor.situacao(json.readTree(
+        "{\"status\":\"authorized\",\"summarized\":{\"charged_quantity\":2,\"semaphore\":\"green\"}}"));
+    assertThat(ativa.situacao()).isEqualTo(ProvedorDePagamento.SituacaoDeAssinatura.ATIVA);
+    assertThat(ativa.cobrancasPagas()).isEqualTo(2);
+    assertThat(ativa.emAtraso()).isFalse();
+    assertThat(MercadoPagoProvedor.situacao(json.readTree("{\"status\":\"pending\"}")).situacao())
+        .isEqualTo(ProvedorDePagamento.SituacaoDeAssinatura.AGUARDANDO_CARTAO);
+    assertThat(MercadoPagoProvedor.situacao(json.readTree(
+        "{\"status\":\"authorized\",\"summarized\":{\"charged_quantity\":2,\"semaphore\":\"red\"}}")).emAtraso()).isTrue();
+    assertThat(MercadoPagoProvedor.situacao(json.readTree("{\"status\":\"cancelled\"}")).situacao())
+        .isEqualTo(ProvedorDePagamento.SituacaoDeAssinatura.CANCELADA);
+  }
+
+  @Test
+  void avisoDeAssinaturaNaoApontaParaCobrancaENaoSeDeduplicaPeloAction() {
+    String corpo = "{\"action\":\"updated\",\"type\":\"subscription_preapproval\",\"data\":{\"id\":\"pre1\"}}";
+    var a = mp.lerAviso(conta(null), Map.of("x-request-id", "r1"), corpo);
+    var b = mp.lerAviso(conta(null), Map.of("x-request-id", "r2"), corpo);
+    assertThat(a.idNaOperadora()).isNull();
+    assertThat(a.idDoEvento()).isNotEqualTo(b.idDoEvento());
+    assertThat(mp.assinaturaDoAviso(conta(null), Map.of(), corpo)).isEqualTo("pre1");
+    assertThat(mp.assinaturaDoAviso(conta(null), Map.of(), "{\"type\":\"order\",\"data\":{\"id\":\"o\"}}")).isNull();
+  }
 }

@@ -96,6 +96,10 @@ public class ServicoClientMemberships {
       cliente.setCpfCnpj(request.customerCpfCnpj.trim());
     }
 
+    if ("CARTAO".equalsIgnoreCase(request.formaDeCobranca)) {
+      return assinarNoCartao(tenantId, clientId, cliente, plano);
+    }
+
     String apiKey = tenantAsaasChargeService.resolveApiKeyAtivaOuFalhar(tenantId);
     tenantAsaasChargeService.ensureAsaasCustomer(apiKey, cliente);
 
@@ -141,6 +145,52 @@ public class ServicoClientMemberships {
     return toResponse(membership);
   }
 
+  /**
+   * Cartao recorrente (Fase 7): a assinatura nasce AGUARDANDO_CARTAO, com o link da operadora. Os
+   * saldos ja sao criados, mas so valem quando a primeira mensalidade for paga (a cobertura na
+   * comanda exige assinatura ATIVA).
+   */
+  private MembershipDtos.ClientMembershipResponse assinarNoCartao(
+      UUID tenantId, UUID clientId, Cliente cliente, MembershipPlan plano) {
+    if (assinaturasNoCartao == null) {
+      throw new IllegalArgumentException("Assinatura no cartão indisponível.");
+    }
+    Instant now = Instant.now();
+    ClientMembership membership = new ClientMembership();
+    membership.setTenantId(tenantId);
+    membership.setClientId(clientId);
+    membership.setPlanId(plano.getId());
+    membership.setPlanNome(plano.getNome());
+    membership.setPrecoMensal(plano.getPrecoMensal());
+    membership.setCumulativo(plano.isCumulativo());
+    membership.setPeriodStart(now);
+    membership.setPeriodEnd(now);
+    assinaturasNoCartao.criarNaOperadora(membership, cliente, plano);
+    clientMembershipRepository.save(membership);
+    criarSaldos(tenantId, membership, plano);
+    return toResponse(membership);
+  }
+
+  private void criarSaldos(UUID tenantId, ClientMembership membership, MembershipPlan plano) {
+    for (MembershipPlanBenefit beneficio : membershipPlanBenefitRepository.findByPlanId(plano.getId())) {
+      ClientMembershipBalance saldo = new ClientMembershipBalance();
+      saldo.setTenantId(tenantId);
+      saldo.setMembershipId(membership.getId());
+      saldo.setServiceId(beneficio.getServiceId());
+      saldo.setServiceNome(servicoRepository.findById(beneficio.getServiceId()).map(Servico::getName).orElse(null));
+      saldo.setQuantidadeMensal(beneficio.getQuantidadeMensal());
+      clientMembershipBalanceRepository.save(saldo);
+    }
+  }
+
+  private br.com.phdigitalcode.azzo.agenda.pro.service.ServicoDeAssinaturasNoCartao assinaturasNoCartao;
+
+  /** Setter (e nao construtor): os testes que montam este servico a mao seguem sem o cartao. */
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setAssinaturasNoCartao(br.com.phdigitalcode.azzo.agenda.pro.service.ServicoDeAssinaturasNoCartao assinaturasNoCartao) {
+    this.assinaturasNoCartao = assinaturasNoCartao;
+  }
+
   @Transactional
   public MembershipDtos.ClientMembershipResponse cancelar(UUID membershipId) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
@@ -161,9 +211,17 @@ public class ServicoClientMemberships {
       }
     }
 
+    if (membership.getAssinaturaNaOperadora() != null && assinaturasNoCartao != null) {
+      assinaturasNoCartao.cancelarNaOperadora(membership);
+    }
+
     // Nao revoga o periodo corrente (ja pago) -- so impede a renovacao. A transicao para
     // CANCELADA de fato acontece quando periodEnd vence (ClientMembershipCancellationScheduler).
     membership.setCancelAtPeriodEnd(true);
+    // Sem cartao cadastrado nao ha periodo pago: cancela ja.
+    if (ClientMembership.STATUS_AGUARDANDO_CARTAO.equals(membership.getStatus())) {
+      membership.setStatus(ClientMembership.STATUS_CANCELADA);
+    }
 
     return toResponse(membership);
   }
@@ -179,6 +237,9 @@ public class ServicoClientMemberships {
         membership.getPeriodStart() != null ? membership.getPeriodStart().toString() : null;
     r.periodEnd = membership.getPeriodEnd() != null ? membership.getPeriodEnd().toString() : null;
     r.cancelAtPeriodEnd = membership.isCancelAtPeriodEnd();
+    r.formaDeCobranca = membership.getAssinaturaNaOperadora() != null ? "CARTAO" : "PIX";
+    r.linkDoCartao = ClientMembership.STATUS_AGUARDANDO_CARTAO.equals(membership.getStatus())
+        ? membership.getLinkDoCartao() : null;
     r.saldos =
         clientMembershipBalanceRepository.findByMembershipId(membership.getId()).stream()
             .map(

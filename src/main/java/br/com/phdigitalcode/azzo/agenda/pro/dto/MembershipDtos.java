@@ -61,6 +61,12 @@ public final class MembershipDtos {
 
     /** Exigido pelo Asaas para a primeira cobranca do cliente, se ainda nao configurado. */
     public String customerCpfCnpj;
+
+    /**
+     * {@code PIX} (padrao: Pix mensal pelo Asaas, como antes) ou {@code CARTAO}: cartao recorrente
+     * pela operadora conectada (Fase 7) — a cliente recebe o link para cadastrar o cartao.
+     */
+    public String formaDeCobranca;
   }
 
   public static class BalanceResponse {
@@ -80,6 +86,10 @@ public final class MembershipDtos {
     public String periodStart;
     public String periodEnd;
     public boolean cancelAtPeriodEnd;
+    /** PIX ou CARTAO. */
+    public String formaDeCobranca;
+    /** Cartao recorrente esperando o cadastro do cartao: o link da operadora para mandar a cliente. */
+    public String linkDoCartao;
     public List<BalanceResponse> saldos = new ArrayList<>();
   }
 }
