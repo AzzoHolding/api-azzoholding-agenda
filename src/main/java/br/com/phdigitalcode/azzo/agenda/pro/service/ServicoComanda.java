@@ -724,9 +724,13 @@ public class ServicoComanda {
       }
     } else if (ComandaItem.COBERTURA_ASSINATURA.equals(item.getCoberturaTipo())) {
       ClientMembershipBalance saldo = saldoDeAssinaturaDoCliente(tenantId, comanda, item);
-      if (saldo.getQuantidadeMensal() - saldo.getUsadasNoPeriodo() < sessoes) {
-        throw new IllegalArgumentException(
-            "A assinatura já usou todas as sessões de " + saldo.getServiceNome() + " deste período.");
+      int restam = saldo.getQuantidadeMensal() - saldo.getUsadasNoPeriodo();
+      if (restam < sessoes) {
+        // Com sessao sobrando, dizer "usou todas" nao era verdade (teste de 14/11, mesmo caso do pacote).
+        throw new IllegalArgumentException(restam <= 0
+            ? "A assinatura já usou todas as sessões de " + saldo.getServiceNome() + " deste período."
+            : "Restam " + restam + (restam == 1 ? " sessão" : " sessões") + " de " + saldo.getServiceNome()
+                + " na assinatura neste período; este item pede " + sessoes + ".");
       }
     } else {
       throw new IllegalArgumentException("Tipo de cobertura inválido.");
