@@ -239,6 +239,8 @@ public class ServicoDeContasDePagamento implements ApplicationRunner {
     if (terminais != null) {
       for (ContaDePagamento conta : contas.findByTenantIdAndAtivoTrueOrderByCreatedAtAsc(tenantId)) {
         for (var t : terminais.findByTenantIdAndContaIdAndAtivoTrue(tenantId, conta.getId())) {
+          // Azzo Conector ainda nao pareado nao recebe venda: fora do PDV.
+          if ("TEF_LOCAL".equals(t.getTipo()) && t.getTokenHash() == null) continue;
           PagamentosDtos.Terminal td = new PagamentosDtos.Terminal();
           td.id = t.getId().toString();
           td.apelido = t.getApelido();
@@ -279,6 +281,9 @@ public class ServicoDeContasDePagamento implements ApplicationRunner {
       throw new ApiClientErrorException("Escolha a maquininha.", 400);
     }
     ProvedorDePagamento provedor = provedor(conta.getProvedor());
+    if ("TEF".equals(conta.getProvedor())) {
+      throw new ApiClientErrorException("No TEF, o caixa entra pelo pareamento do Azzo Conector.", 400);
+    }
     if (!provedor.capacidades().contains(ProvedorDePagamento.Capacidade.MAQUININHA_NUVEM)) {
       throw new ApiClientErrorException(provedor.nome() + " ainda não tem maquininha integrada pelo Azzo.", 400);
     }
@@ -481,6 +486,12 @@ public class ServicoDeContasDePagamento implements ApplicationRunner {
         td.serial = t.getSerial();
         td.modelo = t.getModelo();
         td.apelido = t.getApelido();
+        td.tipo = t.getTipo();
+        if ("TEF_LOCAL".equals(t.getTipo())) {
+          td.pareado = t.getTokenHash() != null;
+          td.nomeDoComputador = t.getNomeDoComputador();
+          td.ultimoContato = t.getUltimoContatoEm() == null ? null : t.getUltimoContatoEm().toString();
+        }
         return td;
       }).toList();
     }

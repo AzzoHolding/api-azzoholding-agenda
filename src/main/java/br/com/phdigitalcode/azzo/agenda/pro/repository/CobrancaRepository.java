@@ -34,6 +34,17 @@ public interface CobrancaRepository extends JpaRepository<Cobranca, UUID> {
       + "and c.previsaoRecebimento is null and c.origemTipo <> 'TESTE'")
   long pagasSemPrevisao(@Param("tenantId") UUID tenantId);
 
+  /** A proxima venda da fila do Azzo Conector: do terminal, esperando, ainda nao pega. */
+  @Query("select c from Cobranca c where c.terminalId = :terminalId and c.provedor = 'TEF' and c.status in ('CRIADA', 'AGUARDANDO') "
+      + "and c.conectorPegouEm is null order by c.createdAt asc")
+  List<Cobranca> filaDoConector(@Param("terminalId") UUID terminalId, Limit limit);
+
+  /** TEF sem resposta do Conector (computador desligado, pinpad sem cartao): expira. */
+  @Query("select c from Cobranca c where c.provedor = 'TEF' and c.status in ('CRIADA', 'AGUARDANDO') and c.createdAt < :antesDe")
+  List<Cobranca> tefSemResposta(@Param("antesDe") Instant antesDe, Limit limit);
+
+  Optional<Cobranca> findFirstByTerminalIdAndNsuOrderByCreatedAtDesc(UUID terminalId, String nsu);
+
   /** As que ainda esperam resposta, numa janela de tempo: a consulta de reserva olha estas. */
   @Query("select c from Cobranca c where c.status in ('CRIADA', 'AGUARDANDO') and c.idNaOperadora is not null "
       + "and c.createdAt < :antesDe and c.createdAt > :depoisDe order by c.createdAt asc")

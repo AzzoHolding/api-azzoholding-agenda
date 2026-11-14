@@ -45,6 +45,25 @@ public class TerminalDePagamento {
   @Column(name = "ativo", nullable = false)
   private boolean ativo = true;
 
+  /** Azzo Conector (TEF_LOCAL, V171): so os hashes do token e do codigo de pareamento. */
+  @Column(name = "token_hash")
+  private String tokenHash;
+
+  @Column(name = "codigo_pareamento_hash")
+  private String codigoPareamentoHash;
+
+  @Column(name = "codigo_expira_em")
+  private Instant codigoExpiraEm;
+
+  @Column(name = "pareado_em")
+  private Instant pareadoEm;
+
+  @Column(name = "ultimo_contato_em")
+  private Instant ultimoContatoEm;
+
+  @Column(name = "nome_do_computador")
+  private String nomeDoComputador;
+
   @Column(name = "created_at", nullable = false)
   private Instant createdAt;
 

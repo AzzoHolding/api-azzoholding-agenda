@@ -139,6 +139,7 @@ class PagamentosIntegrationTest {
   @Autowired private OperadoraDeTeste operadora;
   @Autowired private Ouvinte ouvinte;
   @Autowired private JdbcTemplate jdbc;
+  @Autowired private ServicoDoConectorTef conector;
   @Autowired private br.com.phdigitalcode.azzo.agenda.pro.repository.CobrancaRepository cobrancas;
 
   private ServicoDePagamentos.NovaCobranca pix(String chave) {
@@ -272,6 +273,87 @@ class PagamentosIntegrationTest {
     pagamentos.receberAviso("getnet", conta.getWebhookToken(), Map.of(),
         "{\"evento\":\"sub-evt-2\",\"assinatura\":\"" + assinatura + "\"}");
     assertThat(jdbc.queryForObject("SELECT period_end FROM client_memberships WHERE id = ?", Object.class, membership)).isEqualTo(fim);
+  }
+
+  /** Fase 6: o Azzo Conector pareia, pega a venda, aprova — e uma venda cancelada no caixa e desfeita. */
+  @Test
+  void conectorTefPareiaPegaAVendaEConfirmaSoOQueOAzzoAceita() {
+    UUID tenant = criarTenant();
+    ContaDePagamento conta = new ContaDePagamento();
+    conta.setTenantId(tenant);
+    conta.setProvedor("TEF");
+    conta.setApelido("TEF do balcão");
+    conta.setAmbiente("SANDBOX");
+    conta.setCredenciaisEnc(cifra.encrypt("{\"sistema\":\"PAYGO\",\"pdcPaygo\":\"12345\"}"));
+    conta.setWebhookToken("token-" + UUID.randomUUID());
+    conta.setPadraoPara("CARTAO_PRESENCIAL");
+    contas.save(conta);
+    UUID terminal = UUID.randomUUID();
+    String codigo = "ABCD" + terminal.toString().substring(0, 4).toUpperCase();
+    jdbc.update("INSERT INTO terminais_de_pagamento (id, tenant_id, conta_id, serial, apelido, tipo, codigo_pareamento_hash, codigo_expira_em) "
+        + "VALUES (?, ?, ?, ?, 'Recepção', 'TEF_LOCAL', ?, now() + interval '10 minutes')",
+        terminal, tenant, conta.getId(), "CONECTOR-" + terminal.toString().substring(0, 6), ServicoDoConectorTef.hash(codigo));
+
+    // Pareamento: codigo com hifen e minusculas vale; o token so sai aqui; o codigo nao serve de novo.
+    var pedidoDePareamento = new br.com.phdigitalcode.azzo.agenda.pro.dto.ConectorTefDtos.PedidoDePareamento();
+    pedidoDePareamento.codigo = (codigo.substring(0, 4) + "-" + codigo.substring(4)).toLowerCase();
+    pedidoDePareamento.nomeDoComputador = "CAIXA-01";
+    var pareado = conector.parear(pedidoDePareamento);
+    assertThat(pareado.token).hasSize(64);
+    assertThat(pareado.configuracao.sistema).isEqualTo("PAYGO");
+    assertThat(pareado.configuracao.parametros).containsEntry("pdcPaygo", "12345");
+    assertThat(jdbc.queryForObject("SELECT token_hash FROM terminais_de_pagamento WHERE id = ?", String.class, terminal))
+        .isEqualTo(ServicoDoConectorTef.hash(pareado.token)).isNotEqualTo(pareado.token);
+    assertThatThrownBy(() -> conector.parear(pedidoDePareamento)).isInstanceOf(ApiClientErrorException.class);
+    assertThatThrownBy(() -> conector.autenticar("Bearer " + "0".repeat(64))).isInstanceOf(ApiClientErrorException.class);
+    var t = conector.autenticar("Bearer " + pareado.token);
+
+    // Venda: o PDV cria, o Conector pega uma vez so, aprova e o Azzo manda confirmar.
+    var venda = pagamentos.criar(tenant, new ServicoDePagamentos.NovaCobranca("TESTE", null, "CREDITO", new BigDecimal("80.00"), 3,
+        "Comanda", null, conta.getId(), terminal, "CONECTOR", null, "tef-1-" + terminal));
+    assertThat(venda.status).isEqualTo("AGUARDANDO");
+    var pedido = conector.proximoPedido(t, java.time.Duration.ZERO);
+    assertThat(pedido.cobrancaId).isEqualTo(venda.id);
+    assertThat(pedido.valorEmCentavos).isEqualTo(8000L);
+    assertThat(pedido.parcelas).isEqualTo(3);
+    assertThat(conector.proximoPedido(t, java.time.Duration.ZERO)).isNull();
+
+    var aprovado = new br.com.phdigitalcode.azzo.agenda.pro.dto.ConectorTefDtos.Resultado();
+    aprovado.aprovado = true;
+    aprovado.nsu = "000123";
+    aprovado.bandeira = "Visa";
+    aprovado.cartaoFinal4 = "4111111111111111";
+    aprovado.comprovanteCliente = "VIA CLIENTE";
+    assertThat(conector.resultado(t, UUID.fromString(venda.id), aprovado).confirmar).isTrue();
+    assertThat(conector.resultado(t, UUID.fromString(venda.id), aprovado).confirmar).isTrue(); // repetido
+    Map<String, Object> linha = jdbc.queryForMap("SELECT * FROM cobrancas WHERE id = ?::uuid", venda.id);
+    assertThat(linha.get("status")).isEqualTo("PAGA");
+    assertThat(linha.get("nsu")).isEqualTo("000123");
+    assertThat(linha.get("cartao_final4")).isEqualTo("1111");
+    assertThat(linha.get("comprovante_cliente")).isEqualTo("VIA CLIENTE");
+
+    // O caixa cancelou enquanto a cliente passava o cartao: aprovado no pinpad, o Azzo manda DESFAZER.
+    var outra = pagamentos.criar(tenant, new ServicoDePagamentos.NovaCobranca("TESTE", null, "DEBITO", BigDecimal.TEN, 1,
+        "Comanda", null, conta.getId(), terminal, "CONECTOR", null, "tef-2-" + terminal));
+    conector.proximoPedido(t, java.time.Duration.ZERO);
+    pagamentos.aplicar(UUID.fromString(outra.id), ProvedorDePagamento.StatusNaOperadora.so(ProvedorDePagamento.Status.CANCELADA),
+        "MANUAL", "CANCELAR", "cancelar:" + outra.id, null);
+    assertThat(conector.situacao(t, UUID.fromString(outra.id)).cancelada).isTrue();
+    assertThat(conector.resultado(t, UUID.fromString(outra.id), aprovado).confirmar).isFalse();
+    assertThat(jdbc.queryForObject("SELECT status FROM cobrancas WHERE id = ?::uuid", String.class, outra.id)).isEqualTo("CANCELADA");
+
+    // Cancelada no pinpad pelo operador: a venda paga vira estornada.
+    var cancelamento = new br.com.phdigitalcode.azzo.agenda.pro.dto.ConectorTefDtos.CancelamentoNoPinpad();
+    cancelamento.nsu = "000123";
+    conector.canceladaNoPinpad(t, cancelamento);
+    assertThat(jdbc.queryForObject("SELECT status FROM cobrancas WHERE id = ?::uuid", String.class, venda.id)).isEqualTo("ESTORNADA");
+
+    // Sem resposta do Conector por mais de 10 minutos: expira.
+    var parada = pagamentos.criar(tenant, new ServicoDePagamentos.NovaCobranca("TESTE", null, "DEBITO", BigDecimal.TEN, 1,
+        "Comanda", null, conta.getId(), terminal, "CONECTOR", null, "tef-3-" + terminal));
+    jdbc.update("UPDATE cobrancas SET created_at = now() - interval '11 minutes' WHERE id = ?::uuid", parada.id);
+    assertThat(conector.expirarSemResposta()).isGreaterThanOrEqualTo(1);
+    assertThat(jdbc.queryForObject("SELECT status FROM cobrancas WHERE id = ?::uuid", String.class, parada.id)).isEqualTo("EXPIRADA");
   }
 
   @Test

@@ -72,6 +72,16 @@ public class Cobranca {
   @Column(name = "idempotency_key", nullable = false)
   private String idempotencyKey;
 
+  /** TEF (V171): quando o Azzo Conector pegou a venda, e os comprovantes que ele devolveu. */
+  @Column(name = "conector_pegou_em")
+  private Instant conectorPegouEm;
+
+  @Column(name = "comprovante_cliente", columnDefinition = "TEXT")
+  private String comprovanteCliente;
+
+  @Column(name = "comprovante_loja", columnDefinition = "TEXT")
+  private String comprovanteLoja;
+
   @Column(name = "pix_copia_e_cola", columnDefinition = "TEXT")
   private String pixCopiaECola;
 

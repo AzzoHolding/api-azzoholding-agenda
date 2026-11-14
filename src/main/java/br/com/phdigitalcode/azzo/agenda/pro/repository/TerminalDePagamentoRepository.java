@@ -17,4 +17,8 @@ public interface TerminalDePagamentoRepository extends JpaRepository<TerminalDeP
   Optional<TerminalDePagamento> findByIdAndTenantIdAndAtivoTrue(UUID id, UUID tenantId);
 
   Optional<TerminalDePagamento> findByContaIdAndSerial(UUID contaId, String serial);
+
+  Optional<TerminalDePagamento> findByTokenHashAndAtivoTrue(String tokenHash);
+
+  Optional<TerminalDePagamento> findByCodigoPareamentoHashAndAtivoTrue(String codigoPareamentoHash);
 }

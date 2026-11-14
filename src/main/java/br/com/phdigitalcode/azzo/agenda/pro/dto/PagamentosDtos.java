@@ -61,6 +61,13 @@ public final class PagamentosDtos {
     public String apelido;
     /** So nos ja adicionados ao salao. */
     public String id;
+    /** NUVEM ou TEF_LOCAL (Azzo Conector). */
+    public String tipo;
+    /** Azzo Conector: ja trocou o codigo pelo token? */
+    public Boolean pareado;
+    public String nomeDoComputador;
+    /** Ultima vez que o Conector falou com o Azzo. */
+    public String ultimoContato;
   }
 
   public static class TerminalRequest {

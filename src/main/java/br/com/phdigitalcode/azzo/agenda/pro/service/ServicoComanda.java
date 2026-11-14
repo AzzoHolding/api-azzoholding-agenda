@@ -2253,6 +2253,7 @@ public class ServicoComanda {
           r.bandeira = c.getBandeira();
           r.parcelas = c.getParcelas();
           r.motivoRecusa = c.getMotivoRecusa();
+          r.comprovante = c.getComprovanteCliente();
           if (r.pixPayload == null) r.pixPayload = c.getPixCopiaECola();
         });
       }

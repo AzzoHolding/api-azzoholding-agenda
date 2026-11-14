@@ -155,6 +155,8 @@ public final class ComandaDtos {
     public String bandeira;
     public Integer parcelas;
     public String motivoRecusa;
+    /** TEF: a via do cliente do comprovante, para reimprimir. */
+    public String comprovante;
   }
 
   public static class ComandaResponse {
