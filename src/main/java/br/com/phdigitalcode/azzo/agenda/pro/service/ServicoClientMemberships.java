@@ -66,6 +66,22 @@ public class ServicoClientMemberships {
     this.asaasClient = asaasClient;
   }
 
+  /** As assinaturas do salao (as 200 mais recentes), com o nome da cliente. */
+  @Transactional(readOnly = true)
+  public List<MembershipDtos.ClientMembershipResponse> listarDoSalao() {
+    UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    List<ClientMembership> lista = clientMembershipRepository.findByTenantIdOrderByCreatedAtDesc(
+        tenantId, org.springframework.data.domain.Limit.of(200));
+    java.util.Map<UUID, String> nomes = new java.util.HashMap<>();
+    clienteRepository.findAllById(lista.stream().map(ClientMembership::getClientId).distinct().toList())
+        .forEach(c -> nomes.put(c.getId(), c.getName()));
+    return lista.stream().map(m -> {
+      MembershipDtos.ClientMembershipResponse r = toResponse(m);
+      r.clientNome = nomes.get(m.getClientId());
+      return r;
+    }).toList();
+  }
+
   @Transactional(readOnly = true)
   public List<MembershipDtos.ClientMembershipResponse> listarDoCliente(UUID clientId) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
@@ -142,6 +158,7 @@ public class ServicoClientMemberships {
       clientMembershipBalanceRepository.save(saldo);
     }
 
+    auditar(tenantId, "CLUBE_ASSINATURA_CRIADA", membership);
     return toResponse(membership);
   }
 
@@ -168,6 +185,7 @@ public class ServicoClientMemberships {
     assinaturasNoCartao.criarNaOperadora(membership, cliente, plano);
     clientMembershipRepository.save(membership);
     criarSaldos(tenantId, membership, plano);
+    auditar(tenantId, "CLUBE_ASSINATURA_CRIADA", membership);
     return toResponse(membership);
   }
 
@@ -181,6 +199,32 @@ public class ServicoClientMemberships {
       saldo.setQuantidadeMensal(beneficio.getQuantidadeMensal());
       clientMembershipBalanceRepository.save(saldo);
     }
+  }
+
+  private br.com.phdigitalcode.azzo.agenda.pro.integration.AuditService auditService;
+
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setAuditService(br.com.phdigitalcode.azzo.agenda.pro.integration.AuditService auditService) {
+    this.auditService = auditService;
+  }
+
+  private void auditar(UUID tenantId, String acao, ClientMembership m) {
+    if (auditService == null) return;
+    var command = new br.com.phdigitalcode.azzo.agenda.pro.integration.AuditEventCommand();
+    command.tenantId = tenantId;
+    command.module = br.com.phdigitalcode.azzo.agenda.pro.integration.AuditConstants.Module.SETTINGS;
+    command.action = acao;
+    command.entityType = "CLIENT_MEMBERSHIP";
+    command.entityId = m.getId().toString();
+    command.sourceChannel = br.com.phdigitalcode.azzo.agenda.pro.integration.AuditConstants.SourceChannel.API;
+    java.util.Map<String, Object> depois = new java.util.LinkedHashMap<>();
+    depois.put("plano", m.getPlanNome());
+    depois.put("valorMensal", m.getPrecoMensal());
+    depois.put("situacao", m.getStatus());
+    depois.put("cobranca", m.getAssinaturaNaOperadora() != null ? "Cartão recorrente" : "Pix (Asaas)");
+    depois.put("cancelaAoFimDoPeriodo", m.isCancelAtPeriodEnd());
+    command.after = depois;
+    auditService.recordSuccess(command);
   }
 
   private br.com.phdigitalcode.azzo.agenda.pro.service.ServicoDeAssinaturasNoCartao assinaturasNoCartao;
@@ -222,6 +266,7 @@ public class ServicoClientMemberships {
     if (ClientMembership.STATUS_AGUARDANDO_CARTAO.equals(membership.getStatus())) {
       membership.setStatus(ClientMembership.STATUS_CANCELADA);
     }
+    auditar(tenantId, "CLUBE_ASSINATURA_CANCELADA", membership);
 
     return toResponse(membership);
   }
@@ -229,6 +274,7 @@ public class ServicoClientMemberships {
   private MembershipDtos.ClientMembershipResponse toResponse(ClientMembership membership) {
     MembershipDtos.ClientMembershipResponse r = new MembershipDtos.ClientMembershipResponse();
     r.id = membership.getId().toString();
+    r.clientId = membership.getClientId() != null ? membership.getClientId().toString() : null;
     r.planId = membership.getPlanId() != null ? membership.getPlanId().toString() : null;
     r.planNome = membership.getPlanNome();
     r.precoMensal = membership.getPrecoMensal();

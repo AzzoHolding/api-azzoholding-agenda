@@ -35,6 +35,8 @@ public interface ClientMembershipRepository extends JpaRepository<ClientMembersh
   List<ClientMembership> findPendentesDeCancelamento(
       @Param("statusCancelada") String statusCancelada, @Param("now") Instant now);
 
+  List<ClientMembership> findByTenantIdOrderByCreatedAtDesc(UUID tenantId, org.springframework.data.domain.Limit limit);
+
   Optional<ClientMembership> findByProvedorRecorrenciaAndAssinaturaNaOperadora(String provedor, String assinatura);
 
   /**

@@ -79,6 +79,9 @@ public final class MembershipDtos {
 
   public static class ClientMembershipResponse {
     public String id;
+    public String clientId;
+    /** Preenchido na lista do salao. */
+    public String clientNome;
     public String planId;
     public String planNome;
     public BigDecimal precoMensal;
