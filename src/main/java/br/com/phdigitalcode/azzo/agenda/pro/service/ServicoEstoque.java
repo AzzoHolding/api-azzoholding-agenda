@@ -476,6 +476,10 @@ public class ServicoEstoque {
   @Transactional(readOnly = true)
   public List<ServicoInsumoResponse> listarInsumosPorServico(String serviceId) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    // Sem o servico era NullPointerException e "erro inesperado" (analise de 15/11/2026, M7).
+    if (serviceId == null || serviceId.isBlank()) {
+      throw new IllegalArgumentException("Informe o serviço para listar os insumos.");
+    }
     List<ServicoInsumo> insumos =
         servicoInsumoRepository.findByTenantAndService(tenantId, UUID.fromString(serviceId));
     Map<UUID, ItemEstoque> itens =

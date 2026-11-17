@@ -2,6 +2,7 @@ package br.com.phdigitalcode.azzo.agenda.pro.dto.request;
 
 import java.math.BigDecimal;
 
+import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -21,6 +22,7 @@ public class RecurringTransactionRequest {
 
   @NotNull
   @DecimalMin(value = "0.01", message = "Valor deve ser maior que zero")
+  @DecimalMax(value = "9999999.99", message = "Valor acima do limite de R$ 9.999.999,99. Confira o valor digitado.")
   public BigDecimal amount;
 
   @NotBlank(message = "Forma de pagamento é obrigatória")

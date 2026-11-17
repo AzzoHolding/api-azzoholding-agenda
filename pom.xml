@@ -384,6 +384,15 @@
         <artifactId>maven-surefire-plugin</artifactId>
         <configuration>
           <argLine>-Xmx384m -Xss512k -XX:TieredStopAtLevel=1 -XX:ReservedCodeCacheSize=64m -XX:MaxMetaspaceSize=256m -XX:CompressedClassSpaceSize=64m -XX:+UseSerialGC</argLine>
+          <!--
+            Cada *IntegrationTest com configuracao propria sobe um contexto Spring inteiro, e o
+            cache padrao guarda 32: com o heap de 384m acima, o terceiro ou quarto estourava
+            (OutOfMemoryError em Pagamentos, Ranking e SystemAdmin - analise de 15/11/2026, M8).
+            Guardar 2 fecha os mais antigos; a suite unitaria quase nao usa contexto e nao muda.
+          -->
+          <systemPropertyVariables>
+            <spring.test.context.cache.maxSize>2</spring.test.context.cache.maxSize>
+          </systemPropertyVariables>
         </configuration>
       </plugin>
     </plugins>

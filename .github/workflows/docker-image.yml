@@ -63,11 +63,18 @@ jobs:
       # (node:22-bookworm, catthehacker/ubuntu:act-latest) NAO tem — verificado. O wrapper
       # baixa a propria versao do Maven e deixa o workflow portavel entre GitHub e Gitea.
       #
-      # Testes de integracao (*IntegrationTest, usam Testcontainers) temporariamente
-      # desabilitados. Reabilitar removendo o -Dtest e voltando a rodar
-      # "./mvnw -B clean verify" puro quando houver Docker disponivel ao runner.
-      - name: Rodar testes unitarios (integracao desabilitada temporariamente)
+      - name: Rodar testes unitarios
         run: ./mvnw -B clean verify -Dtest='!*IntegrationTest' -DfailIfNoTests=false
+
+      # Testes de integracao (*IntegrationTest): Postgres de verdade, via Testcontainers, no Docker
+      # do runner do GitHub. Ficaram desligados desde a migracao e apodreceram (analise de
+      # 15/11/2026, M8: 35 de 56 quebrados); religados depois de consertados. Teste vermelho aqui
+      # tambem impede a imagem de ser publicada.
+      - name: Rodar testes de integracao (Postgres via Testcontainers)
+        if: github.server_url == 'https://github.com'
+        env:
+          META_APP_SECRET: segredo-de-teste-do-ci
+        run: ./mvnw -B test -Dtest='*IntegrationTest' -DfailIfNoTests=false
 
       # ─── Publicacao da imagem: portavel entre GitHub e Gitea ────────────────
       #

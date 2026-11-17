@@ -1748,6 +1748,7 @@ public class ServicoAgendamentos {
     }
     a.setDate(DataUtil.parseDataISO(req.date));
     if (a.getDate() == null) throw new IllegalArgumentException("Data inválida");
+    exigirDataDentroDaJanela(a.getDate());
     if (tenantOperationalSettingsService.isClosedOnSpecialDate(tenantId, a.getDate())) {
       throw new IllegalArgumentException("Salão fechado na data informada");
     }
@@ -1804,6 +1805,23 @@ public class ServicoAgendamentos {
       a.setStatus(inicial);
     }
     return items;
+  }
+
+  /** Quantos dias para tras a agenda aceita lancar um atendimento que ja aconteceu. */
+  static final int DIAS_DE_LANCAMENTO_RETROATIVO = 7;
+
+  /**
+   * A agenda interna aceitava qualquer data: um agendamento em 2020 era gravado (analise de
+   * 15/11/2026, M1) e ficava pendente para sempre. O lancamento retroativo continua possivel (o
+   * atendimento que aconteceu e ninguem marcou), ate {@value #DIAS_DE_LANCAMENTO_RETROATIVO} dias.
+   */
+  static void exigirDataDentroDaJanela(LocalDate data) {
+    LocalDate hoje = LocalDate.now(ZONE_BR);
+    if (data.isBefore(hoje.minusDays(DIAS_DE_LANCAMENTO_RETROATIVO))) {
+      throw new IllegalArgumentException(
+          "Data muito antiga: a agenda aceita lançar atendimentos de até "
+              + DIAS_DE_LANCAMENTO_RETROATIVO + " dias atrás.");
+    }
   }
 
   private AgendamentoRequest buildRequestForItems(AppointmentUpdateRequest req, Agendamento a) {

@@ -296,7 +296,7 @@ public class ClienteService {
           "tenantId", tenantId, "clientId", id, "vinculos", vinculos));
       throw new IllegalArgumentException(
           "Este cliente tem " + String.join(", ", vinculos)
-              + " e não pode ser excluído. Para remover os dados pessoais, use a anonimizacao"
+              + " e não pode ser excluído. Para remover os dados pessoais, use a anonimização"
               + " (LGPD).");
     }
 

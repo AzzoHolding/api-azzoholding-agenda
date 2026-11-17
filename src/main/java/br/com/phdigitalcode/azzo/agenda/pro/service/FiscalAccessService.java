@@ -36,7 +36,7 @@ public class FiscalAccessService {
   private static final Logger LOG = LoggerFactory.getLogger(FiscalAccessService.class);
 
   private static final String ACCESS_DENIED_MESSAGE =
-      "Modulo fiscal disponivel apenas para empresas com CNPJ cadastrado.";
+      "O módulo fiscal é para empresas com CNPJ. Cadastre o CNPJ do salão em Configurações para emitir notas.";
 
   private final TenantRepository tenantRepository;
 

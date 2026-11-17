@@ -123,7 +123,9 @@ public class EmailTemplateRendererService {
     String htmlTemplate =
         sanitizeHtml(normalize(input.htmlTemplate(), definition.defaultHtmlTemplate()));
     String renderedSubject = applyVariables(subjectTemplate, variables);
-    String renderedHtml = applyVariables(htmlTemplate, variables);
+    // Os valores entram ESCAPADOS no HTML: um nome digitado como "<script>..." virava codigo no corpo
+    // do e-mail (analise de 15/11/2026, B4). O assunto e texto puro e fica como veio.
+    String renderedHtml = applyVariables(htmlTemplate, escaparValores(variables));
     String resolvedFromEmail = normalize(input.fromEmail(), null);
     String resolvedFromName = normalize(input.fromName(), productName);
     String resolvedReplyTo = normalize(input.replyTo(), null);
@@ -145,6 +147,22 @@ public class EmailTemplateRendererService {
       result = result.replace("{{" + entry.getKey() + "}}", normalize(entry.getValue(), ""));
     }
     return result;
+  }
+
+  static Map<String, String> escaparValores(Map<String, String> variables) {
+    Map<String, String> escapados = new java.util.LinkedHashMap<>();
+    variables.forEach((chave, valor) -> escapados.put(chave, escaparHtml(valor)));
+    return escapados;
+  }
+
+  static String escaparHtml(String valor) {
+    if (valor == null) return null;
+    return valor
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("\"", "&quot;")
+        .replace("'", "&#39;");
   }
 
   private String normalize(String value, String fallback) {
