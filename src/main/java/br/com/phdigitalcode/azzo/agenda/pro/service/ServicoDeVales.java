@@ -122,24 +122,19 @@ public class ServicoDeVales {
     this.tenantRepository = tenantRepository;
   }
 
-  private String prefixoDoSalao(UUID tenantId) {
-    return CodigoAleatorio.prefixoDoSalao(documentoDoSalao(tenantId), tenantId);
-  }
-
   private String documentoDoSalao(UUID tenantId) {
     return tenantRepository == null ? null
         : tenantRepository.findById(tenantId).map(t -> t.getDocument()).orElse(null);
   }
 
   /**
-   * 482913 + 10 caracteres (pedido do dono, 17/11): os 6 digitos do salao na frente, e o resto do hash de um UUID
-   * novo com o documento do salao, cortado em 10.
+   * 10 caracteres (pedido do dono, 17/11): o hash de um UUID novo (a semente) com o documento do salao, cortado em
+   * 10. O documento ja entra no hash, entao o vale nao leva os 6 digitos do salao na frente (o cupom de lote leva).
    */
   private String codigoNovo(UUID tenantId) {
     String documento = documentoDoSalao(tenantId);
-    String doSalao = CodigoAleatorio.prefixoDoSalao(documento, tenantId);
     for (int i = 0; i < 50; i++) {
-      String codigo = doSalao + CodigoAleatorio.deHash(UUID.randomUUID(), documento, TAMANHO_DO_CODIGO);
+      String codigo = CodigoAleatorio.deHash(UUID.randomUUID(), documento, TAMANHO_DO_CODIGO);
       if (!valeRepository.existsByTenantIdAndCodigo(tenantId, codigo)) return codigo;
     }
     throw new IllegalStateException("Não foi possível gerar um código de vale único.");
@@ -180,10 +175,7 @@ public class ServicoDeVales {
     String c = CodigoAleatorio.normalizar(codigo).replace("-", "").replace(" ", "");
     if (c.isEmpty()) throw new IllegalArgumentException("Informe o código do vale-presente.");
     return valeRepository.findByTenantIdAndCodigo(tenantId, c)
-        .orElseThrow(() -> new IllegalArgumentException(
-            CodigoAleatorio.pareceDeOutroSalao(c, prefixoDoSalao(tenantId))
-                ? "Este vale-presente é de outro salão: confira com a cliente."
-                : "Vale-presente não encontrado. Confira o código."));
+        .orElseThrow(() -> new IllegalArgumentException("Vale-presente não encontrado. Confira o código."));
   }
 
   /** Debita o vale (pagamento da comanda). Recusa em frase quando nao ha saldo, venceu ou nao esta ativo. */

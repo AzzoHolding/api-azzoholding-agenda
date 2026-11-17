@@ -1,5 +1,4 @@
--- Item 6 (pedido do dono, 17/11): os codigos gerados pelo sistema comecam com 6 digitos tirados de um hash do
--- CPF/CNPJ do salao, para nao se misturarem com os de outros saloes. Cupom de lote: 482913-NATAL-7K3QPZ (ate 24);
--- vale-presente: 482913 + 10 caracteres (16). As tabelas sao da V180/V181: ainda sem dados em producao.
+-- Item 6 (pedido do dono, 17/11): o codigo do cupom de lote comeca com 6 digitos tirados de um hash do CPF/CNPJ do
+-- salao, para nao se misturar com os de outros saloes: 482913-NATAL-7K3QPZ (ate 24 caracteres). A tabela e da V180:
+-- ainda sem dados em producao. O vale-presente segue com 10 caracteres (o documento entra no hash dele).
 ALTER TABLE cupons ALTER COLUMN codigo TYPE VARCHAR(30);
-ALTER TABLE vales_presente ALTER COLUMN codigo TYPE VARCHAR(20);
