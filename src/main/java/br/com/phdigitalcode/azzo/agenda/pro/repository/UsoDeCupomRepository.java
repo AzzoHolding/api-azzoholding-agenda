@@ -18,8 +18,10 @@ public interface UsoDeCupomRepository extends JpaRepository<UsoDeCupom, UUID> {
       + " and status = 'ATIVO'", nativeQuery = true)
   long contarAtivosDoCliente(@Param("cupomId") UUID cupomId, @Param("clientId") UUID clientId);
 
-  @Query(value = "select * from usos_de_cupom where comanda_id = :comandaId and status = 'ATIVO'", nativeQuery = true)
-  Optional<UsoDeCupom> ativoDaComanda(@Param("comandaId") UUID comandaId);
+  /** Os usos ativos da comanda, na ordem em que entraram (V183: pode haver mais de um). */
+  @Query(value = "select * from usos_de_cupom where comanda_id = :comandaId and status = 'ATIVO'"
+      + " order by created_at, id", nativeQuery = true)
+  List<UsoDeCupom> ativosDaComanda(@Param("comandaId") UUID comandaId);
 
   @Query(value = "select * from usos_de_cupom where appointment_id = :appointmentId and status = 'ATIVO'", nativeQuery = true)
   Optional<UsoDeCupom> ativoDoAgendamento(@Param("appointmentId") UUID appointmentId);

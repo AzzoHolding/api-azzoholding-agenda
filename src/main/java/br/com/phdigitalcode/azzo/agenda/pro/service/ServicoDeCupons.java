@@ -70,6 +70,45 @@ public class ServicoDeCupons {
     this.servicoRepository = servicoRepository;
   }
 
+  /** A opcao "mais de um cupom por comanda" (V183). Por setter: o construtor nao muda. */
+  private br.com.phdigitalcode.azzo.agenda.pro.repository.TenantOperationalSettingsRepository configuracoes;
+
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setConfiguracoes(
+      br.com.phdigitalcode.azzo.agenda.pro.repository.TenantOperationalSettingsRepository configuracoes) {
+    this.configuracoes = configuracoes;
+  }
+
+  /** A comanda aceita mais de um cupom? Padrao: nao. */
+  public boolean permiteVariosPorComanda(UUID tenantId) {
+    return configuracoes != null && configuracoes.findByTenantIdOrCreate(tenantId).isPosVariosCuponsPorComanda();
+  }
+
+  @Transactional
+  public CupomDtos.ConfiguracaoDeCupons configuracao() {
+    CupomDtos.ConfiguracaoDeCupons r = new CupomDtos.ConfiguracaoDeCupons();
+    r.variosPorComanda = permiteVariosPorComanda(contextoTenant.obterTenantIdOuFalhar());
+    return r;
+  }
+
+  @Transactional
+  public CupomDtos.ConfiguracaoDeCupons salvarConfiguracao(CupomDtos.ConfiguracaoDeCupons req) {
+    if (req == null || req.variosPorComanda == null) {
+      throw new IllegalArgumentException("Informe se a comanda aceita mais de um cupom (variosPorComanda).");
+    }
+    if (configuracoes == null) throw new IllegalStateException("Configuração indisponível.");
+    UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    var entidade = configuracoes.findByTenantIdOrCreate(tenantId);
+    boolean antes = entidade.isPosVariosCuponsPorComanda();
+    if (antes != req.variosPorComanda) {
+      entidade.setPosVariosCuponsPorComanda(req.variosPorComanda);
+      configuracoes.save(entidade);
+      auditar(tenantId, "COUPON_SETTINGS_UPDATE", "COUPON_SETTINGS", tenantId,
+          Map.of("variosPorComanda", antes), Map.of("variosPorComanda", req.variosPorComanda));
+    }
+    return configuracao();
+  }
+
   public ServicoDeCupons(
       ContextoTenant contextoTenant,
       AuthenticatedUser authenticatedUser,
@@ -315,14 +354,23 @@ public class ServicoDeCupons {
    */
   @Transactional
   public void liberarDaComanda(UUID tenantId, UUID comandaId) {
-    usoRepository.ativoDaComanda(comandaId).filter(u -> tenantId.equals(u.getTenantId())).ifPresent(u -> {
-      if (u.getAppointmentId() != null) {
-        u.setComandaId(null);
-        usoRepository.save(u);
-      } else {
-        desfazer(u);
-      }
-    });
+    usosAtivosDaComanda(tenantId, comandaId).forEach(this::liberarUso);
+  }
+
+  /** Os usos ativos da comanda, na ordem em que entraram (V183: pode haver mais de um). */
+  public List<UsoDeCupom> usosAtivosDaComanda(UUID tenantId, UUID comandaId) {
+    return usoRepository.ativosDaComanda(comandaId).stream().filter(u -> tenantId.equals(u.getTenantId())).toList();
+  }
+
+  /** Libera um uso da comanda. O do agendamento online so se desliga dela (ver {@link #liberarDaComanda}). */
+  @Transactional
+  public void liberarUso(UsoDeCupom u) {
+    if (u.getAppointmentId() != null) {
+      u.setComandaId(null);
+      usoRepository.save(u);
+    } else {
+      desfazer(u);
+    }
   }
 
   /** Libera o uso ativo do agendamento (cancelado ou falta). */
@@ -340,11 +388,10 @@ public class ServicoDeCupons {
 
   /** O valor do uso acompanha a comanda (o cupom de % muda com o subtotal). */
   @Transactional
-  public void atualizarValorDaComanda(UUID comandaId, BigDecimal valor) {
-    usoRepository.ativoDaComanda(comandaId).ifPresent(u -> {
-      u.setValorDesconto(valor);
-      usoRepository.save(u);
-    });
+  public void atualizarValorDoUso(UsoDeCupom u, BigDecimal valor) {
+    if (u.getValorDesconto() != null && u.getValorDesconto().compareTo(valor) == 0) return;
+    u.setValorDesconto(valor);
+    usoRepository.save(u);
   }
 
   /** O uso que um agendamento online trouxe passa a apontar tambem para a comanda dele. */

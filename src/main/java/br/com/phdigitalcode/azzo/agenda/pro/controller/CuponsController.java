@@ -52,6 +52,17 @@ public class CuponsController {
     return servicoDeCupons.editar(id, request);
   }
 
+  /** Se a comanda aceita mais de um cupom (V183). */
+  @GetMapping("/configuracao")
+  public CupomDtos.ConfiguracaoDeCupons configuracao() {
+    return servicoDeCupons.configuracao();
+  }
+
+  @PutMapping("/configuracao")
+  public CupomDtos.ConfiguracaoDeCupons salvarConfiguracao(@RequestBody CupomDtos.ConfiguracaoDeCupons request) {
+    return servicoDeCupons.salvarConfiguracao(request);
+  }
+
   @GetMapping("/{id}/usos")
   public List<CupomDtos.UsoResponse> usos(@PathVariable UUID id) {
     return servicoDeCupons.usos(id);

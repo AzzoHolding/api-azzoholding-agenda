@@ -148,8 +148,11 @@ public class ComandaController {
 
   @org.springframework.web.bind.annotation.DeleteMapping("/{id}/cupom")
   @RequiresPermission("pos:manage")
-  public ComandaDtos.ComandaResponse removerCupom(@PathVariable UUID id) {
-    return servicoComanda.removerCupom(id);
+  public ComandaDtos.ComandaResponse removerCupom(
+      @PathVariable UUID id,
+      @org.springframework.web.bind.annotation.RequestParam(name = "cupomId", required = false) UUID cupomId) {
+    // Sem cupomId, tira todos os cupons da comanda (menos o do agendamento online).
+    return servicoComanda.removerCupom(id, cupomId);
   }
 
   @PostMapping("/{id}/fidelidade/desfazer")

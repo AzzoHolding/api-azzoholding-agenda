@@ -104,6 +104,46 @@ class CuponsEValesRegrasTest {
   }
 
   @Test
+  @DisplayName("motivo com varios cupons (V183): 'Cupons A, B', e o texto antigo sai inteiro")
+  void motivoComVariosCupons() {
+    assertThat(ServicoComanda.motivoComCupons("Cortesia", List.of("MAES20", "NATAL-ABC123")))
+        .isEqualTo("Cortesia; Cupons MAES20, NATAL-ABC123");
+    assertThat(ServicoComanda.motivoComCupons("Cortesia; Cupons MAES20, NATAL-ABC123", List.of("MAES20")))
+        .isEqualTo("Cortesia; Cupom MAES20");
+    assertThat(ServicoComanda.motivoComCupons("Cupons MAES20, NATAL-ABC123", List.of())).isNull();
+  }
+
+  @Test
+  @DisplayName("dois cupons de lista no mesmo servico: o segundo so leva o que sobrou")
+  void tirarDosServicosNaoPassaDoQueResta() {
+    UUID escova = UUID.randomUUID();
+    List<ComandaItem> itens = List.of(servicoItem(escova, "60.00"), servicoItem(UUID.randomUUID(), "80.00"));
+    List<BigDecimal> restantes = new java.util.ArrayList<>(List.of(new BigDecimal("60.00"), new BigDecimal("80.00")));
+    assertThat(ServicoComanda.tirarDosServicos(itens, restantes, Set.of(escova), new BigDecimal("45.00")))
+        .isEqualByComparingTo("45.00");
+    assertThat(ServicoComanda.tirarDosServicos(itens, restantes, Set.of(escova), new BigDecimal("30.00")))
+        .isEqualByComparingTo("15.00");
+    assertThat(restantes.get(0)).isEqualByComparingTo("0");
+    assertThat(restantes.get(1)).isEqualByComparingTo("80.00");
+  }
+
+  @Test
+  @DisplayName("fechamento com dois cupons de lista: cada um sai so dos servicos dele")
+  void rateioComDoisCuponsDeLista() {
+    UUID escova = UUID.randomUUID();
+    UUID corte = UUID.randomUUID();
+    ComandaItem itemEscova = servicoItem(escova, "60.00");
+    ComandaItem itemCorte = servicoItem(corte, "80.00");
+    // R$ 10 so na escova + R$ 20 so no corte: total 140 - 30 = 110, sem outro desconto.
+    List<BigDecimal> valores = ServicoComanda.ratearComCuponsDeLista(List.of(itemEscova, itemCorte),
+        new BigDecimal("140.00"), new BigDecimal("110.00"), List.of(
+            new ServicoComanda.CupomDeLista(new BigDecimal("10.00"), Set.of(escova)),
+            new ServicoComanda.CupomDeLista(new BigDecimal("20.00"), Set.of(corte))));
+    assertThat(valores.get(0)).isEqualByComparingTo("50.00");
+    assertThat(valores.get(1)).isEqualByComparingTo("60.00");
+  }
+
+  @Test
   @DisplayName("sinal do link acompanha o desconto do cupom")
   void sinalComDesconto() {
     assertThat(ServicoPublicBooking.sinalComDesconto(new BigDecimal("30.00"), new BigDecimal("100.00"), new BigDecimal("20.00")))

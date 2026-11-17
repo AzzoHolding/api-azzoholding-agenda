@@ -244,6 +244,10 @@ public final class ComandaDtos {
     public List<ComandaPagamentoResponse> pagamentos = new ArrayList<>();
     /** Cupom de desconto aplicado (item 6). Nulo sem cupom. */
     public CupomDtos.CupomDaComandaResponse cupom;
+    /** Todos os cupons da comanda (V183). O {@code cupom} acima e o primeiro deles. */
+    public java.util.List<CupomDtos.CupomDaComandaResponse> cupons = new java.util.ArrayList<>();
+    /** O caixa ainda pode aplicar outro cupom: sem cupom, ou com a opcao do dono ligada. */
+    public boolean aceitaMaisCupons;
     /** Vales-presente criados por esta venda (comanda fechada), com o codigo para entregar. */
     public java.util.List<ValeVendidoResponse> valesVendidos = new java.util.ArrayList<>();
   }

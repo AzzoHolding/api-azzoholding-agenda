@@ -28,6 +28,8 @@ import br.com.phdigitalcode.azzo.agenda.pro.entity.Cliente;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.Comanda;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.ComandaItem;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.ComandaPagamento;
+import br.com.phdigitalcode.azzo.agenda.pro.entity.Cupom;
+import br.com.phdigitalcode.azzo.agenda.pro.entity.UsoDeCupom;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.ItemEstoque;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.Profissional;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.MovimentacaoEstoque;
@@ -1040,8 +1042,8 @@ public class ServicoComanda {
     }
     comanda.setDesconto(base.min(NumericUtil.add(
         descontoPercentual, NumericUtil.add(comanda.getValorResgateFidelidade(), comanda.getValorCupom()))));
-    comanda.setDescontoMotivo(motivoComCupom(
-        motivoComResgate(request.motivo.trim(), comanda.getPontosFidelidadeResgatados()), codigoDoCupom(comanda)));
+    comanda.setDescontoMotivo(motivoComCupons(
+        motivoComResgate(request.motivo.trim(), comanda.getPontosFidelidadeResgatados()), codigosDosCupons(comanda)));
     comanda.setTotal(NumericUtil.maxZero(NumericUtil.subtract(subtotal, comanda.getDesconto())));
 
     auditar(tenantId, "POS_DISCOUNT_APPLY", comanda, antesDoDesconto, dadosDoDesconto(comanda));
@@ -1635,47 +1637,39 @@ public class ServicoComanda {
    * resto do desconto (manual e pontos) se divide por todos, como antes.
    */
   List<BigDecimal> ratearDescontoComCupom(Comanda comanda, List<ComandaItem> itens) {
-    java.util.Set<UUID> servicosDoCupom = comanda.getCupomId() == null || servicoDeCupons == null
-        ? java.util.Set.of()
-        : servicoDeCupons.porId(comanda.getTenantId(), comanda.getCupomId())
-            .map(servicoDeCupons::servicosDoCupom).orElse(java.util.Set.of());
-    BigDecimal valorCupom = comanda.getValorCupom() == null ? BigDecimal.ZERO : comanda.getValorCupom();
-    if (servicosDoCupom.isEmpty() || valorCupom.signum() <= 0) {
-      return ratearDesconto(itens, comanda.getSubtotal(), comanda.getTotal());
+    List<CupomDeLista> deLista = new ArrayList<>();
+    if (comanda.getCupomId() != null) {
+      for (CupomNaComanda c : cuponsDaComanda(comanda)) {
+        if (c.doAgendamento() || c.servicos().isEmpty()) continue;
+        BigDecimal valor = c.uso().getValorDesconto() == null ? BigDecimal.ZERO : c.uso().getValorDesconto();
+        if (valor.signum() > 0) deLista.add(new CupomDeLista(valor, c.servicos()));
+      }
     }
-    return ratearComCupomDeLista(itens, comanda.getSubtotal(), comanda.getTotal(), valorCupom, servicosDoCupom);
+    if (deLista.isEmpty()) return ratearDesconto(itens, comanda.getSubtotal(), comanda.getTotal());
+    return ratearComCuponsDeLista(itens, comanda.getSubtotal(), comanda.getTotal(), deLista);
   }
 
-  /** Rateio com cupom de lista: primeiro o cupom so nos servicos da lista, depois o resto sobre todos. */
+  /** Um cupom de lista no rateio: o valor dele e os servicos de onde ele sai. */
+  record CupomDeLista(BigDecimal valor, java.util.Set<UUID> servicos) {}
+
+  /** Rateio com um cupom de lista (ver {@link #ratearComCuponsDeLista}). */
   static List<BigDecimal> ratearComCupomDeLista(List<ComandaItem> itens, BigDecimal subtotal, BigDecimal total,
       BigDecimal valorCupom, java.util.Set<UUID> servicosDoCupom) {
-    // 1) O cupom sai dos servicos da lista, na proporcao do valor de cada um.
+    return ratearComCuponsDeLista(itens, subtotal, total, List.of(new CupomDeLista(valorCupom, servicosDoCupom)));
+  }
+
+  /**
+   * Rateio com cupons de lista: primeiro cada cupom so nos servicos da lista dele (na ordem do calculo), depois o
+   * resto do desconto (cupons da conta toda, manual e pontos) sobre todos.
+   */
+  static List<BigDecimal> ratearComCuponsDeLista(List<ComandaItem> itens, BigDecimal subtotal, BigDecimal total,
+      List<CupomDeLista> cupons) {
+    // 1) Cada cupom sai dos servicos da lista dele, na proporcao do que resta em cada um.
     List<BigDecimal> depoisDoCupom = new ArrayList<>();
-    BigDecimal baseDoCupom = BigDecimal.ZERO;
-    int ultimoDaLista = -1;
-    for (int i = 0; i < itens.size(); i++) {
-      ComandaItem item = itens.get(i);
-      if (ComandaItem.TIPO_SERVICO.equals(item.getTipo()) && servicosDoCupom.contains(item.getReferenciaId())
-          && item.getTotal() != null && item.getTotal().signum() > 0) {
-        baseDoCupom = NumericUtil.add(baseDoCupom, item.getTotal());
-        ultimoDaLista = i;
-      }
-    }
-    BigDecimal cupom = valorCupom.min(baseDoCupom);
+    for (ComandaItem item : itens) depoisDoCupom.add(item.getTotal() == null ? BigDecimal.ZERO : item.getTotal());
     BigDecimal tirado = BigDecimal.ZERO;
-    for (int i = 0; i < itens.size(); i++) {
-      ComandaItem item = itens.get(i);
-      BigDecimal valor = item.getTotal() == null ? BigDecimal.ZERO : item.getTotal();
-      boolean daLista = ComandaItem.TIPO_SERVICO.equals(item.getTipo()) && servicosDoCupom.contains(item.getReferenciaId());
-      if (daLista && baseDoCupom.signum() > 0 && valor.signum() > 0) {
-        BigDecimal parte = i == ultimoDaLista
-            ? NumericUtil.maxZero(NumericUtil.subtract(cupom, tirado))
-            : valor.multiply(cupom).divide(baseDoCupom, 2, RoundingMode.HALF_UP);
-        parte = parte.min(valor);
-        tirado = NumericUtil.add(tirado, parte);
-        valor = NumericUtil.subtract(valor, parte);
-      }
-      depoisDoCupom.add(valor);
+    for (CupomDeLista c : cupons) {
+      tirado = NumericUtil.add(tirado, tirarDosServicos(itens, depoisDoCupom, c.servicos(), c.valor()));
     }
     // 2) O resto do desconto (manual e pontos) sobre o que sobrou, como o rateio de sempre (o vale fica cheio).
     BigDecimal restoDoDesconto = NumericUtil.maxZero(
@@ -2573,22 +2567,10 @@ public class ServicoComanda {
     // O vale-presente vendido nao tem desconto: a base e o resto da conta (item 6).
     BigDecimal base = baseDescontavel(itens);
     BigDecimal manual = descontoManual(comanda);
-    // Cupom (item 6): o de % acompanha a conta; abaixo do valor minimo, sai sozinho e o uso volta ao cupom.
-    if (comanda.getCupomId() != null && servicoDeCupons != null && !cupomVeioDoAgendamento(comanda)) {
-      var cupom = servicoDeCupons.porId(comanda.getTenantId(), comanda.getCupomId()).orElse(null);
-      // Cupom de lista (V182): sem nenhum servico dela na conta, sai tambem.
-      java.util.Set<UUID> servicosDoCupom = cupom == null ? java.util.Set.of() : servicoDeCupons.servicosDoCupom(cupom);
-      BigDecimal elegivel = ServicoDeCupons.baseElegivel(servicosDoCupom, base, valorPorServico(itens));
-      if (cupom == null || (cupom.getValorMinimo() != null && base.compareTo(cupom.getValorMinimo()) < 0)
-          || elegivel.signum() <= 0) {
-        tirarCupom(comanda);
-      } else {
-        BigDecimal novo = ServicoDeCupons.desconto(cupom, elegivel);
-        if (novo.compareTo(comanda.getValorCupom()) != 0) {
-          comanda.setValorCupom(novo);
-          servicoDeCupons.atualizarValorDaComanda(comanda.getId(), novo);
-        }
-      }
+    // Cupons (item 6): o de % acompanha a conta; abaixo do valor minimo ou sem servico da lista, sai sozinho e o
+    // uso volta ao cupom.
+    if (comanda.getCupomId() != null && servicoDeCupons != null) {
+      recalcularCupons(comanda, itens, base);
     }
     // FIN-007: tirar itens ate o resgate passar do subtotal desfaz o resgate (pontos de volta), em
     // vez de cortar o desconto e deixar os pontos gastos. O caixa pode resgatar de novo o que couber.
@@ -2634,12 +2616,15 @@ public class ServicoComanda {
   @Transactional
   public ComandaDtos.ComandaResponse aplicarCupom(UUID id, String codigo) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
-    Comanda comanda = buscarOuFalhar(id, tenantId);
+    // Com trava: dois cupons ao mesmo tempo na mesma comanda nao passam a regra de "um so" juntos.
+    Comanda comanda = comandaRepository.findByIdAndTenantParaAtualizacao(id, tenantId)
+        .orElseThrow(() -> new ApiClientErrorException("Comanda não encontrada.", 404));
     exigirComandaDoProfissional(tenantId, comanda);
     exigirAberta(comanda);
     if (servicoDeCupons == null) throw new IllegalStateException("Cupons indisponíveis.");
-    if (comanda.getCupomId() != null) {
-      throw new IllegalArgumentException(cupomVeioDoAgendamento(comanda)
+    List<CupomNaComanda> atuais = cuponsDaComanda(comanda);
+    if (!atuais.isEmpty() && !servicoDeCupons.permiteVariosPorComanda(tenantId)) {
+      throw new IllegalArgumentException(atuais.stream().anyMatch(CupomNaComanda::doAgendamento)
           ? "Esta comanda já tem o cupom do agendamento online."
           : "Esta comanda já tem um cupom. Remova o cupom atual para usar outro.");
     }
@@ -2647,74 +2632,187 @@ public class ServicoComanda {
     BigDecimal base = baseDescontavel(itens);
     if (base.signum() <= 0) throw new IllegalArgumentException("Lance os serviços ou produtos antes do cupom.");
     var cupom = servicoDeCupons.buscarPorCodigo(tenantId, codigo);
+    if (atuais.stream().anyMatch(c -> cupom.getId().equals(c.uso().getCupomId()))) {
+      throw new IllegalArgumentException("Este cupom já está nesta comanda.");
+    }
     Map<String, Object> antes = dadosDoDesconto(comanda);
-    Map<UUID, BigDecimal> porServico = valorPorServico(itens);
-    servicoDeCupons.reservar(tenantId, cupom.getId(), comanda.getId(), null, comanda.getClientId(), base, porServico);
-
-    BigDecimal valor = ServicoDeCupons.desconto(cupom,
-        ServicoDeCupons.baseElegivel(servicoDeCupons.servicosDoCupom(cupom), base, porServico));
-    comanda.setDesconto(NumericUtil.add(comanda.getDesconto(), valor));
-    comanda.setCupomId(cupom.getId());
-    comanda.setValorCupom(valor);
-    comanda.setDescontoMotivo(motivoComCupom(comanda.getDescontoMotivo(), cupom.getCodigo()));
+    UsoDeCupom uso = servicoDeCupons.reservar(
+        tenantId, cupom.getId(), comanda.getId(), null, comanda.getClientId(), base, valorPorServico(itens));
+    if (comanda.getCupomId() == null) comanda.setCupomId(cupom.getId());
     recalcular(comanda);
-    servicoDeCupons.atualizarValorDaComanda(comanda.getId(), comanda.getValorCupom());
+
+    // Com varios cupons, o novo nao pode ficar sem desconto nem tirar outro da comanda: entao ele nao cabe.
+    java.util.Set<UUID> depoisDoCalculo = new java.util.HashSet<>();
+    cuponsDaComanda(comanda).forEach(c -> depoisDoCalculo.add(c.uso().getId()));
+    boolean ficaramTodos = depoisDoCalculo.contains(uso.getId())
+        && atuais.stream().allMatch(c -> depoisDoCalculo.contains(c.uso().getId()));
+    if (!ficaramTodos) {
+      throw new IllegalArgumentException(
+          "Este cupom não cabe: os serviços dele já estão com todo o desconto que podem ter.");
+    }
 
     Map<String, Object> depois = dadosDoDesconto(comanda);
     depois.put("cupom", cupom.getCodigo());
-    depois.put("valorCupom", comanda.getValorCupom());
+    depois.put("valorCupom", uso.getValorDesconto());
+    depois.put("valorDosCupons", comanda.getValorCupom());
     auditar(tenantId, "POS_COUPON_APPLY", comanda, antes, depois);
     return obter(id);
   }
 
-  /** Tira o cupom da comanda aberta: o desconto dele sai e o uso volta ao cupom. */
+  /** Tira todos os cupons da comanda aberta (menos o do agendamento online). */
   @Transactional
   public ComandaDtos.ComandaResponse removerCupom(UUID id) {
+    return removerCupom(id, null);
+  }
+
+  /**
+   * Tira um cupom da comanda aberta ({@code cupomId}), ou todos quando nulo: o desconto dele sai e o uso volta ao
+   * cupom. O do agendamento online fica: ja esta no preco dos servicos.
+   */
+  @Transactional
+  public ComandaDtos.ComandaResponse removerCupom(UUID id, UUID cupomId) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Comanda comanda = buscarOuFalhar(id, tenantId);
     exigirComandaDoProfissional(tenantId, comanda);
     exigirAberta(comanda);
-    if (comanda.getCupomId() == null) throw new IllegalArgumentException("Esta comanda não tem cupom.");
-    if (cupomVeioDoAgendamento(comanda)) {
+    List<CupomNaComanda> atuais = comanda.getCupomId() == null ? List.of() : cuponsDaComanda(comanda);
+    if (atuais.isEmpty()) throw new IllegalArgumentException("Esta comanda não tem cupom.");
+    List<CupomNaComanda> alvo = atuais.stream()
+        .filter(c -> cupomId == null || cupomId.equals(c.uso().getCupomId())).toList();
+    if (alvo.isEmpty()) throw new IllegalArgumentException("Este cupom não está nesta comanda.");
+    if (alvo.stream().allMatch(CupomNaComanda::doAgendamento)) {
       throw new IllegalArgumentException("O cupom veio do agendamento online e já está no preço dos serviços.");
     }
     Map<String, Object> antes = dadosDoDesconto(comanda);
-    tirarCupom(comanda);
+    for (CupomNaComanda c : alvo) {
+      if (!c.doAgendamento()) servicoDeCupons.liberarUso(c.uso());
+    }
     recalcular(comanda);
     auditar(tenantId, "POS_COUPON_REMOVE", comanda, antes, dadosDoDesconto(comanda));
     return obter(id);
   }
 
-  private void tirarCupom(Comanda comanda) {
-    if (servicoDeCupons != null) servicoDeCupons.liberarDaComanda(comanda.getTenantId(), comanda.getId());
-    comanda.setDesconto(NumericUtil.maxZero(NumericUtil.subtract(comanda.getDesconto(), comanda.getValorCupom())));
-    comanda.setCupomId(null);
-    comanda.setValorCupom(BigDecimal.ZERO);
-    comanda.setDescontoMotivo(motivoComCupom(comanda.getDescontoMotivo(), null));
+  /** Um cupom ativo na comanda: o uso, o cupom e os servicos dele (vazio = a conta toda). */
+  record CupomNaComanda(UsoDeCupom uso, Cupom cupom, java.util.Set<UUID> servicos, boolean doAgendamento) {}
+
+  /**
+   * Os cupons ativos da comanda, na ordem do calculo: primeiro os de lista (descontam so dos servicos deles),
+   * depois os da conta toda; cada grupo na ordem em que entrou.
+   */
+  List<CupomNaComanda> cuponsDaComanda(Comanda comanda) {
+    if (servicoDeCupons == null || comanda.getId() == null) return List.of();
+    List<CupomNaComanda> lista = new ArrayList<>();
+    for (UsoDeCupom uso : servicoDeCupons.usosAtivosDaComanda(comanda.getTenantId(), comanda.getId())) {
+      Cupom cupom = servicoDeCupons.porId(comanda.getTenantId(), uso.getCupomId()).orElse(null);
+      java.util.Set<UUID> servicos = cupom == null ? java.util.Set.of() : servicoDeCupons.servicosDoCupom(cupom);
+      lista.add(new CupomNaComanda(uso, cupom, servicos, uso.getAppointmentId() != null));
+    }
+    lista.sort(java.util.Comparator.comparing(c -> c.servicos().isEmpty()));
+    return lista;
   }
 
-  /** O cupom da comanda e o do agendamento online (o desconto ja esta no preco dos itens). */
-  boolean cupomVeioDoAgendamento(Comanda comanda) {
-    if (comanda.getCupomId() == null || comanda.getAppointmentId() == null) return false;
-    return agendamentoRepository.findByIdAndTenantId(comanda.getAppointmentId(), comanda.getTenantId())
-        .map(a -> comanda.getCupomId().equals(a.getCupomId()))
-        .orElse(false);
+  /**
+   * Recalcula os cupons da comanda. Cada cupom calcula sobre o valor cheio (o de lista, sobre os servicos dele); os
+   * de lista vem primeiro, e a soma nunca passa do que pode ter desconto. O cupom que nao vale mais (abaixo do
+   * minimo, sem servico da lista ou sem espaco) sai sozinho e o uso volta a ele. O do agendamento online vale 0
+   * aqui: o desconto dele ja esta no preco dos itens.
+   */
+  private void recalcularCupons(Comanda comanda, List<ComandaItem> itens, BigDecimal base) {
+    List<BigDecimal> restantes = new ArrayList<>();
+    for (ComandaItem item : itens) {
+      restantes.add(ComandaItem.TIPO_VALE.equals(item.getTipo()) || item.getTotal() == null
+          ? BigDecimal.ZERO : item.getTotal());
+    }
+    Map<UUID, BigDecimal> porServico = valorPorServico(itens);
+    BigDecimal livre = base;
+    BigDecimal soma = BigDecimal.ZERO;
+    UUID doAgendamento = null;
+    UUID primeiro = null;
+    List<String> codigos = new ArrayList<>();
+    for (CupomNaComanda c : cuponsDaComanda(comanda)) {
+      if (c.doAgendamento()) {
+        doAgendamento = c.uso().getCupomId();
+        continue;
+      }
+      Cupom cupom = c.cupom();
+      BigDecimal valor = BigDecimal.ZERO;
+      if (cupom != null && (cupom.getValorMinimo() == null || base.compareTo(cupom.getValorMinimo()) >= 0)) {
+        BigDecimal elegivel = ServicoDeCupons.baseElegivel(c.servicos(), base, porServico);
+        BigDecimal cheio = elegivel.signum() > 0 ? ServicoDeCupons.desconto(cupom, elegivel).min(livre) : BigDecimal.ZERO;
+        valor = c.servicos().isEmpty() ? cheio : tirarDosServicos(itens, restantes, c.servicos(), cheio);
+      }
+      if (valor.signum() <= 0) {
+        servicoDeCupons.liberarUso(c.uso());
+        continue;
+      }
+      servicoDeCupons.atualizarValorDoUso(c.uso(), valor);
+      livre = NumericUtil.maxZero(NumericUtil.subtract(livre, valor));
+      soma = NumericUtil.add(soma, valor);
+      if (primeiro == null) primeiro = cupom.getId();
+      codigos.add(cupom.getCodigo());
+    }
+    comanda.setCupomId(doAgendamento != null ? doAgendamento : primeiro);
+    comanda.setValorCupom(soma);
+    comanda.setDescontoMotivo(motivoComCupons(comanda.getDescontoMotivo(), codigos));
   }
 
-  private String codigoDoCupom(Comanda comanda) {
-    if (comanda.getCupomId() == null || servicoDeCupons == null || cupomVeioDoAgendamento(comanda)) return null;
-    return servicoDeCupons.porId(comanda.getTenantId(), comanda.getCupomId()).map(c -> c.getCodigo()).orElse(null);
+  /**
+   * Tira {@code valor} dos itens de servico da lista, na proporcao do que resta em cada um, sem passar do que
+   * resta. Muda {@code restantes} e devolve quanto tirou.
+   */
+  static BigDecimal tirarDosServicos(List<ComandaItem> itens, List<BigDecimal> restantes,
+      java.util.Set<UUID> servicos, BigDecimal valor) {
+    BigDecimal base = BigDecimal.ZERO;
+    int ultimo = -1;
+    for (int i = 0; i < itens.size(); i++) {
+      if (daLista(itens.get(i), servicos) && restantes.get(i).signum() > 0) {
+        base = NumericUtil.add(base, restantes.get(i));
+        ultimo = i;
+      }
+    }
+    BigDecimal alvo = valor == null ? BigDecimal.ZERO : valor.min(base);
+    if (alvo.signum() <= 0) return BigDecimal.ZERO;
+    BigDecimal tirado = BigDecimal.ZERO;
+    for (int i = 0; i < itens.size(); i++) {
+      BigDecimal resta = restantes.get(i);
+      if (!daLista(itens.get(i), servicos) || resta.signum() <= 0) continue;
+      BigDecimal parte = i == ultimo
+          ? NumericUtil.maxZero(NumericUtil.subtract(alvo, tirado))
+          : resta.multiply(alvo).divide(base, 2, RoundingMode.HALF_UP);
+      parte = parte.min(resta);
+      restantes.set(i, NumericUtil.subtract(resta, parte));
+      tirado = NumericUtil.add(tirado, parte);
+    }
+    return tirado;
+  }
+
+  private static boolean daLista(ComandaItem item, java.util.Set<UUID> servicos) {
+    return ComandaItem.TIPO_SERVICO.equals(item.getTipo()) && servicos.contains(item.getReferenciaId());
+  }
+
+  /** Os codigos dos cupons da comanda que descontam aqui (o do agendamento online fica de fora). */
+  private List<String> codigosDosCupons(Comanda comanda) {
+    if (comanda.getCupomId() == null) return List.of();
+    return cuponsDaComanda(comanda).stream()
+        .filter(c -> !c.doAgendamento() && c.cupom() != null)
+        .map(c -> c.cupom().getCodigo())
+        .toList();
   }
 
   private static final java.util.regex.Pattern TEXTO_DO_CUPOM =
-      java.util.regex.Pattern.compile("\\s*;?\\s*Cupom [A-Z0-9-]+");
+      java.util.regex.Pattern.compile("\\s*;?\\s*Cupo(?:m|ns) [A-Z0-9-]+(?:, [A-Z0-9-]+)*");
 
   /** O motivo do desconto com UM texto de cupom. {@code codigo} nulo tira o texto. */
   static String motivoComCupom(String motivo, String codigo) {
+    return motivoComCupons(motivo, codigo == null ? List.of() : List.of(codigo));
+  }
+
+  /** O motivo do desconto com o texto dos cupons ("Cupom X" ou "Cupons X, Y"). Lista vazia tira o texto. */
+  static String motivoComCupons(String motivo, List<String> codigos) {
     String semCupom = motivo == null ? "" : TEXTO_DO_CUPOM.matcher(motivo).replaceAll("").trim();
     if (semCupom.startsWith(";")) semCupom = semCupom.substring(1).trim();
-    if (codigo == null) return semCupom.isEmpty() ? null : semCupom;
-    String texto = "Cupom " + codigo;
+    if (codigos == null || codigos.isEmpty()) return semCupom.isEmpty() ? null : semCupom;
+    String texto = (codigos.size() == 1 ? "Cupom " : "Cupons ") + String.join(", ", codigos);
     return semCupom.isEmpty() ? texto : semCupom + "; " + texto;
   }
 
@@ -2771,17 +2869,26 @@ public class ServicoComanda {
           comanda.getTenantId(), comanda.getClientId(), comanda.getId(), comanda.getPontosFidelidadeCreditados());
     }
     if (comanda.getCupomId() != null && servicoDeCupons != null) {
-      servicoDeCupons.porId(comanda.getTenantId(), comanda.getCupomId()).ifPresent(c -> {
+      // V183: pode haver mais de um. O do agendamento online aparece primeiro e vale 0 aqui.
+      List<CupomNaComanda> cupons = new ArrayList<>(cuponsDaComanda(comanda));
+      cupons.sort(java.util.Comparator.comparing(c -> !c.doAgendamento()));
+      for (CupomNaComanda c : cupons) {
+        if (c.cupom() == null) continue;
         br.com.phdigitalcode.azzo.agenda.pro.dto.CupomDtos.CupomDaComandaResponse cupom =
             new br.com.phdigitalcode.azzo.agenda.pro.dto.CupomDtos.CupomDaComandaResponse();
-        cupom.codigo = c.getCodigo();
-        cupom.valor = comanda.getValorCupom();
-        cupom.tipo = c.getTipo();
-        cupom.percentualOuValor = c.getValor();
-        cupom.doAgendamento = cupomVeioDoAgendamento(comanda);
-        r.cupom = cupom;
-      });
+        cupom.cupomId = c.cupom().getId().toString();
+        cupom.codigo = c.cupom().getCodigo();
+        cupom.valor = c.doAgendamento() || c.uso().getValorDesconto() == null
+            ? BigDecimal.ZERO : c.uso().getValorDesconto();
+        cupom.tipo = c.cupom().getTipo();
+        cupom.percentualOuValor = c.cupom().getValor();
+        cupom.doAgendamento = c.doAgendamento();
+        r.cupons.add(cupom);
+      }
+      if (!r.cupons.isEmpty()) r.cupom = r.cupons.get(0);
     }
+    r.aceitaMaisCupons = Comanda.STATUS_ABERTA.equals(comanda.getStatus()) && servicoDeCupons != null
+        && (r.cupons.isEmpty() || servicoDeCupons.permiteVariosPorComanda(comanda.getTenantId()));
     if (servicoDeVales != null && itens.stream().anyMatch(i -> ComandaItem.TIPO_VALE.equals(i.getTipo()))) {
       for (var vale : servicoDeVales.daVenda(comanda.getTenantId(), comanda.getId())) {
         ComandaDtos.ValeVendidoResponse v = new ComandaDtos.ValeVendidoResponse();

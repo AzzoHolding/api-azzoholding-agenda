@@ -189,11 +189,19 @@ public final class CupomDtos {
 
   /** O cupom aplicado numa comanda. */
   public static class CupomDaComandaResponse {
+    /** Para tirar este cupom da comanda (V183: pode haver mais de um). */
+    public String cupomId;
     public String codigo;
     public BigDecimal valor;
     public String tipo;
     public BigDecimal percentualOuValor;
     /** true quando veio do agendamento online: o desconto ja esta no preco dos itens. */
     public boolean doAgendamento;
+  }
+
+  /** Configuracao dos cupons do salao (V183). */
+  public static class ConfiguracaoDeCupons {
+    /** A comanda aceita mais de um cupom. Padrao: false (um so). */
+    public Boolean variosPorComanda;
   }
 }
