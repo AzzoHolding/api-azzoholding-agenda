@@ -1,5 +1,7 @@
 package br.com.phdigitalcode.azzo.agenda.pro.service;
 
+import br.com.phdigitalcode.azzo.agenda.pro.exception.ApiClientErrorException;
+
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -217,6 +219,7 @@ public class ClienteService {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Cliente c = new Cliente();
     c.setTenantId(tenantId);
+    recusarTelefoneRepetido(tenantId, req, c);
     aplicar(req, c);
     clienteRepository.save(c);
 
@@ -241,6 +244,7 @@ public class ClienteService {
 
     ClienteStats beforeStats = clienteStatsRepository.findStatsByTenantAndClient(tenantId, c.getId());
     Map<String, Object> before = resumoCliente(c, beforeStats);
+    recusarTelefoneRepetido(tenantId, req, c);
     aplicar(req, c);
     clienteRepository.save(c);
 
@@ -252,6 +256,26 @@ public class ClienteService {
             "tenantId", tenantId, "clientId", c.getId(), "email", c.getEmail(),
             "phone", c.getPhone(), "clientType", c.getClientType()));
     return toListResponse(c, afterStats, List.of());
+  }
+
+  /**
+   * O telefone e unico por salao ({@code uq_clients_tenant_phone}). Sem esta conferencia o banco recusava
+   * e a tela mostrava "erro inesperado" (500) — analise de 15/11/2026, defeito A2. Confere antes de
+   * {@code aplicar}, com o telefone ja normalizado, porque depois a consulta descarregaria a alteracao
+   * no banco e o erro voltaria.
+   */
+  private void recusarTelefoneRepetido(UUID tenantId, ClienteRequest req, Cliente c) {
+    String telefone =
+        br.com.phdigitalcode.azzo.agenda.pro.util.TelefoneBr.normalizarSeMudou(req.phone, c.getPhone());
+    if (telefone == null || telefone.isBlank()) return;
+    clienteRepository.findFirstByTenantIdAndPhone(tenantId, telefone)
+        .filter(outro -> !outro.getId().equals(c.getId()))
+        .ifPresent(outro -> {
+          throw new ApiClientErrorException(
+              "Já existe um cliente com este telefone: " + outro.getName()
+                  + ". Procure o cadastro dele na lista de clientes.",
+              409);
+        });
   }
 
   @Transactional

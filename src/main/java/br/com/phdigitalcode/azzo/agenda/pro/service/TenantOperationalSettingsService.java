@@ -688,7 +688,13 @@ public class TenantOperationalSettingsService {
     List<TenantBusinessHours> rows =
         businessHoursRepository.findByTenantIdOrderByDayOfWeekAsc(tenantId);
     if (rows.isEmpty()) {
-      // fallback: inicializa com defaults
+      // Salao sem horarios ainda (salao novo). Em transacao so de leitura (perfil do salao, pagina
+      // publica, assistente) nao da para gravar: o INSERT dava erro 500 na primeira abertura do
+      // perfil (analise de 15/11/2026). Ai devolve o padrao sem gravar; grava na primeira leitura
+      // com escrita ou quando o dono salva os horarios.
+      if (TransactionSynchronizationManager.isCurrentTransactionReadOnly()) {
+        return horariosPadrao(tenantId).stream().map(this::toBusinessHoursItemResponse).toList();
+      }
       initDefaultBusinessHours(tenantId);
       rows = businessHoursRepository.findByTenantIdOrderByDayOfWeekAsc(tenantId);
     }
@@ -750,6 +756,16 @@ public class TenantOperationalSettingsService {
   }
 
   private void initDefaultBusinessHours(UUID tenantId) {
+    for (TenantBusinessHours entity : horariosPadrao(tenantId)) {
+      businessHoursRepository.save(entity);
+    }
+    // Panache emite o INSERT no persist(); aqui o flush e explicito porque o chamador
+    // (getBusinessHoursFromTable) rele a tabela em seguida (armadilha 2).
+    businessHoursRepository.flush();
+  }
+
+  /** Os sete dias padrao de um salao novo, sem gravar. */
+  private static List<TenantBusinessHours> horariosPadrao(UUID tenantId) {
     String[][] defaults = {
       {"MONDAY", "09:00", "19:00", "true"},
       {"TUESDAY", "09:00", "19:00", "true"},
@@ -759,6 +775,7 @@ public class TenantOperationalSettingsService {
       {"SATURDAY", "09:00", "17:00", "true"},
       {"SUNDAY", "09:00", "13:00", "false"}
     };
+    List<TenantBusinessHours> dias = new ArrayList<>();
     for (String[] d : defaults) {
       TenantBusinessHours entity = new TenantBusinessHours();
       entity.setTenantId(tenantId);
@@ -766,11 +783,9 @@ public class TenantOperationalSettingsService {
       entity.setOpenTime(LocalTime.parse(d[1]));
       entity.setCloseTime(LocalTime.parse(d[2]));
       entity.setEnabled(Boolean.parseBoolean(d[3]));
-      businessHoursRepository.save(entity);
+      dias.add(entity);
     }
-    // Panache emite o INSERT no persist(); aqui o flush e explicito porque o chamador
-    // (getBusinessHoursFromTable) rele a tabela em seguida (armadilha 2).
-    businessHoursRepository.flush();
+    return dias;
   }
 
   private LocalTime parseLocalTime(String value, LocalTime fallback) {

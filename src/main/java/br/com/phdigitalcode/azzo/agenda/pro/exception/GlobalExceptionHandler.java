@@ -214,6 +214,12 @@ public class GlobalExceptionHandler {
     // Pentest 14/10/2026 (SEG-013): falha inesperada (NPE, banco fora, bug) saia como 400 e era
     // logada so como WARN, sem a pilha — parecia erro do cliente e escondia defeito do servidor.
     if (isUnexpected) status = 500;
+    // Dois cadastros ao mesmo tempo com o mesmo telefone passam pela conferencia do ClienteService e o
+    // banco recusa o segundo; sai como conflito com mensagem clara, e nao como 500 (analise de 15/11, A2).
+    if (isUnexpected && root.getMessage() != null && root.getMessage().contains("uq_clients_tenant_phone")) {
+      status = 409;
+      msg = "Já existe um cliente com este telefone. Procure o cadastro dele na lista de clientes.";
+    }
 
     if (root instanceof IllegalArgumentException) {
       // Id malformado (na URL ou no corpo) chegava como "Invalid UUID string: abc" (relatorio de 14/11, Baixo 1).
