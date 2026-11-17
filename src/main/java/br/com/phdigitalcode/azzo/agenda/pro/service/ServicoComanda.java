@@ -1433,8 +1433,7 @@ public class ServicoComanda {
     UUID categoriaVendasId = resolveTransactionCategoryId(tenantId, "VENDAS");
     MetodoPagamento metodoPagamento = resolveMetodoPagamentoRepresentativo(pagamentos);
     List<AlocacaoPagamento> carteiraPagamentos = construirCarteiraPagamentos(pagamentos);
-    List<BigDecimal> valoresLiquidosPorItem =
-        ratearDesconto(itens, comanda.getSubtotal(), comanda.getTotal());
+    List<BigDecimal> valoresLiquidosPorItem = ratearDescontoComCupom(comanda, itens);
 
     // A sessao so e descontada do pacote/assinatura AGORA: conferir de novo, porque outra comanda
     // pode ter usado o saldo entre a escolha e o fechamento.
@@ -1626,6 +1625,85 @@ public class ServicoComanda {
       BigDecimal valor = item.getTotal().multiply(fator).setScale(2, RoundingMode.HALF_UP);
       valores.add(valor);
       acumulado = NumericUtil.add(acumulado, valor);
+    }
+    return valores;
+  }
+
+  /**
+   * O rateio do fechamento. Sem cupom de lista, e o {@link #ratearDesconto} de sempre. Com cupom de lista (V182), o
+   * valor do cupom sai so dos servicos dela (a comissao de quem fez outro servico nao cai por causa do cupom), e o
+   * resto do desconto (manual e pontos) se divide por todos, como antes.
+   */
+  List<BigDecimal> ratearDescontoComCupom(Comanda comanda, List<ComandaItem> itens) {
+    java.util.Set<UUID> servicosDoCupom = comanda.getCupomId() == null || servicoDeCupons == null
+        ? java.util.Set.of()
+        : servicoDeCupons.porId(comanda.getTenantId(), comanda.getCupomId())
+            .map(servicoDeCupons::servicosDoCupom).orElse(java.util.Set.of());
+    BigDecimal valorCupom = comanda.getValorCupom() == null ? BigDecimal.ZERO : comanda.getValorCupom();
+    if (servicosDoCupom.isEmpty() || valorCupom.signum() <= 0) {
+      return ratearDesconto(itens, comanda.getSubtotal(), comanda.getTotal());
+    }
+    return ratearComCupomDeLista(itens, comanda.getSubtotal(), comanda.getTotal(), valorCupom, servicosDoCupom);
+  }
+
+  /** Rateio com cupom de lista: primeiro o cupom so nos servicos da lista, depois o resto sobre todos. */
+  static List<BigDecimal> ratearComCupomDeLista(List<ComandaItem> itens, BigDecimal subtotal, BigDecimal total,
+      BigDecimal valorCupom, java.util.Set<UUID> servicosDoCupom) {
+    // 1) O cupom sai dos servicos da lista, na proporcao do valor de cada um.
+    List<BigDecimal> depoisDoCupom = new ArrayList<>();
+    BigDecimal baseDoCupom = BigDecimal.ZERO;
+    int ultimoDaLista = -1;
+    for (int i = 0; i < itens.size(); i++) {
+      ComandaItem item = itens.get(i);
+      if (ComandaItem.TIPO_SERVICO.equals(item.getTipo()) && servicosDoCupom.contains(item.getReferenciaId())
+          && item.getTotal() != null && item.getTotal().signum() > 0) {
+        baseDoCupom = NumericUtil.add(baseDoCupom, item.getTotal());
+        ultimoDaLista = i;
+      }
+    }
+    BigDecimal cupom = valorCupom.min(baseDoCupom);
+    BigDecimal tirado = BigDecimal.ZERO;
+    for (int i = 0; i < itens.size(); i++) {
+      ComandaItem item = itens.get(i);
+      BigDecimal valor = item.getTotal() == null ? BigDecimal.ZERO : item.getTotal();
+      boolean daLista = ComandaItem.TIPO_SERVICO.equals(item.getTipo()) && servicosDoCupom.contains(item.getReferenciaId());
+      if (daLista && baseDoCupom.signum() > 0 && valor.signum() > 0) {
+        BigDecimal parte = i == ultimoDaLista
+            ? NumericUtil.maxZero(NumericUtil.subtract(cupom, tirado))
+            : valor.multiply(cupom).divide(baseDoCupom, 2, RoundingMode.HALF_UP);
+        parte = parte.min(valor);
+        tirado = NumericUtil.add(tirado, parte);
+        valor = NumericUtil.subtract(valor, parte);
+      }
+      depoisDoCupom.add(valor);
+    }
+    // 2) O resto do desconto (manual e pontos) sobre o que sobrou, como o rateio de sempre (o vale fica cheio).
+    BigDecimal restoDoDesconto = NumericUtil.maxZero(
+        NumericUtil.subtract(NumericUtil.subtract(subtotal, total), tirado));
+    BigDecimal baseDoResto = BigDecimal.ZERO;
+    int ultimoDoResto = -1;
+    for (int i = 0; i < itens.size(); i++) {
+      if (ComandaItem.TIPO_VALE.equals(itens.get(i).getTipo())) continue;
+      if (depoisDoCupom.get(i).signum() > 0) {
+        baseDoResto = NumericUtil.add(baseDoResto, depoisDoCupom.get(i));
+        ultimoDoResto = i;
+      }
+    }
+    List<BigDecimal> valores = new ArrayList<>();
+    BigDecimal distribuido = BigDecimal.ZERO;
+    for (int i = 0; i < itens.size(); i++) {
+      BigDecimal valor = depoisDoCupom.get(i);
+      if (ComandaItem.TIPO_VALE.equals(itens.get(i).getTipo()) || restoDoDesconto.signum() <= 0
+          || baseDoResto.signum() <= 0 || valor.signum() <= 0) {
+        valores.add(valor);
+        continue;
+      }
+      BigDecimal parte = i == ultimoDoResto
+          ? NumericUtil.maxZero(NumericUtil.subtract(restoDoDesconto, distribuido))
+          : valor.multiply(restoDoDesconto).divide(baseDoResto, 2, RoundingMode.HALF_UP);
+      parte = parte.min(valor);
+      distribuido = NumericUtil.add(distribuido, parte);
+      valores.add(NumericUtil.subtract(valor, parte));
     }
     return valores;
   }
@@ -2498,10 +2576,14 @@ public class ServicoComanda {
     // Cupom (item 6): o de % acompanha a conta; abaixo do valor minimo, sai sozinho e o uso volta ao cupom.
     if (comanda.getCupomId() != null && servicoDeCupons != null && !cupomVeioDoAgendamento(comanda)) {
       var cupom = servicoDeCupons.porId(comanda.getTenantId(), comanda.getCupomId()).orElse(null);
-      if (cupom == null || (cupom.getValorMinimo() != null && base.compareTo(cupom.getValorMinimo()) < 0)) {
+      // Cupom de lista (V182): sem nenhum servico dela na conta, sai tambem.
+      java.util.Set<UUID> servicosDoCupom = cupom == null ? java.util.Set.of() : servicoDeCupons.servicosDoCupom(cupom);
+      BigDecimal elegivel = ServicoDeCupons.baseElegivel(servicosDoCupom, base, valorPorServico(itens));
+      if (cupom == null || (cupom.getValorMinimo() != null && base.compareTo(cupom.getValorMinimo()) < 0)
+          || elegivel.signum() <= 0) {
         tirarCupom(comanda);
       } else {
-        BigDecimal novo = ServicoDeCupons.desconto(cupom, base);
+        BigDecimal novo = ServicoDeCupons.desconto(cupom, elegivel);
         if (novo.compareTo(comanda.getValorCupom()) != 0) {
           comanda.setValorCupom(novo);
           servicoDeCupons.atualizarValorDaComanda(comanda.getId(), novo);
@@ -2519,6 +2601,16 @@ public class ServicoComanda {
     comanda.setDesconto(base.min(NumericUtil.add(manual,
         NumericUtil.add(comanda.getValorResgateFidelidade(), comanda.getValorCupom()))));
     comanda.setTotal(NumericUtil.maxZero(NumericUtil.subtract(subtotal, comanda.getDesconto())));
+  }
+
+  /** Quanto cada servico soma na conta (para o cupom de lista, V182). Servico coberto por pacote soma 0. */
+  static Map<UUID, BigDecimal> valorPorServico(List<ComandaItem> itens) {
+    Map<UUID, BigDecimal> mapa = new HashMap<>();
+    for (ComandaItem item : itens) {
+      if (!ComandaItem.TIPO_SERVICO.equals(item.getTipo()) || item.getReferenciaId() == null) continue;
+      mapa.merge(item.getReferenciaId(), item.getTotal() == null ? BigDecimal.ZERO : item.getTotal(), NumericUtil::add);
+    }
+    return mapa;
   }
 
   /** Soma dos itens que aceitam desconto: tudo menos o vale-presente vendido. */
@@ -2556,9 +2648,11 @@ public class ServicoComanda {
     if (base.signum() <= 0) throw new IllegalArgumentException("Lance os serviços ou produtos antes do cupom.");
     var cupom = servicoDeCupons.buscarPorCodigo(tenantId, codigo);
     Map<String, Object> antes = dadosDoDesconto(comanda);
-    servicoDeCupons.reservar(tenantId, cupom.getId(), comanda.getId(), null, comanda.getClientId(), base);
+    Map<UUID, BigDecimal> porServico = valorPorServico(itens);
+    servicoDeCupons.reservar(tenantId, cupom.getId(), comanda.getId(), null, comanda.getClientId(), base, porServico);
 
-    BigDecimal valor = ServicoDeCupons.desconto(cupom, base);
+    BigDecimal valor = ServicoDeCupons.desconto(cupom,
+        ServicoDeCupons.baseElegivel(servicoDeCupons.servicosDoCupom(cupom), base, porServico));
     comanda.setDesconto(NumericUtil.add(comanda.getDesconto(), valor));
     comanda.setCupomId(cupom.getId());
     comanda.setValorCupom(valor);

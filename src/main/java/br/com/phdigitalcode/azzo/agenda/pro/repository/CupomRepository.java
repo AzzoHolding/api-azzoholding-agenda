@@ -56,4 +56,26 @@ public interface CupomRepository extends JpaRepository<Cupom, UUID> {
 
   @Query(value = "select usos from cupons where id = :id", nativeQuery = true)
   int usosAtuais(@Param("id") UUID id);
+
+  // ─── So alguns servicos (V182) ────────────────────────────────────────────
+
+  @Query(value = "select service_id from cupom_servicos where cupom_id = :cupomId", nativeQuery = true)
+  List<UUID> servicosDoCupom(@Param("cupomId") UUID cupomId);
+
+  @Query(value = "select service_id from lote_de_cupom_servicos where lote_id = :loteId", nativeQuery = true)
+  List<UUID> servicosDoLote(@Param("loteId") UUID loteId);
+
+  @Modifying(flushAutomatically = true)
+  @Query(value = "delete from cupom_servicos where cupom_id = :cupomId", nativeQuery = true)
+  int limparServicosDoCupom(@Param("cupomId") UUID cupomId);
+
+  @Modifying(flushAutomatically = true)
+  @Query(value = "insert into cupom_servicos (cupom_id, service_id) values (:cupomId, :serviceId) on conflict do nothing",
+      nativeQuery = true)
+  int incluirServicoNoCupom(@Param("cupomId") UUID cupomId, @Param("serviceId") UUID serviceId);
+
+  @Modifying(flushAutomatically = true)
+  @Query(value = "insert into lote_de_cupom_servicos (lote_id, service_id) values (:loteId, :serviceId) on conflict do nothing",
+      nativeQuery = true)
+  int incluirServicoNoLote(@Param("loteId") UUID loteId, @Param("serviceId") UUID serviceId);
 }

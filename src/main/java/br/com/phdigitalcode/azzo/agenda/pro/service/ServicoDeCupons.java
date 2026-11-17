@@ -31,6 +31,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.integration.AuditService;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.ClienteRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.CupomRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.LoteDeCupomRepository;
+import br.com.phdigitalcode.azzo.agenda.pro.repository.ServicoRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.repository.UsoDeCupomRepository;
 import br.com.phdigitalcode.azzo.agenda.pro.security.AuthenticatedUser;
 import br.com.phdigitalcode.azzo.agenda.pro.security.ContextoTenant;
@@ -60,6 +61,14 @@ public class ServicoDeCupons {
   private final UsoDeCupomRepository usoRepository;
   private final ClienteRepository clienteRepository;
   private final AuditService auditService;
+
+  /** Nomes dos servicos da lista do cupom (V182). Por setter: o construtor nao muda. */
+  private ServicoRepository servicoRepository;
+
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setServicoRepository(ServicoRepository servicoRepository) {
+    this.servicoRepository = servicoRepository;
+  }
 
   public ServicoDeCupons(
       ContextoTenant contextoTenant,
@@ -91,6 +100,76 @@ public class ServicoDeCupons {
 
   public static BigDecimal desconto(Cupom cupom, BigDecimal base) {
     return desconto(cupom.getTipo(), cupom.getValor(), base);
+  }
+
+  // ─── So alguns servicos (V182) ─────────────────────────────────────────────
+
+  /** Os servicos que ganham o desconto. Vazio = a conta toda. O codigo de lote segue a lista do lote. */
+  public java.util.Set<UUID> servicosDoCupom(Cupom c) {
+    List<UUID> ids = c.getLoteId() != null
+        ? cupomRepository.servicosDoLote(c.getLoteId())
+        : cupomRepository.servicosDoCupom(c.getId());
+    return new java.util.LinkedHashSet<>(ids);
+  }
+
+  /**
+   * Sobre quanto o cupom desconta: a conta toda, ou so o valor dos servicos da lista.
+   *
+   * @param valorPorServico quanto cada servico soma na conta (servico -> valor)
+   */
+  public static BigDecimal baseElegivel(
+      java.util.Set<UUID> servicos, BigDecimal baseTotal, Map<UUID, BigDecimal> valorPorServico) {
+    if (servicos == null || servicos.isEmpty()) return baseTotal == null ? BigDecimal.ZERO : baseTotal;
+    BigDecimal soma = BigDecimal.ZERO;
+    for (UUID id : servicos) {
+      BigDecimal v = valorPorServico == null ? null : valorPorServico.get(id);
+      if (v != null) soma = soma.add(v);
+    }
+    return soma.setScale(2, RoundingMode.HALF_UP);
+  }
+
+  /** Recusa o cupom de lista quando a conta nao tem nenhum servico dela: diz quais servicos sao. */
+  void exigirServicoDaLista(UUID tenantId, Cupom c, java.util.Set<UUID> servicos, BigDecimal elegivel) {
+    if (servicos.isEmpty() || elegivel.signum() > 0) return;
+    throw new IllegalArgumentException("Este cupom vale só para: " + String.join(", ", nomes(tenantId, servicos)) + ".");
+  }
+
+  private List<String> nomes(UUID tenantId, java.util.Collection<UUID> ids) {
+    if (servicoRepository == null || ids.isEmpty()) return List.of();
+    return servicoRepository.findByTenantIdAndIdIn(tenantId, ids).stream()
+        .map(br.com.phdigitalcode.azzo.agenda.pro.entity.Servico::getName).sorted().toList();
+  }
+
+  private List<CupomDtos.ServicoDoCupom> servicosParaTela(UUID tenantId, java.util.Collection<UUID> ids) {
+    if (servicoRepository == null || ids.isEmpty()) return new ArrayList<>();
+    List<CupomDtos.ServicoDoCupom> lista = new ArrayList<>();
+    for (var s : servicoRepository.findByTenantIdAndIdIn(tenantId, ids)) {
+      CupomDtos.ServicoDoCupom r = new CupomDtos.ServicoDoCupom();
+      r.id = s.getId().toString();
+      r.nome = s.getName();
+      lista.add(r);
+    }
+    lista.sort(java.util.Comparator.comparing(r -> r.nome == null ? "" : r.nome));
+    return lista;
+  }
+
+  /** Os servicos pedidos, conferidos: do salao, e com id valido. */
+  private java.util.Set<UUID> servicosPedidos(UUID tenantId, List<String> ids) {
+    java.util.Set<UUID> pedidos = new java.util.LinkedHashSet<>();
+    if (ids == null) return pedidos;
+    for (String id : ids) {
+      if (id == null || id.isBlank()) continue;
+      try {
+        pedidos.add(UUID.fromString(id.trim()));
+      } catch (IllegalArgumentException e) {
+        throw new IllegalArgumentException("Serviço inválido na lista do cupom.");
+      }
+    }
+    if (pedidos.isEmpty()) return pedidos;
+    if (servicoRepository != null && servicoRepository.findByTenantIdAndIdIn(tenantId, pedidos).size() != pedidos.size()) {
+      throw new IllegalArgumentException("Um dos serviços da lista não é deste salão.");
+    }
+    return pedidos;
   }
 
   /** Situacao do cupom hoje: VALIDO, AGENDADO, VENCIDO, ESGOTADO ou INATIVO. */
@@ -158,14 +237,18 @@ public class ServicoDeCupons {
    * contado quando o telefone ja e de alguem; o pedido do horario confere de novo, com a cliente gravada.
    */
   @Transactional(readOnly = true)
-  public BigDecimal simularPublico(UUID tenantId, String codigo, UUID clienteIdOuNulo, BigDecimal base) {
+  public BigDecimal simularPublico(UUID tenantId, String codigo, UUID clienteIdOuNulo, BigDecimal base,
+      Map<UUID, BigDecimal> valorPorServico) {
     Cupom c = buscarPorCodigoPublico(tenantId, codigo);
     conferirRegras(c, clienteIdOuNulo == null ? CLIENTE_A_CADASTRAR : clienteIdOuNulo, base, hoje());
     if (c.getLimitePorCliente() != null && clienteIdOuNulo != null
         && usoRepository.contarAtivosDoCliente(c.getId(), clienteIdOuNulo) >= c.getLimitePorCliente()) {
       throw new IllegalArgumentException("Você já usou este cupom.");
     }
-    return desconto(c, base);
+    java.util.Set<UUID> servicos = servicosDoCupom(c);
+    BigDecimal elegivel = baseElegivel(servicos, base, valorPorServico);
+    exigirServicoDaLista(tenantId, c, servicos, elegivel);
+    return desconto(c, elegivel);
   }
 
   /** Marcador para a regra "limite por cliente exige cliente": no link, a cliente ainda vai ser cadastrada. */
@@ -190,9 +273,22 @@ public class ServicoDeCupons {
   @Transactional
   public UsoDeCupom reservar(UUID tenantId, UUID cupomId, UUID comandaId, UUID appointmentId, UUID clienteId,
       BigDecimal base) {
+    return reservar(tenantId, cupomId, comandaId, appointmentId, clienteId, base, null);
+  }
+
+  /**
+   * Como {@link #reservar(UUID, UUID, UUID, UUID, UUID, BigDecimal)}, com o valor de cada servico da conta: o cupom
+   * de lista desconta so sobre os servicos dela (V182), e e recusado quando a conta nao tem nenhum deles.
+   */
+  @Transactional
+  public UsoDeCupom reservar(UUID tenantId, UUID cupomId, UUID comandaId, UUID appointmentId, UUID clienteId,
+      BigDecimal base, Map<UUID, BigDecimal> valorPorServico) {
     Cupom c = cupomRepository.travar(cupomId, tenantId)
         .orElseThrow(() -> new IllegalArgumentException("Cupom não encontrado. Confira o código."));
     conferirRegras(c, clienteId, base, hoje());
+    java.util.Set<UUID> servicos = servicosDoCupom(c);
+    BigDecimal elegivel = baseElegivel(servicos, base, valorPorServico);
+    exigirServicoDaLista(tenantId, c, servicos, elegivel);
     if (c.getLimitePorCliente() != null
         && usoRepository.contarAtivosDoCliente(c.getId(), clienteId) >= c.getLimitePorCliente()) {
       throw new IllegalArgumentException("Este cupom já foi usado por esta cliente.");
@@ -206,7 +302,7 @@ public class ServicoDeCupons {
     uso.setComandaId(comandaId);
     uso.setAppointmentId(appointmentId);
     uso.setClientId(clienteId);
-    uso.setValorDesconto(desconto(c, base));
+    uso.setValorDesconto(desconto(c, elegivel));
     uso.setCreatedBy(authenticatedUser.idOuNulo());
     usoRepository.saveAndFlush(uso);
     return uso;
@@ -290,8 +386,12 @@ public class ServicoDeCupons {
     c.setCodigo(codigo);
     aplicar(req, c);
     c.setCreatedBy(authenticatedUser.idOuNulo());
+    java.util.Set<UUID> servicos = servicosPedidos(tenantId, req.servicoIds);
     cupomRepository.saveAndFlush(c);
-    auditar(tenantId, "COUPON_CREATE", "COUPON", c.getId(), null, dados(c));
+    for (UUID s : servicos) cupomRepository.incluirServicoNoCupom(c.getId(), s);
+    Map<String, Object> depois = dados(c);
+    depois.put("servicos", servicos.stream().map(UUID::toString).toList());
+    auditar(tenantId, "COUPON_CREATE", "COUPON", c.getId(), null, depois);
     return toResponse(cupomRepository.findById(c.getId()).orElse(c), hoje());
   }
 
@@ -316,8 +416,14 @@ public class ServicoDeCupons {
     if (c.getLimiteTotal() != null && c.getLimiteTotal() < c.getUsos()) {
       throw new IllegalArgumentException("O limite não pode ficar abaixo dos " + c.getUsos() + " usos que o cupom já teve.");
     }
+    java.util.Set<UUID> servicos = servicosPedidos(tenantId, req.servicoIds);
+    antes.put("servicos", cupomRepository.servicosDoCupom(c.getId()).stream().map(UUID::toString).toList());
     cupomRepository.saveAndFlush(c);
-    auditar(tenantId, "COUPON_UPDATE", "COUPON", c.getId(), antes, dados(c));
+    cupomRepository.limparServicosDoCupom(c.getId());
+    for (UUID s : servicos) cupomRepository.incluirServicoNoCupom(c.getId(), s);
+    Map<String, Object> depois = dados(c);
+    depois.put("servicos", servicos.stream().map(UUID::toString).toList());
+    auditar(tenantId, "COUPON_UPDATE", "COUPON", c.getId(), antes, depois);
     return toResponse(c, hoje());
   }
 
@@ -398,7 +504,9 @@ public class ServicoDeCupons {
     lote.setValorMinimo(req.valorMinimo);
     lote.setCreatedBy(authenticatedUser.idOuNulo());
     lote.setQuantidade(req.quantidade);
+    java.util.Set<UUID> servicos = servicosPedidos(tenantId, req.servicoIds);
     loteRepository.saveAndFlush(lote);
+    for (UUID s : servicos) cupomRepository.incluirServicoNoLote(lote.getId(), s);
     gerarCodigos(tenantId, lote, req.quantidade);
     auditar(tenantId, "COUPON_BATCH_CREATE", "COUPON_BATCH", lote.getId(), null, dados(lote));
     return acompanhar(lote.getId(), null);
@@ -591,6 +699,7 @@ public class ServicoDeCupons {
         default -> r.naoUsados++;
       }
     }
+    r.servicos = servicosParaTela(lote.getTenantId(), cupomRepository.servicosDoLote(lote.getId()));
   }
 
   private LoteDeCupom loteOuFalhar(UUID tenantId, UUID loteId) {
@@ -626,6 +735,7 @@ public class ServicoDeCupons {
     r.ativo = c.isAtivo();
     r.situacao = situacao(c, hoje);
     r.createdAt = c.getCreatedAt() == null ? null : c.getCreatedAt().toString();
+    r.servicos = servicosParaTela(c.getTenantId(), servicosDoCupom(c));
     return r;
   }
 

@@ -136,4 +136,38 @@ class CuponsEValesRegrasTest {
     i.setTotal(new BigDecimal(total));
     return i;
   }
+
+  // ─── Cupom so para alguns servicos (V182) ─────────────────────────────────
+
+  @Test
+  @DisplayName("base do cupom de lista: so o valor dos servicos da lista; sem lista, a conta toda")
+  void baseElegivel() {
+    UUID escova = UUID.randomUUID();
+    UUID corte = UUID.randomUUID();
+    java.util.Map<UUID, BigDecimal> valores = java.util.Map.of(escova, new BigDecimal("60.00"), corte, new BigDecimal("80.00"));
+    assertThat(ServicoDeCupons.baseElegivel(Set.of(), new BigDecimal("140.00"), valores)).isEqualByComparingTo("140.00");
+    assertThat(ServicoDeCupons.baseElegivel(Set.of(escova), new BigDecimal("140.00"), valores)).isEqualByComparingTo("60.00");
+    assertThat(ServicoDeCupons.baseElegivel(Set.of(UUID.randomUUID()), new BigDecimal("140.00"), valores)).isEqualByComparingTo("0");
+  }
+
+  @Test
+  @DisplayName("fechamento com cupom de lista: o cupom sai so da escova; o desconto manual se divide por todos")
+  void rateioComCupomDeLista() {
+    UUID escova = UUID.randomUUID();
+    ComandaItem itemEscova = servicoItem(escova, "60.00");
+    ComandaItem itemCorte = servicoItem(UUID.randomUUID(), "80.00");
+    // Cupom de R$ 12 so na escova; desconto manual de R$ 12,80 (10% de 128): total 140 - 12 - 12,80 = 115,20
+    List<BigDecimal> valores = ServicoComanda.ratearComCupomDeLista(List.of(itemEscova, itemCorte),
+        new BigDecimal("140.00"), new BigDecimal("115.20"), new BigDecimal("12.00"), Set.of(escova));
+    // Escova: 60 - 12 = 48, depois 10% -> 43,20. Corte: 80, depois 10% -> 72,00.
+    assertThat(valores.get(0)).isEqualByComparingTo("43.20");
+    assertThat(valores.get(1)).isEqualByComparingTo("72.00");
+    assertThat(valores.get(0).add(valores.get(1))).isEqualByComparingTo("115.20");
+  }
+
+  private static ComandaItem servicoItem(UUID servico, String total) {
+    ComandaItem i = item(ComandaItem.TIPO_SERVICO, total);
+    i.setReferenciaId(servico);
+    return i;
+  }
 }

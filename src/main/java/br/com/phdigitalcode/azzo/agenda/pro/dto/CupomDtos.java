@@ -35,6 +35,15 @@ public final class CupomDtos {
 
     @DecimalMin(value = "0.01", message = "O valor mínimo precisa ser maior que zero")
     public BigDecimal valorMinimo;
+
+    /** So estes servicos ganham o desconto (V182). Vazio = a conta toda. */
+    public List<String> servicoIds = new ArrayList<>();
+  }
+
+  /** Um servico da lista do cupom, com o nome para a tela. */
+  public static class ServicoDoCupom {
+    public String id;
+    public String nome;
   }
 
   public static class CupomRequest extends RegrasDoDesconto {
@@ -70,6 +79,8 @@ public final class CupomDtos {
     /** VALIDO, AGENDADO (inicio futuro), VENCIDO, ESGOTADO, INATIVO. */
     public String situacao;
     public String createdAt;
+    /** Vazio = vale para a conta toda. */
+    public List<ServicoDoCupom> servicos = new ArrayList<>();
   }
 
   public static class UsoResponse {
@@ -124,6 +135,8 @@ public final class CupomDtos {
     public int vencidos;
     public int desativados;
     public String createdAt;
+    /** Vazio = vale para a conta toda. */
+    public List<ServicoDoCupom> servicos = new ArrayList<>();
   }
 
   public static class CodigoDoLoteResponse {
