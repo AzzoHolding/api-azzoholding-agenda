@@ -143,6 +143,35 @@ public class GlobalExceptionHandler {
     return buildErrorResponse(HttpStatus.BAD_REQUEST.value(), payload, ex);
   }
 
+  /**
+   * Parametro obrigatorio ausente saia como 400 sem mensagem (analise de 15/11/2026, B3:
+   * /reports/heatmap, /reports/commissions, /reports/daily).
+   */
+  @ExceptionHandler(org.springframework.web.bind.MissingServletRequestParameterException.class)
+  public ResponseEntity<ErrorResponse> handleParametroAusente(
+      org.springframework.web.bind.MissingServletRequestParameterException ex) {
+    ErrorResponse payload = new ErrorResponse(
+        resolveCode(400), "Parâmetro obrigatório ausente: " + ex.getParameterName() + ".", null, resolvePath());
+    return buildErrorResponse(HttpStatus.BAD_REQUEST.value(), payload, ex);
+  }
+
+  /** Parametro com tipo errado (texto onde se espera numero, etc.). */
+  @ExceptionHandler(org.springframework.web.method.annotation.MethodArgumentTypeMismatchException.class)
+  public ResponseEntity<ErrorResponse> handleParametroInvalido(
+      org.springframework.web.method.annotation.MethodArgumentTypeMismatchException ex) {
+    ErrorResponse payload = new ErrorResponse(
+        resolveCode(400), "Parâmetro inválido: " + ex.getName() + ".", null, resolvePath());
+    return buildErrorResponse(HttpStatus.BAD_REQUEST.value(), payload, ex);
+  }
+
+  /** Rota que nao existe: 404 com mensagem, e nao corpo vazio (analise de 15/11/2026, B7). */
+  @ExceptionHandler(org.springframework.web.servlet.resource.NoResourceFoundException.class)
+  public ResponseEntity<ErrorResponse> handleRotaInexistente(
+      org.springframework.web.servlet.resource.NoResourceFoundException ex) {
+    ErrorResponse payload = new ErrorResponse(resolveCode(404), "Rota não encontrada.", null, resolvePath());
+    return buildErrorResponse(HttpStatus.NOT_FOUND.value(), payload, ex);
+  }
+
   @ExceptionHandler(AsaasException.class)
   public ResponseEntity<ErrorResponse> handleAsaas(AsaasException ex) {
     ErrorResponse payload = new ErrorResponse(

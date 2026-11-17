@@ -27,9 +27,11 @@ public final class TelefoneBr {
    * @throws IllegalArgumentException quando informado e nao e um telefone valido
    */
   public static String normalizarOuFalhar(String telefone) {
-    if (telefone == null) return null;
+    if (telefone == null || telefone.isBlank()) return null;
     String digitos = telefone.replaceAll("\\D", "");
-    if (digitos.isEmpty()) return null;
+    // Mascara vazia (" () - ") e campo vazio. Mas "abc" virava telefone vazio e o cadastro passava
+    // sem telefone (analise de 15/11/2026, M3): letra e telefone invalido.
+    if (digitos.isEmpty() && telefone.matches("[\\s()+.\\-]*")) return null;
     if (!valido(digitos)) throw new IllegalArgumentException(MENSAGEM_INVALIDO);
     return digitos;
   }

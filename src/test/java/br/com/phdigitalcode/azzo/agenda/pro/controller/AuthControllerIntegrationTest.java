@@ -37,6 +37,12 @@ import jakarta.servlet.http.Cookie;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.MOCK)
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
+// A classe cadastra e entra varias vezes do mesmo IP; com o limite de producao (3 cadastros em 10
+// min) os ultimos testes recebiam 429 (analise de 15/11/2026, M8).
+@org.springframework.test.context.TestPropertySource(properties = {
+    "app.rate-limit.auth-register.max-attempts=100",
+    "app.rate-limit.auth-login.max-attempts=100"
+})
 @Testcontainers(disabledWithoutDocker = true)
 class AuthControllerIntegrationTest {
 
@@ -54,6 +60,21 @@ class AuthControllerIntegrationTest {
   @Autowired private ObjectMapper objectMapper;
   @Autowired private br.com.phdigitalcode.azzo.agenda.pro.repository.EmailJobRepository emailJobRepository;
 
+  private static String cpfValidoAleatorio() {
+    java.util.Random r = new java.util.Random();
+    int[] d = new int[11];
+    for (int i = 0; i < 9; i++) d[i] = r.nextInt(10);
+    for (int pos = 9; pos < 11; pos++) {
+      int soma = 0;
+      for (int i = 0; i < pos; i++) soma += d[i] * (pos + 1 - i);
+      int resto = (soma * 10) % 11;
+      d[pos] = resto == 10 ? 0 : resto;
+    }
+    StringBuilder cpf = new StringBuilder();
+    for (int x : d) cpf.append(x);
+    return cpf.toString();
+  }
+
   private RegisterRequest buildRegisterRequest(String email) {
     RegisterRequest request = new RegisterRequest();
     request.name = "Maria Dona";
@@ -61,11 +82,15 @@ class AuthControllerIntegrationTest {
     request.password = "SenhaForte@123";
     request.salonName = "Salao da Maria";
     request.phone = "11999998888";
-    request.cpfCnpj = "52998224725"; // CPF valido em formato (11 digitos)
+    // Um CPF por cadastro: o periodo de avaliacao e um por documento, e o segundo teste com o mesmo
+    // CPF era recusado ("CPF/CNPJ ja utilizou o plano gratuito").
+    request.cpfCnpj = cpfValidoAleatorio();
     request.acceptedTermsOfUse = true;
     request.acceptedPrivacyPolicy = true;
-    request.termsOfUseVersion = "v1";
-    request.privacyPolicyVersion = "v1";
+    // As versoes publicadas pelas migrations (V12: termos 2026.03; V146: politica 2026.10). "v1" nao
+    // existe e o cadastro respondia 400 "Versao de termo nao encontrada".
+    request.termsOfUseVersion = "2026.03";
+    request.privacyPolicyVersion = "2026.10";
     return request;
   }
 
@@ -159,7 +184,7 @@ class AuthControllerIntegrationTest {
             .contentType("application/json")
             .content(objectMapper.writeValueAsString(loginRequest)))
         .andExpect(status().isUnauthorized())
-        .andExpect(jsonPath("$.message").value("Credenciais invalidas Revise os dados informados e tente novamente."));
+        .andExpect(jsonPath("$.message").value("Credenciais inválidas Revise os dados informados e tente novamente."));
   }
 
   @Test

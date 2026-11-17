@@ -29,7 +29,7 @@ import br.com.phdigitalcode.azzo.agenda.pro.repository.TenantRepository;
 class FiscalAccessServiceTest {
 
   private static final String MENSAGEM_NEGADO =
-      "Modulo fiscal disponivel apenas para empresas com CNPJ cadastrado.";
+      "O módulo fiscal é para empresas com CNPJ. Cadastre o CNPJ do salão em Configurações para emitir notas.";
 
   @Mock private TenantRepository tenantRepository;
 

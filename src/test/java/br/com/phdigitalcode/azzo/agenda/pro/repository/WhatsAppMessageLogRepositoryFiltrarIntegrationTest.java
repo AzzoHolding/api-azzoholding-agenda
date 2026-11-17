@@ -53,7 +53,9 @@ class WhatsAppMessageLogRepositoryFiltrarIntegrationTest {
   void filtrarSemStatusNemPeriodoNaoLancaErroDeTipoDeParametro() {
     UUID tenantId = UUID.randomUUID();
     entityManager
-        .createNativeQuery("INSERT INTO tenants (id, name, slug) VALUES (:id, :name, :slug)")
+        .createNativeQuery(
+            "INSERT INTO tenants (id, name, slug, plan_status_id) VALUES (:id, :name, :slug,"
+                + " (SELECT id FROM plan_status ORDER BY (code = 'ACTIVE') DESC, code LIMIT 1))")
         .setParameter("id", tenantId)
         .setParameter("name", "Salao de Teste")
         .setParameter("slug", "salao-teste-" + tenantId)

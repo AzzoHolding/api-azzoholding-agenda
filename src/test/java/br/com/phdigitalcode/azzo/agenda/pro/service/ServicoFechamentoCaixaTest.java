@@ -129,7 +129,7 @@ class ServicoFechamentoCaixaTest {
 
     assertThatThrownBy(() -> service.fechar(caixaId, contagem("0.00", "   ")))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Explique a diferenca entre o esperado e o contado antes de fechar o caixa.");
+        .hasMessage("Explique a diferença entre o esperado e o contado antes de fechar o caixa.");
 
     assertThat(caixa.getStatus()).isEqualTo(StatusFechamentoCaixa.OPEN);
     assertThat(caixa.getClosedAt()).isNull();
@@ -194,7 +194,7 @@ class ServicoFechamentoCaixaTest {
         .hasMessageContaining("1 comanda aberta")
         .hasMessageContaining("50.50")
         // Sem isso a pessoa nao tem como saber o que perde ao confirmar.
-        .hasMessageContaining("so poderao ser fechadas amanha");
+        .hasMessageContaining("só poderão ser fechadas amanhã");
 
     assertThat(caixa.getStatus()).isEqualTo(StatusFechamentoCaixa.OPEN);
     verify(auditService, never()).recordSuccess(any());

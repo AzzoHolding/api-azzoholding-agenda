@@ -77,7 +77,7 @@ public class ServicoService {
     List<String> vinculos = vinculosDeExclusao.doServico(tenantId, id);
     if (!vinculos.isEmpty()) {
       throw new IllegalArgumentException(
-          "O serviço \"" + servico.getName() + "\" esta em " + String.join(", ", vinculos)
+          "O serviço \"" + servico.getName() + "\" está em " + String.join(", ", vinculos)
               + " e não pode ser excluído. Desative o serviço.");
     }
     servicoRepository.delete(servico);
@@ -111,7 +111,8 @@ public class ServicoService {
   }
 
   private void aplicar(ServicoRequest req, Servico s, UUID tenantId) {
-    s.setName(req.name);
+    recusarNomeRepetido(req, s, tenantId);
+    s.setName(req.name == null ? null : req.name.trim());
     s.setDescription(req.description);
     s.setDuration(req.duration);
     s.setPrice(req.price);
@@ -119,6 +120,24 @@ public class ServicoService {
     s.setActive(req.isActive);
     atualizarProfissionais(req.professionalIds, s, tenantId);
     aplicarSinal(req, s);
+  }
+
+  /**
+   * Dois servicos ativos com o mesmo nome confundem a agenda, o PDV e os relatorios (analise de
+   * 15/11/2026, M4). So confere quando o nome muda ou o servico e novo: servicos repetidos que ja
+   * existem continuam editaveis.
+   */
+  private void recusarNomeRepetido(ServicoRequest req, Servico s, UUID tenantId) {
+    if (req.name == null || req.name.isBlank() || !req.isActive) return;
+    String nome = req.name.trim();
+    boolean mesmoNome = s.getId() != null && s.getName() != null && s.getName().trim().equalsIgnoreCase(nome);
+    if (mesmoNome) return;
+    boolean repetido = servicoRepository.findByTenantId(tenantId).stream()
+        .filter(outro -> outro.isActive() && !outro.getId().equals(s.getId()))
+        .anyMatch(outro -> outro.getName() != null && outro.getName().trim().equalsIgnoreCase(nome));
+    if (repetido) {
+      throw new IllegalArgumentException("Já existe um serviço ativo com o nome \"" + nome + "\".");
+    }
   }
 
   private void aplicarSinal(ServicoRequest req, Servico s) {
