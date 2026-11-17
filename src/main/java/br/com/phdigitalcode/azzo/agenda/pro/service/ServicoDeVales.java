@@ -123,16 +123,23 @@ public class ServicoDeVales {
   }
 
   private String prefixoDoSalao(UUID tenantId) {
-    String documento = tenantRepository == null ? null
-        : tenantRepository.findById(tenantId).map(t -> t.getDocument()).orElse(null);
-    return CodigoAleatorio.prefixoDoSalao(documento, tenantId);
+    return CodigoAleatorio.prefixoDoSalao(documentoDoSalao(tenantId), tenantId);
   }
 
-  /** 482913 + 10 caracteres: os 6 digitos do salao na frente (pedido do dono, 17/11). */
+  private String documentoDoSalao(UUID tenantId) {
+    return tenantRepository == null ? null
+        : tenantRepository.findById(tenantId).map(t -> t.getDocument()).orElse(null);
+  }
+
+  /**
+   * 482913 + 10 caracteres (pedido do dono, 17/11): os 6 digitos do salao na frente, e o resto do hash de um UUID
+   * novo com o documento do salao, cortado em 10.
+   */
   private String codigoNovo(UUID tenantId) {
-    String doSalao = prefixoDoSalao(tenantId);
+    String documento = documentoDoSalao(tenantId);
+    String doSalao = CodigoAleatorio.prefixoDoSalao(documento, tenantId);
     for (int i = 0; i < 50; i++) {
-      String codigo = doSalao + CodigoAleatorio.gerar(TAMANHO_DO_CODIGO);
+      String codigo = doSalao + CodigoAleatorio.deHash(UUID.randomUUID(), documento, TAMANHO_DO_CODIGO);
       if (!valeRepository.existsByTenantIdAndCodigo(tenantId, codigo)) return codigo;
     }
     throw new IllegalStateException("Não foi possível gerar um código de vale único.");

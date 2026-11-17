@@ -45,6 +45,35 @@ public final class CodigoAleatorio {
     }
   }
 
+  /**
+   * O miolo do codigo do vale-presente (pedido do dono, 17/11): SHA-256 de um UUID novo junto com o documento do
+   * salao (so os numeros), escrito no {@link #ALFABETO} (5 bits por caractere) e cortado no tamanho pedido. O UUID
+   * aleatorio garante o sorteio; o documento amarra o codigo ao salao. Ate 51 caracteres (256 bits).
+   */
+  public static String deHash(java.util.UUID semente, String documento, int tamanho) {
+    if (tamanho < 1 || tamanho > 51) throw new IllegalArgumentException("Tamanho do código fora do limite.");
+    String digitos = documento == null ? "" : documento.replaceAll("\\D", "");
+    try {
+      byte[] h = java.security.MessageDigest.getInstance("SHA-256")
+          .digest((semente + "|" + digitos).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+      StringBuilder codigo = new StringBuilder(tamanho);
+      int buffer = 0;
+      int bits = 0;
+      for (byte b : h) {
+        buffer = (buffer << 8) | (b & 0xff);
+        bits += 8;
+        while (bits >= 5 && codigo.length() < tamanho) {
+          codigo.append(ALFABETO.charAt((buffer >> (bits - 5)) & 31));
+          bits -= 5;
+        }
+        if (codigo.length() == tamanho) break;
+      }
+      return codigo.toString();
+    } catch (java.security.NoSuchAlgorithmException e) {
+      throw new IllegalStateException("Algoritmo SHA-256 indisponível.", e);
+    }
+  }
+
   /** O codigo digitado parece gerado por outro salao: comeca com 6 digitos que nao sao os deste. */
   public static boolean pareceDeOutroSalao(String codigoNormalizado, String prefixoDoSalao) {
     if (codigoNormalizado == null || prefixoDoSalao == null) return false;

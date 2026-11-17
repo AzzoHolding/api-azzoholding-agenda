@@ -120,6 +120,22 @@ class CuponsEValesRegrasTest {
   }
 
   @Test
+  @DisplayName("miolo do vale: hash do UUID com o documento, no alfabeto sem ambiguos e no tamanho pedido")
+  void codigoDoValePorHash() {
+    UUID semente = UUID.randomUUID();
+    String a = CodigoAleatorio.deHash(semente, "12.345.678/0001-95", 10);
+    assertThat(a).hasSize(10).matches("[A-HJ-NP-Z2-9]{10}");
+    // O mesmo UUID e documento (com ou sem mascara) dao o mesmo codigo; outro documento ou outro UUID, outro.
+    assertThat(CodigoAleatorio.deHash(semente, "12345678000195", 10)).isEqualTo(a);
+    assertThat(CodigoAleatorio.deHash(semente, "123.456.789-09", 10)).isNotEqualTo(a);
+    assertThat(CodigoAleatorio.deHash(UUID.randomUUID(), "12345678000195", 10)).isNotEqualTo(a);
+    assertThat(CodigoAleatorio.deHash(semente, null, 51)).hasSize(51);
+    Set<String> mil = new HashSet<>();
+    for (int i = 0; i < 1000; i++) mil.add(CodigoAleatorio.deHash(UUID.randomUUID(), "12345678000195", 10));
+    assertThat(mil).hasSize(1000);
+  }
+
+  @Test
   @DisplayName("motivo com varios cupons (V183): 'Cupons A, B', e o texto antigo sai inteiro")
   void motivoComVariosCupons() {
     assertThat(ServicoComanda.motivoComCupons("Cortesia", List.of("MAES20", "NATAL-ABC123")))
