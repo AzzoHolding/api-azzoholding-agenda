@@ -57,6 +57,9 @@ public final class PublicBookingDtos {
     public List<ItemRequest> items = new ArrayList<>();
     @NotBlank public String date;
     @NotBlank public String startTime;
+    /** Cupom de desconto (item 6). Opcional. */
+    @jakarta.validation.constraints.Size(max = 20, message = "Código do cupom inválido")
+    public String cupom;
   }
 
   public static class ItemRequest {
@@ -68,6 +71,8 @@ public final class PublicBookingDtos {
     public String appointmentId;
     public String status;
     public String message;
+    /** Desconto do cupom aplicado (item 6); nulo sem cupom. */
+    public java.math.BigDecimal discountValue;
 
     public boolean depositRequired;
     public BigDecimal depositValue;

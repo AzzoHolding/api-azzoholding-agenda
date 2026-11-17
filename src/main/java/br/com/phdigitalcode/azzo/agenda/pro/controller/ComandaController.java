@@ -137,6 +137,21 @@ public class ComandaController {
     return servicoComanda.fidelidadeDaComanda(id);
   }
 
+  /** Cupom de desconto na comanda (item 6). */
+  @PostMapping("/{id}/cupom")
+  @RequiresPermission("pos:manage")
+  public ComandaDtos.ComandaResponse aplicarCupom(
+      @PathVariable UUID id,
+      @Valid @RequestBody br.com.phdigitalcode.azzo.agenda.pro.dto.CupomDtos.AplicarCupomRequest request) {
+    return servicoComanda.aplicarCupom(id, request.codigo);
+  }
+
+  @org.springframework.web.bind.annotation.DeleteMapping("/{id}/cupom")
+  @RequiresPermission("pos:manage")
+  public ComandaDtos.ComandaResponse removerCupom(@PathVariable UUID id) {
+    return servicoComanda.removerCupom(id);
+  }
+
   @PostMapping("/{id}/fidelidade/desfazer")
   @RequiresPermission("pos:manage")
   public ComandaDtos.ComandaResponse desfazerResgate(

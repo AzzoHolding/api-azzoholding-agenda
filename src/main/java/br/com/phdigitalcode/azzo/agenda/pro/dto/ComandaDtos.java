@@ -25,10 +25,11 @@ public final class ComandaDtos {
 
   public static class AdicionarItemRequest {
     @NotBlank
-    @Pattern(regexp = "SERVICO|PRODUTO|PACOTE")
+    @Pattern(regexp = "SERVICO|PRODUTO|PACOTE|VALE", message = "Tipo de item inválido")
     public String tipo;
 
-    @NotBlank public String referenciaId;
+    /** Obrigatorio para SERVICO, PRODUTO e PACOTE. O VALE (vale-presente vendido) nao tem catalogo. */
+    public String referenciaId;
     public String professionalId;
 
     @DecimalMin(value = "0.001", inclusive = true)
@@ -43,6 +44,17 @@ public final class ComandaDtos {
      * acidente cobra o cliente duas vezes.
      */
     public Boolean confirmarDuplicado;
+
+    /** VALE: para quem e o vale (opcional). */
+    @jakarta.validation.constraints.Size(max = 120, message = "O nome de quem recebe deve ter no máximo 120 caracteres")
+    public String valeDestinatario;
+
+    /** VALE: mensagem impressa no vale (opcional). */
+    @jakarta.validation.constraints.Size(max = 300, message = "A mensagem deve ter no máximo 300 caracteres")
+    public String valeMensagem;
+
+    /** VALE: validade em meses (padrao 12). */
+    public Integer valeValidadeMeses;
   }
 
   public static class AplicarDescontoRequest {
@@ -64,7 +76,8 @@ public final class ComandaDtos {
   public static class RegistrarPagamentoRequest {
     @NotBlank
     @Pattern(
-        regexp = "DINHEIRO|PIX_ASAAS|CARTAO_CREDITO_EXTERNO|CARTAO_DEBITO_EXTERNO|CREDITO_SINAL|PIX|CARTAO_CREDITO|CARTAO_DEBITO|LINK")
+        regexp = "DINHEIRO|PIX_ASAAS|CARTAO_CREDITO_EXTERNO|CARTAO_DEBITO_EXTERNO|CREDITO_SINAL|PIX|CARTAO_CREDITO|CARTAO_DEBITO|LINK|VALE_PRESENTE",
+        message = "Forma de pagamento inválida")
     public String meio;
 
     @NotNull
@@ -76,6 +89,10 @@ public final class ComandaDtos {
 
     /** Maquininha integrada que recebe a cobranca (CARTAO_CREDITO / CARTAO_DEBITO). */
     public String terminalId;
+
+    /** VALE_PRESENTE: o codigo do vale usado no pagamento. */
+    @jakarta.validation.constraints.Size(max = 20, message = "Código do vale inválido")
+    public String codigoVale;
   }
 
   public static class CancelarComandaRequest {
@@ -198,6 +215,8 @@ public final class ComandaDtos {
     public String comprovante;
     /** Pix na chave do salao: o caixa confirma o recebimento ("Recebi"); nao vem aviso. */
     public boolean confirmacaoManual;
+    /** VALE_PRESENTE: o codigo do vale usado. */
+    public String valeCodigo;
   }
 
   public static class ComandaResponse {
@@ -223,6 +242,10 @@ public final class ComandaDtos {
     public String closedAt;
     public List<ComandaItemResponse> itens = new ArrayList<>();
     public List<ComandaPagamentoResponse> pagamentos = new ArrayList<>();
+    /** Cupom de desconto aplicado (item 6). Nulo sem cupom. */
+    public CupomDtos.CupomDaComandaResponse cupom;
+    /** Vales-presente criados por esta venda (comanda fechada), com o codigo para entregar. */
+    public java.util.List<ValeVendidoResponse> valesVendidos = new java.util.ArrayList<>();
   }
 
   public static class ComandaPageResponse {
@@ -230,5 +253,15 @@ public final class ComandaDtos {
     public long totalElements;
     public int page;
     public int size;
+  }
+
+  /** Vale-presente criado pela venda, para o caixa entregar o codigo. */
+  public static class ValeVendidoResponse {
+    public String id;
+    public String codigo;
+    public BigDecimal valor;
+    public String expiraEm;
+    public String destinatarioNome;
+    public String mensagem;
   }
 }

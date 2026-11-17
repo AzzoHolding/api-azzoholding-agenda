@@ -48,13 +48,24 @@ public class ClientesController {
   private final ClienteService clienteService;
   private final br.com.phdigitalcode.azzo.agenda.pro.service.ServicoTenantLoyalty fidelidade;
   private final br.com.phdigitalcode.azzo.agenda.pro.service.ServicoPackages pacotes;
+  private final br.com.phdigitalcode.azzo.agenda.pro.service.ServicoDeVales vales;
 
   public ClientesController(ClienteService clienteService,
       br.com.phdigitalcode.azzo.agenda.pro.service.ServicoTenantLoyalty fidelidade,
-      br.com.phdigitalcode.azzo.agenda.pro.service.ServicoPackages pacotes) {
+      br.com.phdigitalcode.azzo.agenda.pro.service.ServicoPackages pacotes,
+      br.com.phdigitalcode.azzo.agenda.pro.service.ServicoDeVales vales) {
     this.clienteService = clienteService;
     this.fidelidade = fidelidade;
     this.pacotes = pacotes;
+    this.vales = vales;
+  }
+
+  /** Vales-presente comprados pela cliente (item 6), com saldo e validade. */
+  @GetMapping("/{id}/vales")
+  @RequiresPermission("appointment:read")
+  public List<br.com.phdigitalcode.azzo.agenda.pro.dto.ValeDtos.ValeResponse> valesPresente(@PathVariable UUID id) {
+    clienteService.exigirFichaCompletaDe(id);
+    return vales.doCliente(id);
   }
 
   /** Pontos da cliente: saldo, valor em reais, o que vence e o extrato (portado em 14/11). */

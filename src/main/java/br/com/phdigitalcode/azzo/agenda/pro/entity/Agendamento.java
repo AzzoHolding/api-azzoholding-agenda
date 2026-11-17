@@ -70,6 +70,10 @@ public class Agendamento {
   @Column(name = "notes")
   private String notes;
 
+  /** Cupom usado no agendamento online (V180). O desconto fica nos itens (discount_amount). */
+  @Column(name = "cupom_id")
+  private java.util.UUID cupomId;
+
   @OneToMany(fetch = FetchType.EAGER, cascade = CascadeType.ALL, orphanRemoval = true)
   @JoinColumn(name = "appointment_id", referencedColumnName = "id")
   private List<AgendamentoItem> items = new ArrayList<>();

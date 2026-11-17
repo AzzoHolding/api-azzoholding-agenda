@@ -29,6 +29,8 @@ public class ComandaPagamento {
   public static final String MEIO_CARTAO_CREDITO = "CARTAO_CREDITO";
   public static final String MEIO_CARTAO_DEBITO = "CARTAO_DEBITO";
   public static final String MEIO_LINK = "LINK";
+  /** Pago com saldo de vale-presente (V181): a receita ja entrou na venda do vale. */
+  public static final String MEIO_VALE_PRESENTE = "VALE_PRESENTE";
 
   public static final String STATUS_PENDENTE = "PENDENTE";
   public static final String STATUS_CONFIRMADO = "CONFIRMADO";
@@ -50,6 +52,9 @@ public class ComandaPagamento {
 
   @Column(name = "comanda_id", nullable = false)
   private UUID comandaId;
+
+  @Column(name = "vale_presente_id")
+  private UUID valePresenteId;
 
   @Column(name = "meio", nullable = false)
   private String meio;

@@ -83,6 +83,58 @@ public class ServicoPublicBooking {
     this.fotos = fotos;
   }
 
+  /** Cupom de desconto no link publico (item 6). Por setter: o construtor nao muda. */
+  private ServicoDeCupons servicoDeCupons;
+
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setServicoDeCupons(ServicoDeCupons servicoDeCupons) {
+    this.servicoDeCupons = servicoDeCupons;
+  }
+
+  /**
+   * A pagina publica confere o cupom antes de agendar: diz se vale e quanto desconta. Nao reserva nada (quem reserva
+   * e o pedido do horario). Codigo que nao existe e codigo que nao vale para este pedido dao a mesma resposta.
+   */
+  // Sem @Transactional de proposito: a recusa do cupom (IllegalArgumentException) vem de uma transacao do
+  // ServicoDeCupons e a marcaria para desfazer; aqui ela vira resposta, e a transacao de fora quebraria com 500.
+  public br.com.phdigitalcode.azzo.agenda.pro.dto.CupomDtos.ValidarCupomPublicoResponse validarCupom(
+      String slug, br.com.phdigitalcode.azzo.agenda.pro.dto.CupomDtos.ValidarCupomPublicoRequest request) {
+    Tenant tenant = obterTenantPorSlug(slug);
+    var r = new br.com.phdigitalcode.azzo.agenda.pro.dto.CupomDtos.ValidarCupomPublicoResponse();
+    String ids = request.serviceIds == null || request.serviceIds.isEmpty() ? null : String.join(",", request.serviceIds);
+    BigDecimal base = BigDecimal.ZERO;
+    for (Servico s : resolveSelectedServices(tenant.getId(), request.serviceId, ids)) {
+      base = NumericUtil.add(base, s.getPrice());
+    }
+    if (servicoDeCupons == null || base.signum() <= 0) {
+      r.valido = false;
+      r.mensagem = "Escolha o serviço antes de usar o cupom.";
+      return r;
+    }
+    UUID clienteId = clientePeloTelefone(tenant.getId(), request.telefone);
+    try {
+      BigDecimal desconto = servicoDeCupons.simularPublico(tenant.getId(), request.codigo, clienteId, base);
+      r.valido = true;
+      r.desconto = desconto;
+      r.totalComDesconto = NumericUtil.maxZero(NumericUtil.subtract(base, desconto));
+      r.mensagem = "Cupom aplicado.";
+    } catch (IllegalArgumentException e) {
+      r.valido = false;
+      r.mensagem = e.getMessage();
+    }
+    return r;
+  }
+
+  private UUID clientePeloTelefone(UUID tenantId, String telefone) {
+    String normalizado = normalizePhone(telefone);
+    if (normalizado == null) return null;
+    return clienteRepository.findByTenantIdOrderByName(tenantId).stream()
+        .filter(c -> Objects.equals(normalizePhone(c.getPhone()), normalizado))
+        .map(Cliente::getId)
+        .findFirst()
+        .orElse(null);
+  }
+
   public ServicoPublicBooking(
       TenantRepository tenantRepository,
       ServicoRepository servicoRepository,
@@ -288,8 +340,17 @@ public class ServicoPublicBooking {
       throw new IllegalArgumentException("O profissional não atende neste horário");
     }
 
-    // O sinal exige CPF/CNPJ — conferido ANTES de gravar qualquer coisa.
-    BigDecimal depositAmount = calcularValorSinal(selectedItems);
+    // Cupom (item 6): conferido antes de gravar; o uso e reservado depois que o agendamento existe.
+    BigDecimal valorDosServicos = BigDecimal.ZERO;
+    for (ResolvedPublicItem item : selectedItems) {
+      valorDosServicos = NumericUtil.add(valorDosServicos, NumericUtil.multiply(item.service().getPrice(), item.quantity()));
+    }
+    var cupom = request.cupom == null || request.cupom.isBlank() || servicoDeCupons == null
+        ? null : servicoDeCupons.buscarPorCodigoPublico(tenant.getId(), request.cupom);
+    BigDecimal descontoDoCupom = cupom == null ? BigDecimal.ZERO : ServicoDeCupons.desconto(cupom, valorDosServicos);
+
+    // O sinal exige CPF/CNPJ — conferido ANTES de gravar qualquer coisa. Com cupom, o sinal acompanha o desconto.
+    BigDecimal depositAmount = sinalComDesconto(calcularValorSinal(selectedItems), valorDosServicos, descontoDoCupom);
     String cpfCnpjInformado =
         request.customerCpfCnpj != null && !request.customerCpfCnpj.isBlank()
             ? request.customerCpfCnpj.trim()
@@ -368,7 +429,15 @@ public class ServicoPublicBooking {
     agendamento.setEndTime(endTime.format(TIME_FMT));
     agendamento.setStatus(StatusAgendamento.PENDING);
     agendamento = agendamentoRepository.save(agendamento);
-    persistItems(agendamento, selectedItems);
+    if (cupom != null) {
+      // Reserva o uso agora: o limite total e o limite por cliente valem para o link tambem.
+      var uso = servicoDeCupons.reservar(tenant.getId(), cupom.getId(), null, agendamento.getId(), cliente.getId(),
+          valorDosServicos);
+      descontoDoCupom = uso.getValorDesconto();
+      agendamento.setCupomId(cupom.getId());
+      agendamento = agendamentoRepository.save(agendamento);
+    }
+    persistItems(agendamento, selectedItems, descontoDoCupom);
     notificationService.registrarCriacaoAgendamento(
         tenant.getId(), agendamento.getId(), cliente.getId(), "APPOINTMENT_CREATED");
 
@@ -376,6 +445,7 @@ public class ServicoPublicBooking {
     resp.appointmentId = agendamento.getId().toString();
     resp.status = agendamento.getStatus().name();
     resp.message = "Agendamento criado com sucesso.";
+    if (cupom != null) resp.discountValue = descontoDoCupom;
 
     if (NumericUtil.isPositive(depositAmount)) {
       // O CPF ja foi conferido antes de gravar: e o do cadastro, ou o informado para quem nao tinha.
@@ -390,6 +460,16 @@ public class ServicoPublicBooking {
     }
 
     return resp;
+  }
+
+  /** O sinal na mesma proporcao do desconto do cupom: 20% de desconto, 20% a menos de sinal. */
+  static BigDecimal sinalComDesconto(BigDecimal sinal, BigDecimal valorDosServicos, BigDecimal desconto) {
+    if (!NumericUtil.isPositive(sinal) || !NumericUtil.isPositive(desconto) || !NumericUtil.isPositive(valorDosServicos)) {
+      return sinal;
+    }
+    BigDecimal fator = NumericUtil.maxZero(NumericUtil.subtract(valorDosServicos, desconto))
+        .divide(valorDosServicos, 6, java.math.RoundingMode.HALF_UP);
+    return sinal.multiply(fator).setScale(2, java.math.RoundingMode.HALF_UP);
   }
 
   private BigDecimal calcularValorSinal(List<ResolvedPublicItem> items) {
@@ -467,13 +547,23 @@ public class ServicoPublicBooking {
         .orElseThrow(() -> new IllegalArgumentException("Salão não encontrado"));
   }
 
-  private void persistItems(Agendamento appointment, List<ResolvedPublicItem> items) {
+  /**
+   * Grava os itens com o desconto do cupom repartido pelo valor de cada um (o ultimo absorve o arredondamento).
+   * A comanda do atendimento recebe o preco ja com desconto (precoAcordadoPorUnidade).
+   */
+  private void persistItems(Agendamento appointment, List<ResolvedPublicItem> items, BigDecimal desconto) {
     if (appointment == null || appointment.getId() == null || items == null || items.isEmpty()) return;
     boolean exists = agendamentoItemRepository.existsByAppointmentId(appointment.getId());
     if (exists) return;
 
+    BigDecimal bruto = BigDecimal.ZERO;
+    for (ResolvedPublicItem i : items) bruto = NumericUtil.add(bruto, NumericUtil.multiply(i.service().getPrice(), i.quantity()));
+    BigDecimal descontoTotal = desconto == null ? BigDecimal.ZERO : desconto.min(bruto);
+    BigDecimal descontoDistribuido = BigDecimal.ZERO;
+
     List<AgendamentoItem> persistedItems = new ArrayList<>();
-    for (ResolvedPublicItem resolvedItem : items) {
+    for (int indice = 0; indice < items.size(); indice++) {
+      ResolvedPublicItem resolvedItem = items.get(indice);
       AgendamentoItem item = new AgendamentoItem();
       item.setTenantId(appointment.getTenantId());
       item.setAppointmentId(appointment.getId());
@@ -482,8 +572,20 @@ public class ServicoPublicBooking {
       item.setQuantity(resolvedItem.quantity());
       item.setUnitPrice(resolvedItem.service().getPrice());
       item.setGrossAmount(NumericUtil.multiply(resolvedItem.service().getPrice(), resolvedItem.quantity()));
-      item.setDiscountAmount(NumericUtil.zero());
-      item.setTotalPrice(item.getGrossAmount());
+      BigDecimal descontoDoItem;
+      if (!NumericUtil.isPositive(descontoTotal) || !NumericUtil.isPositive(bruto)) {
+        descontoDoItem = NumericUtil.zero();
+      } else if (indice == items.size() - 1) {
+        descontoDoItem = NumericUtil.maxZero(NumericUtil.subtract(descontoTotal, descontoDistribuido));
+      } else {
+        descontoDoItem = item.getGrossAmount().multiply(descontoTotal)
+            .divide(bruto, 2, java.math.RoundingMode.HALF_UP);
+      }
+      // CHECK de appointment_items: desconto <= bruto e total = bruto - desconto.
+      descontoDoItem = descontoDoItem.min(item.getGrossAmount());
+      descontoDistribuido = NumericUtil.add(descontoDistribuido, descontoDoItem);
+      item.setDiscountAmount(descontoDoItem);
+      item.setTotalPrice(NumericUtil.subtract(item.getGrossAmount(), descontoDoItem));
       item = agendamentoItemRepository.save(item);
       persistedItems.add(item);
     }
