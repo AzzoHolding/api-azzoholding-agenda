@@ -114,9 +114,25 @@ public class ServicoDeVales {
     return vale;
   }
 
+  /** O documento do salao, para o prefixo do codigo do vale. Por setter: o construtor nao muda. */
+  private br.com.phdigitalcode.azzo.agenda.pro.repository.TenantRepository tenantRepository;
+
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setTenantRepository(br.com.phdigitalcode.azzo.agenda.pro.repository.TenantRepository tenantRepository) {
+    this.tenantRepository = tenantRepository;
+  }
+
+  private String prefixoDoSalao(UUID tenantId) {
+    String documento = tenantRepository == null ? null
+        : tenantRepository.findById(tenantId).map(t -> t.getDocument()).orElse(null);
+    return CodigoAleatorio.prefixoDoSalao(documento, tenantId);
+  }
+
+  /** 482913 + 10 caracteres: os 6 digitos do salao na frente (pedido do dono, 17/11). */
   private String codigoNovo(UUID tenantId) {
+    String doSalao = prefixoDoSalao(tenantId);
     for (int i = 0; i < 50; i++) {
-      String codigo = CodigoAleatorio.gerar(TAMANHO_DO_CODIGO);
+      String codigo = doSalao + CodigoAleatorio.gerar(TAMANHO_DO_CODIGO);
       if (!valeRepository.existsByTenantIdAndCodigo(tenantId, codigo)) return codigo;
     }
     throw new IllegalStateException("Não foi possível gerar um código de vale único.");
@@ -157,7 +173,10 @@ public class ServicoDeVales {
     String c = CodigoAleatorio.normalizar(codigo).replace("-", "").replace(" ", "");
     if (c.isEmpty()) throw new IllegalArgumentException("Informe o código do vale-presente.");
     return valeRepository.findByTenantIdAndCodigo(tenantId, c)
-        .orElseThrow(() -> new IllegalArgumentException("Vale-presente não encontrado. Confira o código."));
+        .orElseThrow(() -> new IllegalArgumentException(
+            CodigoAleatorio.pareceDeOutroSalao(c, prefixoDoSalao(tenantId))
+                ? "Este vale-presente é de outro salão: confira com a cliente."
+                : "Vale-presente não encontrado. Confira o código."));
   }
 
   /** Debita o vale (pagamento da comanda). Recusa em frase quando nao ha saldo, venceu ou nao esta ativo. */

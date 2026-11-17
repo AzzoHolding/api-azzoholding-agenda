@@ -58,7 +58,7 @@ public final class PublicBookingDtos {
     @NotBlank public String date;
     @NotBlank public String startTime;
     /** Cupom de desconto (item 6). Opcional. */
-    @jakarta.validation.constraints.Size(max = 20, message = "Código do cupom inválido")
+    @jakarta.validation.constraints.Size(max = 30, message = "Código do cupom inválido")
     public String cupom;
   }
 

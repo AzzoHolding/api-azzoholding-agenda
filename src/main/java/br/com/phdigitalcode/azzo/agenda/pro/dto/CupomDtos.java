@@ -160,14 +160,14 @@ public final class CupomDtos {
 
   public static class AplicarCupomRequest {
     @NotBlank(message = "Informe o código do cupom")
-    @Size(max = 20, message = "Código inválido")
+    @Size(max = 30, message = "Código inválido")
     public String codigo;
   }
 
   /** O que a pagina publica pergunta antes de agendar. */
   public static class ValidarCupomPublicoRequest {
     @NotBlank(message = "Informe o código do cupom")
-    @Size(max = 20, message = "Código inválido")
+    @Size(max = 30, message = "Código inválido")
     public String codigo;
 
     public List<String> serviceIds = new ArrayList<>();
@@ -203,5 +203,7 @@ public final class CupomDtos {
   public static class ConfiguracaoDeCupons {
     /** A comanda aceita mais de um cupom. Padrao: false (um so). */
     public Boolean variosPorComanda;
+    /** Os 6 digitos do salao no inicio dos codigos gerados (so leitura). */
+    public String prefixoDoSalao;
   }
 }

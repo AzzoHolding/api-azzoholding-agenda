@@ -79,6 +79,21 @@ public class ServicoDeCupons {
     this.configuracoes = configuracoes;
   }
 
+  /** O documento do salao, para o prefixo dos codigos gerados. Por setter: o construtor nao muda. */
+  private br.com.phdigitalcode.azzo.agenda.pro.repository.TenantRepository tenantRepository;
+
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setTenantRepository(br.com.phdigitalcode.azzo.agenda.pro.repository.TenantRepository tenantRepository) {
+    this.tenantRepository = tenantRepository;
+  }
+
+  /** Os 6 digitos do salao (hash do CPF/CNPJ) no inicio dos codigos do gerador. */
+  public String prefixoDoSalao(UUID tenantId) {
+    String documento = tenantRepository == null ? null
+        : tenantRepository.findById(tenantId).map(t -> t.getDocument()).orElse(null);
+    return CodigoAleatorio.prefixoDoSalao(documento, tenantId);
+  }
+
   /** A comanda aceita mais de um cupom? Padrao: nao. */
   public boolean permiteVariosPorComanda(UUID tenantId) {
     return configuracoes != null && configuracoes.findByTenantIdOrCreate(tenantId).isPosVariosCuponsPorComanda();
@@ -87,7 +102,9 @@ public class ServicoDeCupons {
   @Transactional
   public CupomDtos.ConfiguracaoDeCupons configuracao() {
     CupomDtos.ConfiguracaoDeCupons r = new CupomDtos.ConfiguracaoDeCupons();
-    r.variosPorComanda = permiteVariosPorComanda(contextoTenant.obterTenantIdOuFalhar());
+    UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    r.variosPorComanda = permiteVariosPorComanda(tenantId);
+    r.prefixoDoSalao = prefixoDoSalao(tenantId);
     return r;
   }
 
@@ -261,7 +278,10 @@ public class ServicoDeCupons {
     String c = CodigoAleatorio.normalizar(codigo);
     if (c.isEmpty()) throw new IllegalArgumentException("Informe o código do cupom.");
     return cupomRepository.buscarPorCodigo(tenantId, c)
-        .orElseThrow(() -> new IllegalArgumentException("Cupom não encontrado. Confira o código."));
+        .orElseThrow(() -> new IllegalArgumentException(
+            CodigoAleatorio.pareceDeOutroSalao(c, prefixoDoSalao(tenantId))
+                ? "Este código é de outro salão: confira com a cliente."
+                : "Cupom não encontrado. Confira o código."));
   }
 
   /** No link publico, codigo inexistente tem a mesma resposta de codigo que nao vale: nada de varrer codigos. */
@@ -592,6 +612,8 @@ public class ServicoDeCupons {
    * lote). Tudo na mesma transacao: ou nascem todos, ou nenhum.
    */
   private void gerarCodigos(UUID tenantId, LoteDeCupom lote, int quantidade) {
+    // 482913-NATAL-7K3QPZ: os 6 digitos do salao na frente (pedido do dono, 17/11).
+    String doSalao = prefixoDoSalao(tenantId);
     Set<String> sorteados = new HashSet<>();
     List<Cupom> novos = new ArrayList<>(quantidade);
     int tentativas = 0;
@@ -599,7 +621,7 @@ public class ServicoDeCupons {
       if (++tentativas > quantidade * 20 + 100) {
         throw new IllegalStateException("Não foi possível gerar códigos únicos. Tente um prefixo diferente.");
       }
-      String codigo = lote.getPrefixo() + "-" + CodigoAleatorio.gerar(TAMANHO_DO_CODIGO_DO_LOTE);
+      String codigo = doSalao + "-" + lote.getPrefixo() + "-" + CodigoAleatorio.gerar(TAMANHO_DO_CODIGO_DO_LOTE);
       if (!sorteados.add(codigo) || cupomRepository.contarCodigo(tenantId, codigo) > 0) continue;
       Cupom c = new Cupom();
       c.setTenantId(tenantId);

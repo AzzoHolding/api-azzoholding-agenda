@@ -104,6 +104,22 @@ class CuponsEValesRegrasTest {
   }
 
   @Test
+  @DisplayName("prefixo do salao: 6 digitos, iguais para o mesmo documento com ou sem mascara")
+  void prefixoDoSalao() {
+    UUID tenant = UUID.randomUUID();
+    String comMascara = CodigoAleatorio.prefixoDoSalao("12.345.678/0001-95", tenant);
+    assertThat(comMascara).matches("\\d{6}");
+    assertThat(CodigoAleatorio.prefixoDoSalao("12345678000195", UUID.randomUUID())).isEqualTo(comMascara);
+    assertThat(CodigoAleatorio.prefixoDoSalao("123.456.789-09", tenant)).isNotEqualTo(comMascara);
+    // Sem documento: o hash e do id do salao (sempre o mesmo para o mesmo salao).
+    assertThat(CodigoAleatorio.prefixoDoSalao(null, tenant)).isEqualTo(CodigoAleatorio.prefixoDoSalao("", tenant));
+    assertThat(CodigoAleatorio.pareceDeOutroSalao("000000-NATAL-ABC234", comMascara))
+        .isEqualTo(!comMascara.equals("000000"));
+    assertThat(CodigoAleatorio.pareceDeOutroSalao(comMascara + "-NATAL-ABC234", comMascara)).isFalse();
+    assertThat(CodigoAleatorio.pareceDeOutroSalao("MAES20", comMascara)).isFalse();
+  }
+
+  @Test
   @DisplayName("motivo com varios cupons (V183): 'Cupons A, B', e o texto antigo sai inteiro")
   void motivoComVariosCupons() {
     assertThat(ServicoComanda.motivoComCupons("Cortesia", List.of("MAES20", "NATAL-ABC123")))
