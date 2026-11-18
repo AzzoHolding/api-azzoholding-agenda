@@ -132,6 +132,10 @@ public class TenantOperationalSettings {
   @Column(name = "pos_max_discount_percent", nullable = false)
   private int posMaxDiscountPercent = 100;
 
+  /** O PDV aceita mais de um cupom na mesma comanda (V183). Padrao: um so. */
+  @Column(name = "pos_varios_cupons_por_comanda", nullable = false)
+  private boolean posVariosCuponsPorComanda = false;
+
   /** Como o salao concilia (V158). O padrao e lancamento a lancamento. */
   @Enumerated(EnumType.STRING)
   @Column(name = "reconciliation_mode", nullable = false, length = 20)

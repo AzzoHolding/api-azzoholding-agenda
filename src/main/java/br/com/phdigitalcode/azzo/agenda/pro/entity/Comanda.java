@@ -99,6 +99,13 @@ public class Comanda {
   @Column(name = "valor_resgate_fidelidade", nullable = false)
   private BigDecimal valorResgateFidelidade = BigDecimal.ZERO;
 
+  /** Cupom de desconto aplicado (V180). O valor faz parte de {@link #desconto}, como o resgate de pontos. */
+  @Column(name = "cupom_id")
+  private UUID cupomId;
+
+  @Column(name = "valor_cupom", nullable = false)
+  private BigDecimal valorCupom = BigDecimal.ZERO;
+
   @Column(name = "opened_at", nullable = false)
   private Instant openedAt;
 

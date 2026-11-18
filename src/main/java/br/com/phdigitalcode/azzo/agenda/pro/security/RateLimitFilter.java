@@ -160,7 +160,10 @@ public class RateLimitFilter extends OncePerRequestFilter {
           java.util.regex.Pattern.compile("/api/v1/public/salons/[^/]+/appointments"),
           new RateLimitRule("public-booking", bookingMax, Duration.ofMinutes(bookingWindow)),
           java.util.regex.Pattern.compile("/api/v1/public/salons/[^/]+/booking-funnel/events"),
-          new RateLimitRule("public-funnel", funnelMax, Duration.ofMinutes(funnelWindow)));
+          new RateLimitRule("public-funnel", funnelMax, Duration.ofMinutes(funnelWindow)),
+          // Cupom no link (item 6): sem limite, dava para testar codigos de lote a vontade.
+          java.util.regex.Pattern.compile("/api/v1/public/salons/[^/]+/cupom/validar"),
+          new RateLimitRule("public-coupon", bookingMax, Duration.ofMinutes(bookingWindow)));
       FilterRegistrationBean<RateLimitFilter> registration =
           new FilterRegistrationBean<>(new RateLimitFilter(rules, porPadrao));
       registration.addUrlPatterns("/api/v1/auth/*", "/api/v1/public/*");

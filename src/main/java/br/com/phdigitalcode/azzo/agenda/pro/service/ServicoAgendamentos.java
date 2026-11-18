@@ -130,6 +130,14 @@ public class ServicoAgendamentos {
 
   private static final Logger LOG = LoggerFactory.getLogger(ServicoAgendamentos.class);
 
+  /** Cupom do agendamento online (item 6). Por setter: o construtor nao muda. */
+  private ServicoDeCupons servicoDeCupons;
+
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setServicoDeCupons(ServicoDeCupons servicoDeCupons) {
+    this.servicoDeCupons = servicoDeCupons;
+  }
+
   private static final ZoneId ZONE_BR = ZoneId.of("America/Sao_Paulo");
   private static final DateTimeFormatter TIME_FMT = DateTimeFormatter.ofPattern("HH:mm");
   /** Profissional desligado de "aceita agendamento": continua na equipe, sem marcacao nova. */
@@ -460,6 +468,10 @@ public class ServicoAgendamentos {
     }
     if (novoStatus == StatusAgendamento.CANCELLED || novoStatus == StatusAgendamento.NO_SHOW) {
       cancelarComandaAbertaSeNecessario(tenantId, a);
+      // O cupom usado no link volta a valer: a cliente nao foi atendida (item 6).
+      if (servicoDeCupons != null && a.getCupomId() != null) {
+        servicoDeCupons.liberarDoAgendamento(tenantId, a.getId());
+      }
     }
     if (novoStatus == StatusAgendamento.CANCELLED) {
       try {
