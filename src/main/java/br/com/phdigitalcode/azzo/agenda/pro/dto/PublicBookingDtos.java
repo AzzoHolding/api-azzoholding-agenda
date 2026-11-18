@@ -74,6 +74,9 @@ public final class PublicBookingDtos {
     /** Desconto do cupom aplicado (item 6); nulo sem cupom. */
     public java.math.BigDecimal discountValue;
 
+    /** Link para a cliente preencher a anamnese e assinar os termos (servicos que pedem). Nulo se nada pede. */
+    public String linkDocumentos;
+
     public boolean depositRequired;
     public BigDecimal depositValue;
     public String depositPixPayload;

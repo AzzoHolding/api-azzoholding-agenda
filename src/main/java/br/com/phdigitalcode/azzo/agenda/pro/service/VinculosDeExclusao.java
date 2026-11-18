@@ -62,6 +62,10 @@ public class VinculosDeExclusao {
     adicionar(vinculos, contar(
         "SELECT COUNT(*) FROM appointment_customer_notes WHERE tenant_id = :t AND client_id = :id",
         tenantId, clientId), "registros de atendimento");
+    adicionar(vinculos, contar(
+        "SELECT (SELECT COUNT(*) FROM anamneses WHERE tenant_id = :t AND client_id = :id)"
+            + " + (SELECT COUNT(*) FROM assinaturas_do_cliente WHERE tenant_id = :t AND client_id = :id)",
+        tenantId, clientId), "anamneses ou documentos assinados");
     return vinculos;
   }
 

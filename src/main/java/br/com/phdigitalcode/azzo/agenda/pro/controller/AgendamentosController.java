@@ -351,7 +351,8 @@ public class AgendamentosController {
         id,
         value,
         request != null ? request.paymentMethod : null,
-        request != null ? request.conclusionAction : null);
+        request != null ? request.conclusionAction : null,
+        request != null ? request.justificativaInicio : null);
   }
 
   @PostMapping("/{id}/customer-notes")

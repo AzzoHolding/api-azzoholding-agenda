@@ -137,6 +137,14 @@ public class ServicoPublicBooking {
         .orElse(null);
   }
 
+  /** Link para preencher a anamnese e assinar os termos depois de agendar. Por setter: o construtor nao muda. */
+  private br.com.phdigitalcode.azzo.agenda.pro.saude.LinksDaCliente linksDaCliente;
+
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setLinksDaCliente(br.com.phdigitalcode.azzo.agenda.pro.saude.LinksDaCliente linksDaCliente) {
+    this.linksDaCliente = linksDaCliente;
+  }
+
   public ServicoPublicBooking(
       TenantRepository tenantRepository,
       ServicoRepository servicoRepository,
@@ -457,6 +465,13 @@ public class ServicoPublicBooking {
     resp.status = agendamento.getStatus().name();
     resp.message = "Agendamento criado com sucesso.";
     if (cupom != null) resp.discountValue = descontoDoCupom;
+    if (linksDaCliente != null) {
+      try {
+        resp.linkDocumentos = linksDaCliente.linkParaAgendamentoOnline(tenant.getId(), cliente.getId(), agendamento.getId());
+      } catch (Exception e) {
+        // O link e uma ajuda: falhar aqui nao desfaz o agendamento.
+      }
+    }
 
     if (NumericUtil.isPositive(depositAmount)) {
       // O CPF ja foi conferido antes de gravar: e o do cadastro, ou o informado para quem nao tinha.
