@@ -200,7 +200,8 @@ public class LinksDaCliente {
     } catch (Exception ignored) {
       // cai no erro abaixo
     }
-    throw new ApiClientErrorException("Sua sessão expirou. Abra o link de novo.", 401);
+    // 400, e nao 401: o cliente HTTP do app trata 401 como "sem login" e mandaria a cliente para o login do salao.
+    throw new ApiClientErrorException("Sua sessão expirou. Abra o link de novo.", 400);
   }
 
   @Transactional(readOnly = true)

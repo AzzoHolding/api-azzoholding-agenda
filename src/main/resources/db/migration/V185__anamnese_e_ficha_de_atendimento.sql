@@ -320,7 +320,7 @@ INSERT INTO item_menu (id, route, label, is_active, display_order, icon_key, sid
   (gen_random_uuid(), '/clientes/fichas-de-outros', 'Ver fichas de atendimento de outras profissionais', TRUE, 75, 'Users', FALSE, NOW(), NOW()),
   (gen_random_uuid(), '/clientes/fotos', 'Ver fotos de antes e depois', TRUE, 76, 'Users', FALSE, NOW(), NOW()),
   (gen_random_uuid(), '/clientes/fotos-marketing', 'Liberar fotos para divulgação', TRUE, 77, 'Users', FALSE, NOW(), NOW()),
-  (gen_random_uuid(), '/configuracoes/anamnese-e-termos', 'Anamnese e termos', TRUE, 146, 'Settings', TRUE, NOW(), NOW())
+  (gen_random_uuid(), '/anamnese-e-termos', 'Anamnese e termos', TRUE, 146, 'Settings', TRUE, NOW(), NOW())
 ON CONFLICT (route) DO NOTHING;
 
 UPDATE item_menu filho SET parent_item_menu_id = pai.id, updated_at = NOW()
@@ -330,12 +330,12 @@ WHERE pai.route = '/clientes'
 
 UPDATE item_menu filho SET parent_item_menu_id = pai.id, exclusivo_do_dono = TRUE, updated_at = NOW()
 FROM item_menu pai
-WHERE pai.route = '/configuracoes' AND filho.route = '/configuracoes/anamnese-e-termos';
+WHERE pai.route = '/configuracoes' AND filho.route = '/anamnese-e-termos';
 
 INSERT INTO menu_role_permissions (id, role, route, is_active, created_at, updated_at)
 SELECT gen_random_uuid(), r.role, m.route, r.role = 'OWNER', NOW(), NOW()
 FROM (VALUES ('/clientes/saude'), ('/clientes/fichas-de-outros'), ('/clientes/fotos'), ('/clientes/fotos-marketing'),
-             ('/configuracoes/anamnese-e-termos')) AS m(route)
+             ('/anamnese-e-termos')) AS m(route)
 CROSS JOIN (VALUES ('OWNER'), ('PROFESSIONAL'), ('ADMIN')) AS r(role)
 ON CONFLICT DO NOTHING;
 
@@ -345,7 +345,7 @@ FROM item_menu im
 JOIN (VALUES ('/clientes/saude', 'saude:ver'), ('/clientes/saude', 'saude:editar'),
              ('/clientes/fichas-de-outros', 'ficha:ver-outros'), ('/clientes/fotos', 'fotos:ver'),
              ('/clientes/fotos-marketing', 'fotos:marketing'),
-             ('/configuracoes/anamnese-e-termos', 'documentos:gerenciar')) AS p(route, code)
+             ('/anamnese-e-termos', 'documentos:gerenciar')) AS p(route, code)
   ON p.route = im.route
 ON CONFLICT DO NOTHING;
 
