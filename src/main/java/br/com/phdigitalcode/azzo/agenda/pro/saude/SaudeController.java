@@ -42,10 +42,14 @@ public class SaudeController {
   private final LinhaDoTempoDaCliente linhaDoTempo;
   private final LinksDaCliente links;
   private final RelatoriosDeSaude relatorios;
+  private final ContasDaCliente contas;
+  private final ExamesDaCliente exames;
 
   public SaudeController(ModelosDeSaude modelos, AnamneseDaCliente anamnese, FichaDeAtendimento fichas,
       AssinaturasDaCliente assinaturas, FotosDaFicha fotos, LinhaDoTempoDaCliente linhaDoTempo, LinksDaCliente links,
-      RelatoriosDeSaude relatorios) {
+      RelatoriosDeSaude relatorios, ContasDaCliente contas, ExamesDaCliente exames) {
+    this.contas = contas;
+    this.exames = exames;
     this.modelos = modelos;
     this.anamnese = anamnese;
     this.fichas = fichas;
@@ -132,7 +136,7 @@ public class SaudeController {
 
   public record AlertaRequest(String tipo, String texto) {}
 
-  public record LinkRequest(String proposito, UUID appointmentId) {}
+  public record LinkRequest(String proposito, UUID appointmentId, Boolean recuperar) {}
 
   @GetMapping("/clients/{id}/saude")
   @RequiresPermission("appointment:read")
@@ -214,10 +218,70 @@ public class SaudeController {
     return links.listar(id);
   }
 
+  /** Convite para a area da cliente (com conta, devolve so o endereco da area; recuperar: convite para senha nova). */
   @PostMapping("/clients/{id}/links")
   @RequiresPermission("appointment:write")
   public Map<String, Object> criarLink(@PathVariable UUID id, @RequestBody LinkRequest r) {
-    return links.criar(id, r.proposito(), r.appointmentId());
+    return contas.convidar(id, Boolean.TRUE.equals(r.recuperar()), r.appointmentId());
+  }
+
+  @GetMapping("/clients/{id}/conta")
+  @RequiresPermission("appointment:read")
+  public Map<String, Object> contaDaCliente(@PathVariable UUID id) {
+    return contas.situacao(id);
+  }
+
+  @PostMapping("/clients/{id}/conta/desligar")
+  @RequiresPermission("appointment:write")
+  public Map<String, Object> desligarConta(@PathVariable UUID id, @RequestBody Map<String, String> r) {
+    contas.desligar(id, r == null ? null : r.get("motivo"));
+    return contas.situacao(id);
+  }
+
+  // ─── Exames ────────────────────────────────────────────────────────────────
+
+  @GetMapping("/clients/{id}/exames")
+  @RequiresPermission("appointment:read")
+  public Map<String, Object> exames(@PathVariable UUID id) {
+    return exames.doSalao(id);
+  }
+
+  @PostMapping(value = "/clients/{id}/exames", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+  @RequiresPermission("appointment:write")
+  public Map<String, Object> enviarExame(@PathVariable UUID id, @RequestParam("arquivo") MultipartFile arquivo,
+      @RequestParam("titulo") String titulo, @RequestParam(name = "tipo", required = false) String tipo,
+      @RequestParam(name = "dataExame", required = false) String dataExame,
+      @RequestParam(name = "observacao", required = false) String observacao,
+      @RequestParam(name = "pedidoId", required = false) UUID pedidoId) throws java.io.IOException {
+    return exames.enviarPeloSalao(id, arquivo.getBytes(),
+        new ExamesDaCliente.Envio(titulo, tipo, dataExame, observacao, pedidoId, arquivo.getOriginalFilename()));
+  }
+
+  @GetMapping("/clients/{id}/exames/{exameId}/arquivo")
+  @RequiresPermission("appointment:read")
+  public ResponseEntity<byte[]> arquivoDoExame(@PathVariable UUID id, @PathVariable UUID exameId) {
+    ArquivosProtegidos.Arquivo a = exames.arquivoParaOSalao(id, exameId);
+    return arquivo(a.bytes(), a.contentType(), "exame-" + exameId + (a.contentType().contains("pdf") ? ".pdf" : ".jpg"));
+  }
+
+  @PostMapping("/clients/{id}/exames/{exameId}/arquivar")
+  @RequiresPermission("appointment:write")
+  public Map<String, Object> arquivarExame(@PathVariable UUID id, @PathVariable UUID exameId, @RequestBody Map<String, Boolean> r) {
+    return exames.arquivar(id, exameId, r == null || !Boolean.FALSE.equals(r.get("arquivado")));
+  }
+
+  public record PedidoDeExameRequest(String descricao, UUID appointmentId) {}
+
+  @PostMapping("/clients/{id}/exames/pedidos")
+  @RequiresPermission("appointment:write")
+  public Map<String, Object> pedirExame(@PathVariable UUID id, @RequestBody PedidoDeExameRequest r) {
+    return exames.pedir(id, r.descricao(), r.appointmentId());
+  }
+
+  @PostMapping("/clients/{id}/exames/pedidos/{pedidoId}/cancelar")
+  @RequiresPermission("appointment:write")
+  public Map<String, Object> cancelarPedidoDeExame(@PathVariable UUID id, @PathVariable UUID pedidoId) {
+    return exames.cancelarPedido(id, pedidoId);
   }
 
   @PostMapping("/clients/{id}/links/{linkId}/revogar")

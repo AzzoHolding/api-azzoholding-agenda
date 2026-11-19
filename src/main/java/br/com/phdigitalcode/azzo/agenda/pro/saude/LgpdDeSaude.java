@@ -33,7 +33,8 @@ public class LgpdDeSaude {
     Long n = jdbc.queryForObject("""
         select (select count(*) from anamneses where tenant_id = :t and client_id = :c)
              + (select count(*) from fichas_de_atendimento where tenant_id = :t and client_id = :c)
-             + (select count(*) from assinaturas_do_cliente where tenant_id = :t and client_id = :c)""",
+             + (select count(*) from assinaturas_do_cliente where tenant_id = :t and client_id = :c)
+             + (select count(*) from exames_da_cliente where tenant_id = :t and client_id = :c)""",
         Map.of("t", t, "c", clientId), Long.class);
     return n == null ? 0 : n;
   }
@@ -59,6 +60,11 @@ public class LgpdDeSaude {
     r.put("documentosAssinados", jdbc.queryForList("""
         select tipo_documento, evento, assinante_nome, metodo, hash_conteudo, hash_evidencia, created_at::text as em
           from assinaturas_do_cliente where tenant_id = :t and client_id = :c order by created_at""", Map.of("t", t, "c", clientId)));
+    r.put("exames", jdbc.queryForList("""
+        select titulo, tipo, data_exame::text as data_exame, observacao, enviado_por, created_at::text as em
+          from exames_da_cliente where tenant_id = :t and client_id = :c order by created_at""", Map.of("t", t, "c", clientId)));
+    r.put("pedidosDeExame", jdbc.queryForList("select descricao, created_at::text as em, atendido_em::text as atendido_em"
+        + " from pedidos_de_exame where tenant_id = :t and client_id = :c order by created_at", Map.of("t", t, "c", clientId)));
     return r;
   }
 
@@ -90,7 +96,13 @@ public class LgpdDeSaude {
         update assinaturas_do_cliente set retrato = null, assinante_nome = null, assinante_documento = null, parentesco = null,
                arquivo_assinatura_id = null, ip = null, user_agent = null, motivo = null
          where tenant_id = :t and client_id = :c""", p);
+    // Exames (area da cliente): saem antes dos arquivos, que eles apontam.
+    jdbc.update("delete from exames_da_cliente where tenant_id = :t and client_id = :c", p);
+    jdbc.update("delete from pedidos_de_exame where tenant_id = :t and client_id = :c", p);
     int arquivos = jdbc.update("delete from arquivos_protegidos where tenant_id = :t and client_id = :c", p);
+    // A conta da cliente perde o vinculo com este salao (continua com os outros).
+    jdbc.update("update vinculos_da_conta set desfeito_em = now(), desfeito_por = 'LGPD' where tenant_id = :t and client_id = :c"
+        + " and desfeito_em is null", p);
     jdbc.update("update links_do_cliente set revogado_em = coalesce(revogado_em, now()) where tenant_id = :t and client_id = :c", p);
     return m("versoesDeAnamnese", versoes, "alertas", alertas, "fichas", fichas, "fotos", fotos, "arquivos", arquivos);
   }

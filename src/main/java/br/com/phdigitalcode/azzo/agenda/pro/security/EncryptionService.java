@@ -27,6 +27,17 @@ public class EncryptionService {
     this.keySpec = new SecretKeySpec(keyBytes, "AES");
   }
 
+  /** HMAC-SHA256 com a mesma chave: valor fixo para buscar um dado cifrado (ex.: o CPF da conta da cliente). */
+  public String hmac(String value) {
+    try {
+      javax.crypto.Mac mac = javax.crypto.Mac.getInstance("HmacSHA256");
+      mac.init(new SecretKeySpec(keySpec.getEncoded(), "HmacSHA256"));
+      return java.util.HexFormat.of().formatHex(mac.doFinal(value.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+    } catch (java.security.GeneralSecurityException e) {
+      throw new IllegalStateException("Falha ao calcular o HMAC.", e);
+    }
+  }
+
   public String encrypt(String value) {
     if (value == null || value.isBlank()) return "";
     try {

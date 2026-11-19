@@ -138,11 +138,11 @@ public class ServicoPublicBooking {
   }
 
   /** Link para preencher a anamnese e assinar os termos depois de agendar. Por setter: o construtor nao muda. */
-  private br.com.phdigitalcode.azzo.agenda.pro.saude.LinksDaCliente linksDaCliente;
+  private br.com.phdigitalcode.azzo.agenda.pro.saude.ContasDaCliente contasDaCliente;
 
   @org.springframework.beans.factory.annotation.Autowired(required = false)
-  void setLinksDaCliente(br.com.phdigitalcode.azzo.agenda.pro.saude.LinksDaCliente linksDaCliente) {
-    this.linksDaCliente = linksDaCliente;
+  void setContasDaCliente(br.com.phdigitalcode.azzo.agenda.pro.saude.ContasDaCliente contasDaCliente) {
+    this.contasDaCliente = contasDaCliente;
   }
 
   public ServicoPublicBooking(
@@ -465,9 +465,9 @@ public class ServicoPublicBooking {
     resp.status = agendamento.getStatus().name();
     resp.message = "Agendamento criado com sucesso.";
     if (cupom != null) resp.discountValue = descontoDoCupom;
-    if (linksDaCliente != null) {
+    if (contasDaCliente != null) {
       try {
-        resp.linkDocumentos = linksDaCliente.linkParaAgendamentoOnline(tenant.getId(), cliente.getId(), agendamento.getId());
+        resp.linkDocumentos = contasDaCliente.linkParaAgendamentoOnline(tenant.getId(), cliente.getId(), agendamento.getId());
       } catch (Exception e) {
         // O link e uma ajuda: falhar aqui nao desfaz o agendamento.
       }

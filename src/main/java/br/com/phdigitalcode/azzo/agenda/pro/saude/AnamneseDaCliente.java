@@ -338,6 +338,12 @@ public class AnamneseDaCliente {
 
   /** Cria a versao nova (salao ou link). Respostas iguais a versao atual nao criam versao. */
   UUID salvarVersao(UUID t, UUID clientId, UUID modeloId, Map<String, Object> respostas, String canal, UUID usuario, UUID linkId) {
+    return salvarVersao(t, clientId, modeloId, respostas, canal, usuario, linkId, null);
+  }
+
+  /** contaId: a versao feita pela propria cliente na area dela (canal AREA). */
+  UUID salvarVersao(UUID t, UUID clientId, UUID modeloId, Map<String, Object> respostas, String canal, UUID usuario, UUID linkId,
+      UUID contaId) {
     List<Map<String, Object>> mod = jdbc.queryForList("select versao_atual_id, ativo from modelos_de_anamnese where tenant_id = :t and id = :m",
         Map.of("t", t, "m", modeloId));
     if (mod.isEmpty() || mod.get(0).get("versao_atual_id") == null) throw new IllegalArgumentException("Modelo de anamnese não encontrado.");
@@ -363,10 +369,10 @@ public class AnamneseDaCliente {
     UUID v = UUID.randomUUID();
     jdbc.update("""
         insert into versoes_de_anamnese (id, tenant_id, anamnese_id, client_id, numero, versao_do_modelo_id, respostas,
-                                         completa, faltando, canal, preenchida_por, link_id)
-        values (:id, :t, :a, :c, :n, :vm, cast(:r as jsonb), :comp, cast(:f as jsonb), :canal, :u, :l)""",
+                                         completa, faltando, canal, preenchida_por, link_id, conta_id)
+        values (:id, :t, :a, :c, :n, :vm, cast(:r as jsonb), :comp, cast(:f as jsonb), :canal, :u, :l, :conta)""",
         m("id", v, "t", t, "a", anamneseId, "c", clientId, "n", numero, "vm", versaoDoModelo, "r", Saude.json(limpas),
-            "comp", falta.isEmpty(), "f", Saude.json(falta), "canal", canal, "u", usuario, "l", linkId));
+            "comp", falta.isEmpty(), "f", Saude.json(falta), "canal", canal, "u", usuario, "l", linkId, "conta", contaId));
     jdbc.update("update anamneses set versao_atual_id = :v, updated_at = now() where id = :a", Map.of("v", v, "a", anamneseId));
     acesso.auditar(t, "HEALTH_ANAMNESIS_VERSION", clientId, m("modelo", modeloId, "versao", v, "numero", numero,
         "completa", falta.isEmpty(), "canal", canal), false);

@@ -64,7 +64,7 @@ public class AssinaturasDaCliente {
       String motivo, Boolean aceite) {}
 
   /** De onde veio: salao (usuario presente) ou link pessoal. */
-  record Origem(String metodo, String ip, String userAgent, UUID usuarioPresente, UUID linkId) {}
+  record Origem(String metodo, String ip, String userAgent, UUID usuarioPresente, UUID linkId, UUID contaId) {}
 
   /** O documento a assinar: retrato (texto fiel) e o hash dele. */
   record Conteudo(String retrato, String hash, UUID modeloDocumentoId, UUID versaoDocumentoId, UUID versaoAnamneseId, UUID fichaId) {}
@@ -103,7 +103,7 @@ public class AssinaturasDaCliente {
     if ("ASSINATURA".equals(p.evento()) && "ACEITE_NO_SALAO".equals(metodo)) {
       throw new IllegalArgumentException("No salão, a cliente assina desenhando na tela.");
     }
-    return registrar(t, clientId, p, new Origem(metodo, ip, userAgent, acesso.usuarioId(), null));
+    return registrar(t, clientId, p, new Origem(metodo, ip, userAgent, acesso.usuarioId(), null, null));
   }
 
   Map<String, Object> registrar(UUID t, UUID clientId, Pedido p, Origem o) {
@@ -113,7 +113,7 @@ public class AssinaturasDaCliente {
     if ("REVOGACAO".equals(evento) && !p.tipoDocumento().startsWith("AUTORIZACAO_")) {
       throw new IllegalArgumentException("Só as autorizações de fotos e de marketing podem ser revogadas.");
     }
-    if ("ASSINATURA".equals(evento) && "LINK".equals(o.metodo()) && !Boolean.TRUE.equals(p.aceite())) {
+    if ("ASSINATURA".equals(evento) && ("LINK".equals(o.metodo()) || "AREA".equals(o.metodo())) && !Boolean.TRUE.equals(p.aceite())) {
       throw new IllegalArgumentException("Marque que leu e concorda para assinar.");
     }
     Conteudo c = conteudo(t, clientId, p);
@@ -158,6 +158,7 @@ public class AssinaturasDaCliente {
     evidencia.put("navegador", String.valueOf(o.userAgent()));
     evidencia.put("usuarioPresente", String.valueOf(o.usuarioPresente()));
     evidencia.put("link", String.valueOf(o.linkId()));
+    if (o.contaId() != null) evidencia.put("conta", o.contaId().toString());
     evidencia.put("hashImagem", String.valueOf(hashImagem));
     evidencia.put("em", agora.toString());
     String hashEvidencia = hashDaEvidencia(evidencia);
@@ -167,14 +168,14 @@ public class AssinaturasDaCliente {
         insert into assinaturas_do_cliente (id, tenant_id, client_id, evento, tipo_documento, modelo_documento_id,
             versao_documento_id, versao_anamnese_id, ficha_id, appointment_id, retrato, hash_conteudo, assinante_nome,
             assinante_documento, responsavel_legal, parentesco, metodo, arquivo_assinatura_id, ip, user_agent,
-            usuario_presente, link_id, motivo, hash_evidencia, created_at)
+            usuario_presente, link_id, conta_id, motivo, hash_evidencia, created_at)
         values (:id, :t, :c, :e, :tipo, :md, :vd, :va, :f, :a, :r, :h, :n, :doc, :resp, :par, :met, :img, :ip, :ua,
-                :u, :l, :mot, :he, :em)""",
+                :u, :l, :conta, :mot, :he, :em)""",
         m("id", id, "t", t, "c", clientId, "e", evento, "tipo", p.tipoDocumento(), "md", c.modeloDocumentoId(),
             "vd", c.versaoDocumentoId(), "va", c.versaoAnamneseId(), "f", c.fichaId(), "a", p.appointmentId(),
             "r", c.retrato(), "h", c.hash(), "n", nome, "doc", documento, "resp", Boolean.TRUE.equals(p.responsavelLegal()), "par", parentesco,
             "met", o.metodo(), "img", imagemId, "ip", Saude.limpar(o.ip(), 60), "ua", Saude.limpar(o.userAgent(), 300),
-            "u", o.usuarioPresente(), "l", o.linkId(), "mot", Saude.limpar(p.motivo(), 300), "he", hashEvidencia,
+            "u", o.usuarioPresente(), "l", o.linkId(), "conta", o.contaId(), "mot", Saude.limpar(p.motivo(), 300), "he", hashEvidencia,
             "em", java.sql.Timestamp.from(agora)));
     // Revogou o marketing: nenhuma foto continua liberada para divulgacao.
     if ("AUTORIZACAO_MARKETING".equals(p.tipoDocumento()) && !"ASSINATURA".equals(evento)) {

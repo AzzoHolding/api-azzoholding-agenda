@@ -165,8 +165,14 @@ public class RateLimitFilter extends OncePerRequestFilter {
           java.util.regex.Pattern.compile("/api/v1/public/salons/[^/]+/cupom/validar"),
           new RateLimitRule("public-coupon", bookingMax, Duration.ofMinutes(bookingWindow)),
           // Link pessoal da cliente (anamnese e ficha): a conferencia dos 4 digitos tambem bloqueia o link no 5o erro.
-          java.util.regex.Pattern.compile("/api/v1/public/documentos/[^/]+/conferir"),
-          new RateLimitRule("public-documentos", bookingMax, Duration.ofMinutes(bookingWindow)));
+          // Area da cliente: convite (4 digitos; o 5o erro bloqueia o convite), login e recuperacao. A conta tambem
+          // bloqueia por 15 min no 5o erro de senha.
+          java.util.regex.Pattern.compile("/api/v1/public/area-da-cliente/convite/[^/]+/(conferir|criar-conta|entrar|nova-senha)"),
+          new RateLimitRule("cliente-convite", bookingMax, Duration.ofMinutes(bookingWindow)),
+          java.util.regex.Pattern.compile("/api/v1/public/area-da-cliente/entrar"),
+          new RateLimitRule("cliente-entrar", loginMax, Duration.ofMinutes(loginWindow)),
+          java.util.regex.Pattern.compile("/api/v1/public/area-da-cliente/(esqueci-a-senha|nova-senha|confirmar-email|eu/senha|eu/excluir)"),
+          new RateLimitRule("cliente-recuperar", forgotMax, Duration.ofMinutes(forgotWindow)));
       FilterRegistrationBean<RateLimitFilter> registration =
           new FilterRegistrationBean<>(new RateLimitFilter(rules, porPadrao));
       registration.addUrlPatterns("/api/v1/auth/*", "/api/v1/public/*");
