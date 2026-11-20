@@ -86,15 +86,15 @@ public class EmailJobService {
    * que ela e cliente (email_jobs exige tenant); os modelos de e-mail sao os mesmos do login do salao.
    */
   @Transactional
-  public void enqueueParaContaDaCliente(UUID tenantId, boolean novaSenha, UUID tokenId, String email, String nome, String url) {
+  public void enqueueParaContaDaCliente(UUID tenantId, UUID relacionado, String email, String nome, AvisoDaClienteEmailPayload aviso) {
     EmailJob job = new EmailJob();
     job.setTenantId(tenantId);
-    job.setRelatedEntityType("CONTA_DA_CLIENTE_TOKEN");
-    job.setRelatedEntityId(tokenId);
-    job.setEmailType(novaSenha ? EmailJobType.PASSWORD_RESET : EmailJobType.EMAIL_VERIFICATION);
+    job.setRelatedEntityType("CONTA_DA_CLIENTE");
+    job.setRelatedEntityId(relacionado);
+    job.setEmailType(EmailJobType.CLIENTE_AVISO);
     job.setRecipientEmail(email);
     job.setRecipientName(nome);
-    job.setPayloadJson(toJson(novaSenha ? new PasswordResetEmailPayload(url, tokenId) : new EmailVerificationEmailPayload(url, tokenId)));
+    job.setPayloadJson(toJson(aviso));
     job.setStatus(EmailJobStatus.NEW);
     emailJobRepository.save(job);
   }

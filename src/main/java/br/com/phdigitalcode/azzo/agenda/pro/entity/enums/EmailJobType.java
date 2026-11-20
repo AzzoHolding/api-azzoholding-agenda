@@ -10,5 +10,7 @@ package br.com.phdigitalcode.azzo.agenda.pro.entity.enums;
 public enum EmailJobType {
   PASSWORD_RESET,
   EMAIL_VERIFICATION,
-  LICENSE_EXPIRING_SOON
+  LICENSE_EXPIRING_SOON,
+  /** Conta da cliente (area da cliente): confirmar e-mail, senha nova e avisos, com texto proprio. */
+  CLIENTE_AVISO
 }

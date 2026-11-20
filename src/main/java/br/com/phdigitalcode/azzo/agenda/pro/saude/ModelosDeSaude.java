@@ -268,7 +268,7 @@ public class ModelosDeSaude {
         select s.id as service_id, s.name as servico, s.category_id, s.is_active,
                e.modelo_anamnese_id, e.termo_id, coalesce(e.exige_autorizacao_fotos, false) as exige_autorizacao_fotos,
                coalesce(e.ficha_assinada, false) as ficha_assinada, coalesce(e.nivel, 'ALERTAR') as nivel,
-               e.id is not null as configurado
+               e.exame_exigido, e.id is not null as configurado
           from services s left join exigencias_do_servico e on e.tenant_id = s.tenant_id and e.service_id = s.id
          where s.tenant_id = :t order by s.is_active desc, s.name""", Map.of("t", t));
   }
@@ -276,6 +276,14 @@ public class ModelosDeSaude {
   @Transactional
   public List<Map<String, Object>> salvarExigencia(UUID serviceId, UUID modeloAnamneseId, UUID termoId,
       boolean exigeFotos, boolean fichaAssinada, String nivel) {
+    return salvarExigencia(serviceId, modeloAnamneseId, termoId, exigeFotos, fichaAssinada, nivel, null);
+  }
+
+  /** exameExigido: o que a cliente deve enviar (ex.: "Exame de tireoide"); vale o exame dos ultimos 12 meses. */
+  @Transactional
+  public List<Map<String, Object>> salvarExigencia(UUID serviceId, UUID modeloAnamneseId, UUID termoId,
+      boolean exigeFotos, boolean fichaAssinada, String nivel, String exameExigido) {
+    String exame = Saude.limpar(exameExigido, 200);
     acesso.exigirGerenciarDocumentos();
     UUID t = acesso.tenant();
     Boolean servico = jdbc.queryForObject("select exists(select 1 from services where tenant_id = :t and id = :s)",
@@ -287,19 +295,19 @@ public class ModelosDeSaude {
     }
     String n = nivel == null ? "ALERTAR" : nivel;
     if (!n.equals("ALERTAR") && !n.equals("BLOQUEAR")) throw new IllegalArgumentException("Nível inválido.");
-    boolean vazio = modeloAnamneseId == null && termoId == null && !exigeFotos && !fichaAssinada;
+    boolean vazio = modeloAnamneseId == null && termoId == null && !exigeFotos && !fichaAssinada && exame == null;
     if (vazio) {
       jdbc.update("delete from exigencias_do_servico where tenant_id = :t and service_id = :s", Map.of("t", t, "s", serviceId));
     } else {
       jdbc.update("""
           insert into exigencias_do_servico (tenant_id, service_id, modelo_anamnese_id, termo_id, exige_autorizacao_fotos,
-                                             ficha_assinada, nivel)
-          values (:t, :s, :ma, :te, :f, :fa, :n)
+                                             ficha_assinada, nivel, exame_exigido)
+          values (:t, :s, :ma, :te, :f, :fa, :n, :ex)
           on conflict (tenant_id, service_id) where service_id is not null do update
              set modelo_anamnese_id = excluded.modelo_anamnese_id, termo_id = excluded.termo_id,
                  exige_autorizacao_fotos = excluded.exige_autorizacao_fotos, ficha_assinada = excluded.ficha_assinada,
-                 nivel = excluded.nivel, updated_at = now()""",
-          m("t", t, "s", serviceId, "ma", modeloAnamneseId, "te", termoId, "f", exigeFotos, "fa", fichaAssinada, "n", n));
+                 nivel = excluded.nivel, exame_exigido = excluded.exame_exigido, updated_at = now()""",
+          m("t", t, "s", serviceId, "ma", modeloAnamneseId, "te", termoId, "f", exigeFotos, "fa", fichaAssinada, "n", n, "ex", exame));
     }
     acesso.auditar(t, "HEALTH_REQUIREMENT_UPDATE", null, m("servico", serviceId, "nivel", n), false);
     return exigencias();
@@ -313,7 +321,8 @@ public class ModelosDeSaude {
                coalesce(e.termo_id, ec.termo_id) as termo_id,
                coalesce(e.exige_autorizacao_fotos, ec.exige_autorizacao_fotos, false) as exige_autorizacao_fotos,
                coalesce(e.ficha_assinada, ec.ficha_assinada, false) as ficha_assinada,
-               coalesce(e.nivel, ec.nivel, 'ALERTAR') as nivel
+               coalesce(e.nivel, ec.nivel, 'ALERTAR') as nivel,
+               coalesce(e.exame_exigido, ec.exame_exigido) as exame_exigido
           from services s
           left join exigencias_do_servico e on e.tenant_id = s.tenant_id and e.service_id = s.id
           left join exigencias_do_servico ec on ec.tenant_id = s.tenant_id and ec.category_id = s.category_id

@@ -107,6 +107,32 @@ public class RelatoriosDeSaude {
          where c.tenant_id = :t order by c.name""", Map.of("t", t));
   }
 
+  /** Adesao a area da cliente: quantas clientes tem conta e o que aconteceu com os convites do periodo. */
+  @Transactional(readOnly = true)
+  public Map<String, Object> adesao(LocalDate de, LocalDate ate) {
+    acesso.exigirGerenciarDocumentos();
+    UUID t = acesso.tenant();
+    Map<String, Object> p = Map.of("t", t, "de", java.sql.Date.valueOf(de), "ate", java.sql.Date.valueOf(ate.plusDays(1)));
+    Map<String, Object> r = new java.util.LinkedHashMap<>(jdbc.queryForMap("""
+        select (select count(*) from clients where tenant_id = :t and anonymized_at is null) as clientes,
+               (select count(*) from vinculos_da_conta where tenant_id = :t and desfeito_em is null) as com_conta,
+               (select count(*) from vinculos_da_conta where tenant_id = :t and created_at >= :de and created_at < :ate) as contas_no_periodo,
+               (select count(*) from links_do_cliente where tenant_id = :t and proposito = 'CONVITE_DA_CONTA'
+                   and created_at >= :de and created_at < :ate) as convites,
+               (select count(*) from links_do_cliente where tenant_id = :t and proposito = 'CONVITE_DA_CONTA'
+                   and created_at >= :de and created_at < :ate and usado_em is not null) as usados,
+               (select count(*) from links_do_cliente where tenant_id = :t and proposito = 'CONVITE_DA_CONTA'
+                   and created_at >= :de and created_at < :ate and usado_em is null and revogado_em is null
+                   and bloqueado_em is null and expira_em > now()) as aguardando,
+               (select count(*) from links_do_cliente where tenant_id = :t and proposito = 'CONVITE_DA_CONTA'
+                   and created_at >= :de and created_at < :ate and usado_em is null
+                   and (revogado_em is not null or bloqueado_em is not null or expira_em <= now())) as perdidos""", p));
+    long clientes = ((Number) r.get("clientes")).longValue();
+    long comConta = ((Number) r.get("com_conta")).longValue();
+    r.put("percentual_com_conta", clientes == 0 ? 0 : Math.round(comConta * 1000.0 / clientes) / 10.0);
+    return r;
+  }
+
   // ─── Rotinas ───────────────────────────────────────────────────────────────
 
   /** Ficha ainda em rascunho de atendimento de antes de ontem: um aviso no sino, uma vez. */

@@ -12,11 +12,17 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import br.com.phdigitalcode.azzo.agenda.pro.entity.enums.StatusNotification;
 import br.com.phdigitalcode.azzo.agenda.pro.exception.ApiClientErrorException;
+import br.com.phdigitalcode.azzo.agenda.pro.security.ContextoTenant;
+import br.com.phdigitalcode.azzo.agenda.pro.service.NotificationPublisher;
+import br.com.phdigitalcode.azzo.agenda.pro.service.ServicoAgendamentos;
 
 /**
  * O que a cliente ve e faz na area dela (PLANO-AREA-DA-CLIENTE.md, secao 5). Tudo parte da conta da sessao; cada salao so
@@ -39,9 +45,34 @@ public class AreaDaCliente {
   private final ArquivosProtegidos arquivos;
   private final ExamesDaCliente exames;
   private final AcessoDeSaude acesso;
+  private final ModelosDeSaude modelos;
+  private final LgpdDeSaude lgpd;
+
+  /** Desmarcar pela area usa o mesmo caminho do salao (comanda, cupom, ficha, aviso). Por setter e preguicoso: evita ciclo. */
+  private ServicoAgendamentos agendamentos;
+  private ContextoTenant contextoTenant;
+  private NotificationPublisher avisos;
+
+  @Autowired(required = false)
+  void setAgendamentos(@Lazy ServicoAgendamentos agendamentos) {
+    this.agendamentos = agendamentos;
+  }
+
+  @Autowired(required = false)
+  void setContextoTenant(ContextoTenant contextoTenant) {
+    this.contextoTenant = contextoTenant;
+  }
+
+  @Autowired(required = false)
+  void setAvisos(NotificationPublisher avisos) {
+    this.avisos = avisos;
+  }
 
   public AreaDaCliente(NamedParameterJdbcTemplate jdbc, ContasDaCliente contas, LinksDaCliente links, AnamneseDaCliente anamnese,
-      AssinaturasDaCliente assinaturas, ArquivosProtegidos arquivos, ExamesDaCliente exames, AcessoDeSaude acesso) {
+      AssinaturasDaCliente assinaturas, ArquivosProtegidos arquivos, ExamesDaCliente exames, AcessoDeSaude acesso,
+      ModelosDeSaude modelos, LgpdDeSaude lgpd) {
+    this.modelos = modelos;
+    this.lgpd = lgpd;
     this.jdbc = jdbc;
     this.contas = contas;
     this.links = links;
@@ -90,9 +121,154 @@ public class AreaDaCliente {
          where a.tenant_id = :t and a.client_id = :c""" + " and " + filtro
         + " order by a.date" + (futuros ? "" : " desc") + ", a.start_time" + (futuros ? "" : " desc") + " limit 100",
         m("t", s.tenantId(), "c", s.clientId(), "hoje", java.sql.Date.valueOf(hoje), "ativos", ATIVOS))) {
-      r.add(m("id", a.get("id"), "salaoId", s.tenantId(), "salao", s.nome(), "data", a.get("date").toString(),
+      Map<String, Object> x = m("id", a.get("id"), "salaoId", s.tenantId(), "salao", s.nome(), "data", a.get("date").toString(),
           "inicio", String.valueOf(a.get("start_time")), "fim", String.valueOf(a.get("end_time")), "status", a.get("status"),
-          "profissional", a.get("profissional"), "servicos", a.get("servicos"), "total", a.get("total")));
+          "profissional", a.get("profissional"), "servicos", a.get("servicos"), "total", a.get("total"));
+      if (futuros) x.put("desmarcar", porQueNaoDesmarca(s, (UUID) a.get("id"), String.valueOf(a.get("status")),
+          ((java.sql.Date) a.get("date")).toLocalDate(), hora(a.get("start_time"))));
+      r.add(x);
+    }
+    return r;
+  }
+
+  // ─── Desmarcar ─────────────────────────────────────────────────────────────
+
+  /** appointments.start_time e texto ("16:00"). */
+  static java.time.LocalTime hora(Object v) {
+    String h = String.valueOf(v);
+    return java.time.LocalTime.parse(h.length() >= 5 ? h.substring(0, 5) : h);
+  }
+
+  /**
+   * Nulo quando a cliente pode desmarcar; senao, o motivo. Segue a politica de cancelamento do salao (horas minimas
+   * antes do horario); horario com sinal pago ou ja em atendimento so o salao desmarca.
+   */
+  String porQueNaoDesmarca(Salao s, UUID agendamento, String status, LocalDate data, java.time.LocalTime inicio) {
+    if (!"Pendente".equals(status) && !"Confirmado".equals(status)) return "Este horário já começou. Fale com o salão.";
+    java.time.ZonedDateTime comeca = java.time.ZonedDateTime.of(data, inicio, AnamneseDaCliente.ZONA_BR);
+    java.time.ZonedDateTime agora = java.time.ZonedDateTime.now(AnamneseDaCliente.ZONA_BR);
+    if (!comeca.isAfter(agora)) return "O horário já passou. Fale com o salão.";
+    Boolean sinal = jdbc.queryForObject("select exists(select 1 from appointment_deposits where tenant_id = :t and appointment_id = :a"
+        + " and paid_at is not null)", Map.of("t", s.tenantId(), "a", agendamento), Boolean.class);
+    if (Boolean.TRUE.equals(sinal)) return "Este horário tem sinal pago. Para desmarcar, fale com o salão.";
+    Map<String, Object> pol = jdbc.query("select cancellation_policy_enabled, cancellation_min_hours_before from tenant_operational_settings"
+        + " where tenant_id = :t", Map.of("t", s.tenantId()), rs -> rs.next()
+            ? m("ativa", rs.getBoolean(1), "horas", rs.getObject(2) == null ? 0 : rs.getInt(2)) : null);
+    if (pol != null && Boolean.TRUE.equals(pol.get("ativa"))) {
+      int horas = (Integer) pol.get("horas");
+      if (horas > 0 && comeca.isBefore(agora.plusHours(horas))) {
+        return "Pela regra do salão, só dá para desmarcar até " + horas + " horas antes. Fale com o salão.";
+      }
+    }
+    return null;
+  }
+
+  @Transactional
+  public Map<String, Object> desmarcar(UUID conta, UUID tenantId, UUID agendamentoId) {
+    Salao s = salao(conta, tenantId);
+    List<Map<String, Object>> r = jdbc.queryForList("select status, date, start_time from appointments where tenant_id = :t and id = :a"
+        + " and client_id = :c", Map.of("t", s.tenantId(), "a", agendamentoId, "c", s.clientId()));
+    if (r.isEmpty()) throw new ApiClientErrorException("Horário não encontrado.", 404);
+    String motivo = porQueNaoDesmarca(s, agendamentoId, String.valueOf(r.get(0).get("status")),
+        ((java.sql.Date) r.get(0).get("date")).toLocalDate(), hora(r.get(0).get("start_time")));
+    if (motivo != null) throw new IllegalArgumentException(motivo);
+    if (agendamentos == null || contextoTenant == null) throw new IllegalStateException("Desmarcar não está disponível.");
+    contextoTenant.definirTenantId(s.tenantId());
+    try {
+      agendamentos.atualizarStatus(agendamentoId, "CANCELLED");
+    } finally {
+      contextoTenant.limparTenantIdOverride();
+    }
+    acesso.auditar(s.tenantId(), "CLIENT_AREA_APPOINTMENT_CANCEL", s.clientId(), m("agendamento", agendamentoId, "conta", conta), false);
+    avisarSalao(s, agendamentoId, "DESMARCOU", "desmarcou o horário de " + r.get(0).get("date") + " às "
+        + String.valueOf(r.get(0).get("start_time")).substring(0, 5) + " pela área da cliente.");
+    contas.evento(conta, "DESMARCOU_HORARIO", s.nome());
+    return doSalao(conta, tenantId);
+  }
+
+  /** Aviso no sino do salao quando a cliente faz algo na area. Falhar aqui nunca derruba a acao dela. */
+  void avisarSalao(Salao s, UUID agendamento, String tipo, String texto) {
+    if (avisos == null) return;
+    try {
+      String nome = jdbc.queryForObject("select name from clients where id = :c", Map.of("c", s.clientId()), String.class);
+      avisos.publish(s.tenantId(), agendamento, null, "CLIENT_AREA", "cliente:" + s.clientId() + ":" + tipo,
+          nome + " " + texto, StatusNotification.SENT, null, java.time.Instant.now(), 300L);
+    } catch (Exception ignored) {
+      // so um aviso
+    }
+  }
+
+  // ─── Pacotes, assinaturas, vales e pontos (so leitura) ─────────────────────
+
+  Map<String, Object> beneficios(Salao s) {
+    Map<String, Object> p = Map.of("t", s.tenantId(), "c", s.clientId());
+    List<Map<String, Object>> pacotes = new ArrayList<>();
+    for (Map<String, Object> x : jdbc.queryForList("""
+        select pp.package_nome, pp.created_at, b.service_nome, b.sessoes_totais, b.sessoes_usadas, b.expira_em
+          from client_package_purchases pp join client_package_balances b on b.purchase_id = pp.id
+         where pp.tenant_id = :t and pp.client_id = :c order by pp.created_at desc, b.service_nome""", p)) {
+      pacotes.add(m("pacote", x.get("package_nome"), "servico", x.get("service_nome"), "total", x.get("sessoes_totais"),
+          "usadas", x.get("sessoes_usadas"), "expiraEm", Saude.instante(x.get("expira_em")), "compradoEm", Saude.instante(x.get("created_at"))));
+    }
+    List<Map<String, Object>> assinaturasDoClube = new ArrayList<>();
+    for (Map<String, Object> x : jdbc.queryForList("""
+        select ms.id, ms.plan_nome, ms.status, ms.period_end, ms.cancel_at_period_end from client_memberships ms
+         where ms.tenant_id = :t and ms.client_id = :c order by ms.created_at desc""", p)) {
+      List<Map<String, Object>> saldos = new ArrayList<>();
+      for (Map<String, Object> b : jdbc.queryForList("select service_nome, quantidade_mensal, usadas_no_periodo from client_membership_balances"
+          + " where membership_id = :m order by service_nome", Map.of("m", x.get("id")))) {
+        saldos.add(m("servico", b.get("service_nome"), "porMes", b.get("quantidade_mensal"), "usadas", b.get("usadas_no_periodo")));
+      }
+      assinaturasDoClube.add(m("plano", x.get("plan_nome"), "status", x.get("status"), "ate", Saude.instante(x.get("period_end")),
+          "encerraNoFim", x.get("cancel_at_period_end"), "servicos", saldos));
+    }
+    List<Map<String, Object>> vales = new ArrayList<>();
+    for (Map<String, Object> x : jdbc.queryForList("""
+        select codigo, valor_inicial, saldo, expira_em, status, destinatario_nome, created_at from vales_presente
+         where tenant_id = :t and comprador_client_id = :c order by created_at desc""", p)) {
+      vales.add(m("codigo", x.get("codigo"), "valor", x.get("valor_inicial"), "saldo", x.get("saldo"),
+          "expiraEm", x.get("expira_em") == null ? null : x.get("expira_em").toString(), "status", x.get("status"),
+          "para", x.get("destinatario_nome"), "compradoEm", Saude.instante(x.get("created_at"))));
+    }
+    Map<String, Object> pontos = jdbc.query("""
+        select c.loyalty_points, l.pontos_por_resgate_real from clients c
+          join tenant_loyalty_settings l on l.tenant_id = c.tenant_id and l.ativo where c.id = :c and c.tenant_id = :t""",
+        p, rs -> rs.next() ? m("saldo", rs.getObject(1), "pontosPorReal", rs.getObject(2)) : null);
+    return m("pacotes", pacotes, "clube", assinaturasDoClube, "vales", vales, "pontos", pontos);
+  }
+
+  /** Tudo o que o salao tem da cliente, para ela baixar (a mesma base da exportacao LGPD). */
+  @Transactional(readOnly = true)
+  public Map<String, Object> meusDados(UUID conta, UUID tenantId) {
+    Salao s = salao(conta, tenantId);
+    Map<String, Object> cadastro = jdbc.queryForMap("select name as nome, phone as telefone, email, birth_date::text as nascimento,"
+        + " cpf_cnpj as documento, created_at::text as cliente_desde from clients where id = :c", Map.of("c", s.clientId()));
+    Map<String, Object> r = new LinkedHashMap<>();
+    r.put("salao", s.nome());
+    r.put("geradoEm", java.time.Instant.now().toString());
+    r.put("cadastro", cadastro);
+    List<Map<String, Object>> horarios = new ArrayList<>(agendamentos(s, true));
+    horarios.addAll(agendamentos(s, false));
+    r.put("horarios", horarios);
+    r.put("saude", lgpd.exportar(s.tenantId(), s.clientId()));
+    r.put("beneficios", beneficios(s));
+    registrar(s.tenantId(), s.clientId(), "AREA_MEUS_DADOS", conta);
+    return r;
+  }
+
+  /** Exames que os servicos dos proximos horarios exigem e que a cliente nao enviou nos ultimos 12 meses. */
+  List<Map<String, Object>> examesExigidos(Salao s, List<UUID> ids) {
+    if (ids.isEmpty()) return List.of();
+    List<UUID> servicos = jdbc.queryForList("select distinct service_id from appointment_items where appointment_id in (:a)"
+        + " and service_id is not null", Map.of("a", ids), UUID.class);
+    Boolean temExame = jdbc.queryForObject("select exists(select 1 from exames_da_cliente where tenant_id = :t and client_id = :c"
+        + " and arquivado_em is null and created_at > now() - interval '12 months')", Map.of("t", s.tenantId(), "c", s.clientId()), Boolean.class);
+    if (Boolean.TRUE.equals(temExame)) return List.of();
+    List<Map<String, Object>> r = new ArrayList<>();
+    Set<String> vistos = new LinkedHashSet<>();
+    for (Map<String, Object> e : modelos.exigenciasDosServicos(s.tenantId(), servicos)) {
+      Object exame = e.get("exame_exigido");
+      if (exame != null && vistos.add(String.valueOf(exame))) r.add(m("descricao", exame, "servico", e.get("servico")));
     }
     return r;
   }
@@ -185,6 +361,10 @@ public class AreaDaCliente {
       }
     }
     for (Map<String, Object> p : pedidos) r.add(m("tipo", "EXAME", "texto", "Envie o exame: " + p.get("descricao"), "id", p.get("id")));
+    for (Map<String, Object> e : examesExigidos(s, futuros(s))) {
+      r.add(m("tipo", "EXAME", "texto", "Envie o exame: " + e.get("descricao") + " (pedido para " + e.get("servico") + ")",
+          "id", "servico:" + e.get("descricao")));
+    }
     for (Map<String, Object> x : r) {
       x.put("salaoId", s.tenantId());
       x.put("salao", s.nome());
@@ -281,6 +461,7 @@ public class AreaDaCliente {
     r.put("documentos", documentos(s));
     r.put("exames", exames.lista(s.tenantId(), s.clientId(), false));
     r.put("pedidosDeExame", pedidos);
+    r.put("beneficios", beneficios(s));
     registrar(s.tenantId(), s.clientId(), "AREA_SALAO", conta);
     return r;
   }
@@ -294,6 +475,7 @@ public class AreaDaCliente {
       throw new ApiClientErrorException("Esta ficha não está disponível para você neste salão.", 403);
     }
     UUID v = anamnese.salvarVersao(s.tenantId(), s.clientId(), modeloId, respostas, "AREA", null, null, conta);
+    avisarSalao(s, null, "ANAMNESE", "atualizou a ficha de saúde pela área da cliente.");
     return m("versaoId", v, "salao", doSalao(conta, tenantId));
   }
 
@@ -319,6 +501,8 @@ public class AreaDaCliente {
         pedido.responsavelLegal(), pedido.parentesco(), pedido.imagemPng(), pedido.motivo(), pedido.aceite());
     Map<String, Object> r = assinaturas.registrar(s.tenantId(), s.clientId(), semAgendamento,
         new AssinaturasDaCliente.Origem("AREA", ip, userAgent, null, null, conta));
+    String verbo = "RECUSA".equals(pedido.evento()) ? "recusou" : "REVOGACAO".equals(pedido.evento()) ? "revogou" : "assinou";
+    avisarSalao(s, null, "DOCUMENTO", verbo + " um documento pela área da cliente (" + AssinaturasDaCliente.rotulo(pedido.tipoDocumento()) + ").");
     return m("assinatura", r, "salao", doSalao(conta, tenantId));
   }
 
@@ -347,6 +531,7 @@ public class AreaDaCliente {
   public Map<String, Object> enviarExame(UUID conta, UUID tenantId, byte[] bytes, ExamesDaCliente.Envio envio) {
     Salao s = salao(conta, tenantId);
     exames.guardar(s.tenantId(), s.clientId(), bytes, envio, "CLIENTE", null, conta);
+    avisarSalao(s, null, "EXAME", "enviou um exame pela área da cliente.");
     return doSalao(conta, tenantId);
   }
 

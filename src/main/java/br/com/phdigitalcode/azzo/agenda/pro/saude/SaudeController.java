@@ -66,7 +66,8 @@ public class SaudeController {
 
   public record DocumentoRequest(String tipo, String nome, Boolean ativo, String conteudo) {}
 
-  public record ExigenciaRequest(UUID modeloAnamneseId, UUID termoId, Boolean exigeAutorizacaoFotos, Boolean fichaAssinada, String nivel) {}
+  public record ExigenciaRequest(UUID modeloAnamneseId, UUID termoId, Boolean exigeAutorizacaoFotos, Boolean fichaAssinada, String nivel,
+      String exameExigido) {}
 
   @GetMapping("/anamnese/modelos")
   @RequiresPermission("appointment:read")
@@ -129,7 +130,7 @@ public class SaudeController {
 
   @PutMapping("/anamnese/exigencias/{serviceId}")
   public List<Map<String, Object>> salvarExigencia(@PathVariable UUID serviceId, @RequestBody ExigenciaRequest r) {
-    return modelos.salvarExigencia(serviceId, r.modeloAnamneseId(), r.termoId(), Boolean.TRUE.equals(r.exigeAutorizacaoFotos()), Boolean.TRUE.equals(r.fichaAssinada()), r.nivel());
+    return modelos.salvarExigencia(serviceId, r.modeloAnamneseId(), r.termoId(), Boolean.TRUE.equals(r.exigeAutorizacaoFotos()), Boolean.TRUE.equals(r.fichaAssinada()), r.nivel(), r.exameExigido());
   }
 
   // ─── Cliente ───────────────────────────────────────────────────────────────
@@ -223,6 +224,11 @@ public class SaudeController {
   @RequiresPermission("appointment:write")
   public Map<String, Object> criarLink(@PathVariable UUID id, @RequestBody LinkRequest r) {
     return contas.convidar(id, Boolean.TRUE.equals(r.recuperar()), r.appointmentId());
+  }
+
+  @GetMapping("/anamnese/relatorios/adesao")
+  public Map<String, Object> adesao(@RequestParam("de") LocalDate de, @RequestParam("ate") LocalDate ate) {
+    return relatorios.adesao(de, ate);
   }
 
   @GetMapping("/clients/{id}/conta")

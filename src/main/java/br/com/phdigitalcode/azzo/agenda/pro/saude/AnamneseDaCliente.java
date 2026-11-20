@@ -462,6 +462,10 @@ public class AnamneseDaCliente {
             "nome", nome, "texto", (recusado ? "A cliente recusou: " : "Falta assinar: ") + nome));
       }
       if (Boolean.TRUE.equals(e.get("exige_autorizacao_fotos"))) fotos = true;
+      Object exame = e.get("exame_exigido");
+      if (exame != null && vistos.add("E" + exame) && (clientId == null || !temExameRecente(t, clientId))) {
+        itens.add(m("tipo", "EXAME_PENDENTE", "nivel", nivel, "servico", servico, "nome", exame, "texto", "Falta o exame: " + exame));
+      }
     }
     if (fotos && (clientId == null || !autorizacaoAtiva(t, clientId, "AUTORIZACAO_FOTOS")) && vistos.add("F")) {
       itens.add(m("tipo", "AUTORIZACAO_FOTOS_PENDENTE", "nivel", "ALERTAR", "texto", "Falta a autorização de fotos"));
@@ -474,6 +478,13 @@ public class AnamneseDaCliente {
     r.put("fichaAssinada", fichaAssinada);
     r.put("alertas", comAlertas && clientId != null && acesso.podeVerAlertas(t, clientId) ? alertas(t, clientId) : List.of());
     return r;
+  }
+
+  /** Exame enviado (pelo salao ou pela cliente) nos ultimos 12 meses e nao arquivado. */
+  boolean temExameRecente(UUID t, UUID clientId) {
+    Boolean r = jdbc.queryForObject("select exists(select 1 from exames_da_cliente where tenant_id = :t and client_id = :c"
+        + " and arquivado_em is null and created_at > now() - interval '12 months')", Map.of("t", t, "c", clientId), Boolean.class);
+    return Boolean.TRUE.equals(r);
   }
 
   static String textoDaPendencia(String tipo, String nome) {

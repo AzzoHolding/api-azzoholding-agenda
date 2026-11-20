@@ -171,7 +171,8 @@ public class RateLimitFilter extends OncePerRequestFilter {
           new RateLimitRule("cliente-convite", bookingMax, Duration.ofMinutes(bookingWindow)),
           java.util.regex.Pattern.compile("/api/v1/public/area-da-cliente/entrar"),
           new RateLimitRule("cliente-entrar", loginMax, Duration.ofMinutes(loginWindow)),
-          java.util.regex.Pattern.compile("/api/v1/public/area-da-cliente/(esqueci-a-senha|nova-senha|confirmar-email|eu/senha|eu/excluir)"),
+          java.util.regex.Pattern.compile(
+              "/api/v1/public/area-da-cliente/(esqueci-a-senha|nova-senha|confirmar-email|eu/senha|eu/excluir|eu/cpf|eu/email|eu/email/reenviar)"),
           new RateLimitRule("cliente-recuperar", forgotMax, Duration.ofMinutes(forgotWindow)));
       FilterRegistrationBean<RateLimitFilter> registration =
           new FilterRegistrationBean<>(new RateLimitFilter(rules, porPadrao));

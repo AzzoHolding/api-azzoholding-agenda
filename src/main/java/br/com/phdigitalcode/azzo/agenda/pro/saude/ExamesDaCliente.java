@@ -31,6 +31,13 @@ public class ExamesDaCliente {
   private final AcessoDeSaude acesso;
   private final AnamneseDaCliente anamnese;
   private final ArquivosProtegidos arquivos;
+  /** Aviso por e-mail a cliente (se ela tem conta). Por setter: o construtor nao muda. */
+  private ContasDaCliente contas;
+
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setContas(@org.springframework.context.annotation.Lazy ContasDaCliente contas) {
+    this.contas = contas;
+  }
 
   public ExamesDaCliente(NamedParameterJdbcTemplate jdbc, AcessoDeSaude acesso, AnamneseDaCliente anamnese, ArquivosProtegidos arquivos) {
     this.jdbc = jdbc;
@@ -164,6 +171,8 @@ public class ExamesDaCliente {
     anamnese.exigirCliente(t, clientId);
     acesso.exigirSaudeEditar(t, clientId);
     guardar(t, clientId, bytes, e, "SALAO", acesso.usuarioId(), null);
+    if (contas != null) contas.avisarCliente(t, clientId, "Novo exame na sua área", "O salão guardou um documento na sua área: "
+        + Saude.limpar(e.titulo(), 160) + ".");
     return doSalao(clientId);
   }
 
@@ -204,6 +213,7 @@ public class ExamesDaCliente {
     jdbc.update("insert into pedidos_de_exame (id, tenant_id, client_id, descricao, appointment_id, pedido_por) values (:id, :t, :c, :d, :a, :u)",
         m("id", id, "t", t, "c", clientId, "d", d, "a", appointmentId, "u", acesso.usuarioId()));
     acesso.auditar(t, "HEALTH_EXAM_REQUEST", clientId, m("pedido", id), false);
+    if (contas != null) contas.avisarCliente(t, clientId, "O salão pediu um exame", "Envie pela sua área: " + d + ".");
     return doSalao(clientId);
   }
 

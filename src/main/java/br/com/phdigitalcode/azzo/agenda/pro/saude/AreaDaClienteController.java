@@ -104,12 +104,12 @@ public class AreaDaClienteController {
         SaudeController.ip(req), ua(req)));
   }
 
-  public record NovaSenhaPeloConvite(String sessao, String senha) {}
+  public record NovaSenhaPeloConvite(String sessao, String senha, String email) {}
 
   @PostMapping("/convite/{token}/nova-senha")
   public ResponseEntity<Map<String, Object>> novaSenhaPeloConvite(@PathVariable String token, @RequestBody NovaSenhaPeloConvite r,
       HttpServletRequest req) {
-    return comSessao(contas.novaSenhaPeloConvite(token, r.sessao(), r.senha(), SaudeController.ip(req), ua(req)));
+    return comSessao(contas.novaSenhaPeloConvite(token, r.sessao(), r.senha(), r.email(), SaudeController.ip(req), ua(req)));
   }
 
   // ─── Entrar, sair, recuperar ───────────────────────────────────────────────
@@ -148,7 +148,24 @@ public class AreaDaClienteController {
 
   @GetMapping("/eu")
   public Map<String, Object> eu(@CookieValue(name = COOKIE, required = false) String c, @RequestHeader(name = CABECALHO, required = false) String h) {
-    return contas.minhaConta(conta(c, h));
+    return contas.minhaConta(conta(c, h), token(c, h));
+  }
+
+  @PostMapping("/eu/sair-dos-outros-aparelhos")
+  public Map<String, Object> sairDosOutros(@CookieValue(name = COOKIE, required = false) String c,
+      @RequestHeader(name = CABECALHO, required = false) String h) {
+    return contas.sairDosOutrosAparelhos(conta(c, h), token(c, h));
+  }
+
+  @GetMapping("/eu/dados")
+  public ResponseEntity<Map<String, Object>> dadosDaConta(@CookieValue(name = COOKIE, required = false) String c,
+      @RequestHeader(name = CABECALHO, required = false) String h) {
+    return baixar(contas.dadosDaConta(conta(c, h)), "minha-conta.json");
+  }
+
+  private static ResponseEntity<Map<String, Object>> baixar(Map<String, Object> dados, String nome) {
+    return ResponseEntity.ok().header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + nome + "\"")
+        .header(HttpHeaders.CACHE_CONTROL, "no-store").body(dados);
   }
 
   @PutMapping("/eu/nome")
@@ -205,6 +222,18 @@ public class AreaDaClienteController {
   public Map<String, Object> salao(@CookieValue(name = COOKIE, required = false) String c, @RequestHeader(name = CABECALHO, required = false) String h,
       @PathVariable UUID salao) {
     return area.doSalao(conta(c, h), salao);
+  }
+
+  @PostMapping("/saloes/{salao}/horarios/{agendamentoId}/desmarcar")
+  public Map<String, Object> desmarcar(@CookieValue(name = COOKIE, required = false) String c,
+      @RequestHeader(name = CABECALHO, required = false) String h, @PathVariable UUID salao, @PathVariable UUID agendamentoId) {
+    return area.desmarcar(conta(c, h), salao, agendamentoId);
+  }
+
+  @GetMapping("/saloes/{salao}/meus-dados")
+  public ResponseEntity<Map<String, Object>> meusDados(@CookieValue(name = COOKIE, required = false) String c,
+      @RequestHeader(name = CABECALHO, required = false) String h, @PathVariable UUID salao) {
+    return baixar(area.meusDados(conta(c, h), salao), "meus-dados.json");
   }
 
   @PostMapping("/saloes/{salao}/sair")
