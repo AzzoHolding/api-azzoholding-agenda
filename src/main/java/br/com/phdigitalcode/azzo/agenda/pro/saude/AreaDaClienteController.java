@@ -36,6 +36,8 @@ public class AreaDaClienteController {
   static final String COOKIE = "AZZO_CLIENTE_SESSAO";
   static final String CABECALHO = "X-Sessao-Cliente";
   static final String CAMINHO = "/api/v1/public/area-da-cliente";
+  /** O app (Flutter) manda este cabecalho para receber a sessao no corpo; ele guarda e manda em {@link #CABECALHO}. */
+  static final String CABECALHO_DO_APP = "X-Cliente-App";
 
   private final ContasDaCliente contas;
   private final AreaDaCliente area;
@@ -73,9 +75,18 @@ public class AreaDaClienteController {
         .maxAge(segundos).build();
   }
 
-  private ResponseEntity<Map<String, Object>> comSessao(String token) {
+  /**
+   * A web recebe a sessao so no cookie httpOnly (o JavaScript nao a le). O app nao usa cookie: com o cabecalho
+   * {@code X-Cliente-App: 1} a sessao vem tambem no corpo, e o app a manda depois em {@code X-Sessao-Cliente}.
+   */
+  ResponseEntity<Map<String, Object>> comSessao(String token, HttpServletRequest req) {
+    Map<String, Object> corpo = doApp(req) ? Map.of("ok", true, "sessao", token) : Map.of("ok", true);
     return ResponseEntity.ok().header(HttpHeaders.SET_COOKIE, cookie(token, ContasDaCliente.SESSAO.toSeconds()).toString())
-        .body(Map.of("ok", true));
+        .body(corpo);
+  }
+
+  static boolean doApp(HttpServletRequest req) {
+    return req != null && "1".equals(req.getHeader(CABECALHO_DO_APP));
   }
 
   private static String ua(HttpServletRequest req) {
@@ -99,7 +110,7 @@ public class AreaDaClienteController {
   @PostMapping("/convite/{token}/criar-conta")
   public ResponseEntity<Map<String, Object>> criarConta(@PathVariable String token, @RequestBody CriarConta r, HttpServletRequest req) {
     return comSessao(contas.criarPeloConvite(token, r.sessao(), new ContasDaCliente.NovaConta(r.nome(), r.email(), r.senha(), r.aceite()),
-        SaudeController.ip(req), ua(req)));
+        SaudeController.ip(req), ua(req)), req);
   }
 
   public record EntrarPeloConvite(String sessao, String tipo, String identificador, String senha) {}
@@ -108,7 +119,7 @@ public class AreaDaClienteController {
   public ResponseEntity<Map<String, Object>> entrarPeloConvite(@PathVariable String token, @RequestBody EntrarPeloConvite r,
       HttpServletRequest req) {
     return comSessao(contas.entrarPeloConvite(token, r.sessao(), new ContasDaCliente.Entrada(r.tipo(), r.identificador(), r.senha()),
-        SaudeController.ip(req), ua(req)));
+        SaudeController.ip(req), ua(req)), req);
   }
 
   public record NovaSenhaPeloConvite(String sessao, String senha, String email) {}
@@ -116,14 +127,14 @@ public class AreaDaClienteController {
   @PostMapping("/convite/{token}/nova-senha")
   public ResponseEntity<Map<String, Object>> novaSenhaPeloConvite(@PathVariable String token, @RequestBody NovaSenhaPeloConvite r,
       HttpServletRequest req) {
-    return comSessao(contas.novaSenhaPeloConvite(token, r.sessao(), r.senha(), r.email(), SaudeController.ip(req), ua(req)));
+    return comSessao(contas.novaSenhaPeloConvite(token, r.sessao(), r.senha(), r.email(), SaudeController.ip(req), ua(req)), req);
   }
 
   // ─── Entrar, sair, recuperar ───────────────────────────────────────────────
 
   @PostMapping("/entrar")
   public ResponseEntity<Map<String, Object>> entrar(@RequestBody ContasDaCliente.Entrada r, HttpServletRequest req) {
-    return comSessao(contas.entrar(r, SaudeController.ip(req), ua(req)));
+    return comSessao(contas.entrar(r, SaudeController.ip(req), ua(req)), req);
   }
 
   @PostMapping("/sair")
