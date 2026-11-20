@@ -39,14 +39,21 @@ public class AreaDaClienteController {
 
   private final ContasDaCliente contas;
   private final AreaDaCliente area;
+  private final PainelDaCliente painel;
+  private final AgendaDaCliente agenda;
+  private final ChatDaArea chat;
   private final boolean cookieSeguro;
   private final String sameSite;
 
-  public AreaDaClienteController(ContasDaCliente contas, AreaDaCliente area,
+  public AreaDaClienteController(ContasDaCliente contas, AreaDaCliente area, PainelDaCliente painel, AgendaDaCliente agenda,
+      ChatDaArea chat,
       @Value("${app.auth.cookie.secure:true}") boolean cookieSeguro,
       @Value("${app.auth.cookie.same-site:STRICT}") String sameSite) {
     this.contas = contas;
     this.area = area;
+    this.painel = painel;
+    this.agenda = agenda;
+    this.chat = chat;
     this.cookieSeguro = cookieSeguro;
     this.sameSite = "NONE".equalsIgnoreCase(sameSite) ? "None" : "LAX".equalsIgnoreCase(sameSite) ? "Lax" : "Strict";
   }
@@ -210,6 +217,67 @@ public class AreaDaClienteController {
   @GetMapping("/inicio")
   public Map<String, Object> inicio(@CookieValue(name = COOKIE, required = false) String c, @RequestHeader(name = CABECALHO, required = false) String h) {
     return area.inicio(conta(c, h));
+  }
+
+  // ─── Salões da Azzo: buscar, ver precos, agendar, conversar ───────────────────
+
+  @GetMapping("/saloes-azzo")
+  public Map<String, Object> buscarSaloes(@CookieValue(name = COOKIE, required = false) String c,
+      @RequestHeader(name = CABECALHO, required = false) String h, @RequestParam(name = "busca", required = false) String busca,
+      @RequestParam(name = "cidade", required = false) String cidade, @RequestParam(name = "pagina", defaultValue = "0") int pagina) {
+    return agenda.buscar(conta(c, h), busca, cidade, pagina);
+  }
+
+  @GetMapping("/saloes-azzo/{slug}")
+  public Map<String, Object> salaoDaAzzo(@CookieValue(name = COOKIE, required = false) String c,
+      @RequestHeader(name = CABECALHO, required = false) String h, @PathVariable String slug) {
+    return agenda.perfil(conta(c, h), slug);
+  }
+
+  @PostMapping("/saloes-azzo/{slug}/agendar")
+  public Map<String, Object> agendar(@CookieValue(name = COOKIE, required = false) String c,
+      @RequestHeader(name = CABECALHO, required = false) String h, @PathVariable String slug, @RequestBody AgendaDaCliente.Pedido pedido) {
+    return agenda.agendar(conta(c, h), slug, pedido);
+  }
+
+  @PostMapping("/saloes-azzo/{slug}/conversar")
+  public Map<String, Object> conversar(@CookieValue(name = COOKIE, required = false) String c,
+      @RequestHeader(name = CABECALHO, required = false) String h, @PathVariable String slug) {
+    return agenda.ligarParaConversar(conta(c, h), slug);
+  }
+
+  @GetMapping("/mensagens")
+  public Map<String, Object> conversas(@CookieValue(name = COOKIE, required = false) String c,
+      @RequestHeader(name = CABECALHO, required = false) String h) {
+    return chat.conversas(conta(c, h));
+  }
+
+  @GetMapping("/saloes/{salao}/mensagens")
+  public java.util.List<Map<String, Object>> mensagens(@CookieValue(name = COOKIE, required = false) String c,
+      @RequestHeader(name = CABECALHO, required = false) String h, @PathVariable UUID salao) {
+    return chat.mensagens(conta(c, h), salao);
+  }
+
+  @PostMapping("/saloes/{salao}/mensagens")
+  public java.util.List<Map<String, Object>> enviarMensagem(@CookieValue(name = COOKIE, required = false) String c,
+      @RequestHeader(name = CABECALHO, required = false) String h, @PathVariable UUID salao, @RequestBody Map<String, String> r) {
+    return chat.enviar(conta(c, h), salao, r == null ? null : r.get("texto"));
+  }
+
+  @GetMapping("/painel")
+  public Map<String, Object> painel(@CookieValue(name = COOKIE, required = false) String c,
+      @RequestHeader(name = CABECALHO, required = false) String h, @RequestParam(name = "salao", required = false) UUID salao) {
+    return painel.painel(conta(c, h), salao);
+  }
+
+  @GetMapping("/agendamentos")
+  public Map<String, Object> agendamentos(@CookieValue(name = COOKIE, required = false) String c,
+      @RequestHeader(name = CABECALHO, required = false) String h, @RequestParam(name = "salao", required = false) UUID salao,
+      @RequestParam(name = "situacao", required = false) String situacao,
+      @RequestParam(name = "de", required = false) java.time.LocalDate de,
+      @RequestParam(name = "ate", required = false) java.time.LocalDate ate,
+      @RequestParam(name = "pagina", defaultValue = "0") int pagina) {
+    return painel.agendamentos(conta(c, h), salao, situacao, de, ate, pagina);
   }
 
   @GetMapping("/tudo")

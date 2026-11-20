@@ -204,12 +204,16 @@ public class ChatService {
 
     Cliente client = clienteRepository.findByIdAndTenantId(clientId, tenantId).orElse(null);
     if (client == null) throw notFound("Cliente nao encontrado.");
-    // Gate LGPD: nao enviar mensagem a cliente com opt-out registrado
-    if (Boolean.TRUE.equals(client.getWhatsappOptOut())) {
+    ChatChannel canalPedido = request.channel == null || request.channel.isBlank() ? null : ChatChannel.from(request.channel);
+    ChatConversationEntity conversaEscolhida = canalPedido == null ? null
+        : chatConversationRepository.findByTenantClientAndChannel(tenantId, clientId, canalPedido).orElse(null);
+    // Gate LGPD: nao enviar mensagem a cliente com opt-out registrado. O opt-out e das mensagens pelo WhatsApp; a
+    // conversa pela area da cliente foi aberta por ela e fica fora.
+    if (Boolean.TRUE.equals(client.getWhatsappOptOut()) && canalPedido != ChatChannel.AREA_CLIENTE) {
       throw new ApiClientErrorException(
           "Cliente optou por não receber mensagens pelo WhatsApp.", HttpStatus.UNPROCESSABLE_ENTITY.value());
     }
-    OutboundRoute outboundRoute = resolveOutboundRoute(tenantId, client);
+    OutboundRoute outboundRoute = resolveOutboundRoute(tenantId, client, conversaEscolhida);
     String destination = outboundRoute.destination();
     LOG.info(
         "chat.sendMessage.started {}",
@@ -372,6 +376,68 @@ public class ChatService {
         content,
         contactName,
         providerMessageId));
+  }
+
+  /**
+   * Area da cliente (V188): a conversa do cadastro com o canal AREA_CLIENTE, criada se ainda nao existe. O contato
+   * externo e o id da conta da cliente.
+   */
+  public ChatConversationEntity garantirConversaDaArea(UUID tenantId, UUID clientId, String contaId) {
+    ChatConversationEntity c = chatConversationRepository
+        .findByTenantClientAndChannel(tenantId, clientId, ChatChannel.AREA_CLIENTE)
+        .orElse(null);
+    if (c == null) return requiresNewTransaction.execute(status -> createConversation(tenantId, clientId, contaId, ChatChannel.AREA_CLIENTE));
+    if (!contaId.equals(c.getExternalContactId())) {
+      requiresNewTransaction.executeWithoutResult(status -> chatConversationRepository.findById(c.getId()).ifPresent(x -> {
+        x.setExternalContactId(contaId);
+        chatConversationRepository.save(x);
+      }));
+    }
+    return c;
+  }
+
+  /** Mensagem que a cliente mandou pela area. Mesmo caminho do WhatsApp e do Telegram (modo manual, nao lidas, aviso). */
+  public InboundProcessingResult processInboundAreaMessage(UUID tenantId, String contaId, String content, String contactName) {
+    return requiresNewTransaction.execute(status -> processInboundMessage(
+        tenantId, ChatChannel.AREA_CLIENTE, contaId, content, contactName, null));
+  }
+
+  /** Mensagens da conversa da area, da mais antiga a mais nova (ate 200). As do salao passam a lidas. */
+  @Transactional
+  public List<Map<String, Object>> mensagensDaArea(UUID tenantId, UUID clientId) {
+    ChatConversationEntity c = chatConversationRepository
+        .findByTenantClientAndChannel(tenantId, clientId, ChatChannel.AREA_CLIENTE)
+        .orElse(null);
+    if (c == null) return List.of();
+    List<ChatMessageEntity> lista = new java.util.ArrayList<>(chatMessageRepository.listByConversation(tenantId, c.getId(), 0, 200));
+    lista.sort(java.util.Comparator.comparing(ChatMessageEntity::getCreatedAt));
+    Instant agora = Instant.now();
+    List<Map<String, Object>> r = new java.util.ArrayList<>();
+    for (ChatMessageEntity m : lista) {
+      if (m.getDirection() == ChatMessageDirection.OUTBOUND && m.getReadAt() == null && m.getStatus() != ChatMessageStatus.FAILED) {
+        m.setReadAt(agora);
+        m.setStatus(ChatMessageStatus.READ);
+        chatMessageRepository.save(m);
+      }
+      Map<String, Object> x = new java.util.LinkedHashMap<>();
+      x.put("id", m.getId());
+      x.put("deMim", m.getDirection() == ChatMessageDirection.INBOUND);
+      x.put("texto", decryptContent(m.getContent()));
+      x.put("em", m.getCreatedAt() == null ? null : m.getCreatedAt().toString());
+      x.put("falhou", m.getStatus() == ChatMessageStatus.FAILED);
+      r.add(x);
+    }
+    return r;
+  }
+
+  /** Respostas do salao (ou do assistente) que a cliente ainda nao viu na area, por salao. */
+  public long naoLidasDaArea(UUID tenantId, UUID clientId) {
+    ChatConversationEntity c = chatConversationRepository
+        .findByTenantClientAndChannel(tenantId, clientId, ChatChannel.AREA_CLIENTE)
+        .orElse(null);
+    if (c == null) return 0;
+    return chatMessageRepository.listByConversation(tenantId, c.getId(), 0, 200).stream()
+        .filter(m -> m.getDirection() == ChatMessageDirection.OUTBOUND && m.getReadAt() == null).count();
   }
 
   public InboundProcessingResult processInboundTelegramMessage(
@@ -668,6 +734,14 @@ public class ChatService {
   }
 
   private Cliente resolveOrCreateClient(UUID tenantId, ChatChannel channel, String externalContactId, String contactName) {
+    if (channel == ChatChannel.AREA_CLIENTE) {
+      // A conversa da area nasce antes (garantirConversaDaArea), ligada ao cadastro do vinculo da conta.
+      ChatConversationEntity conversa = chatConversationRepository
+          .findByTenantAndExternalContactId(tenantId, externalContactId, channel)
+          .orElseThrow(() -> new IllegalStateException("Conversa da área da cliente não encontrada."));
+      return clienteRepository.findById(conversa.getClientId())
+          .orElseThrow(() -> new IllegalStateException("Cliente da conversa não encontrado."));
+    }
     if (channel == ChatChannel.WHATSAPP) {
       return clienteRepository.findByTenantAndPhoneDigits(tenantId, externalContactId)
           .orElseGet(() -> createClientFromInbound(tenantId, externalContactId, contactName));
@@ -742,8 +816,17 @@ public class ChatService {
   }
 
   OutboundRoute resolveOutboundRoute(UUID tenantId, Cliente client) {
-    CustomerCommunicationChannelResolver.ResolvedChannel resolvedChannel =
-        customerCommunicationChannelResolver.resolve(tenantId, client, client.getPhone());
+    return resolveOutboundRoute(tenantId, client, null);
+  }
+
+  OutboundRoute resolveOutboundRoute(UUID tenantId, Cliente client, ChatConversationEntity conversaEscolhida) {
+    // Sem conversa escolhida, a mesma chamada de sempre (conversa mais recente, ou o telefone).
+    CustomerCommunicationChannelResolver.ResolvedChannel resolvedChannel = conversaEscolhida == null
+        ? customerCommunicationChannelResolver.resolve(tenantId, client, client.getPhone())
+        : customerCommunicationChannelResolver.resolve(tenantId, client, conversaEscolhida, client.getPhone());
+    if (resolvedChannel.channel() == ChatChannel.AREA_CLIENTE) {
+      return new OutboundRoute(ChatChannel.AREA_CLIENTE, resolvedChannel.externalContactId(), resolvedChannel.conversation());
+    }
     if (resolvedChannel.channel() == ChatChannel.TELEGRAM) {
       return new OutboundRoute(ChatChannel.TELEGRAM, resolvedChannel.externalContactId(), resolvedChannel.conversation());
     }

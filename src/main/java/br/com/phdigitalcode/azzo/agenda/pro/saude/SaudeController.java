@@ -44,6 +44,13 @@ public class SaudeController {
   private final RelatoriosDeSaude relatorios;
   private final ContasDaCliente contas;
   private final ExamesDaCliente exames;
+  private AgendaDaCliente agendaDaCliente;
+
+  /** Por setter: o construtor nao muda. */
+  @org.springframework.beans.factory.annotation.Autowired
+  void setAgendaDaCliente(AgendaDaCliente agendaDaCliente) {
+    this.agendaDaCliente = agendaDaCliente;
+  }
 
   public SaudeController(ModelosDeSaude modelos, AnamneseDaCliente anamnese, FichaDeAtendimento fichas,
       AssinaturasDaCliente assinaturas, FotosDaFicha fotos, LinhaDoTempoDaCliente linhaDoTempo, LinksDaCliente links,
@@ -224,6 +231,16 @@ public class SaudeController {
   @RequiresPermission("appointment:write")
   public Map<String, Object> criarLink(@PathVariable UUID id, @RequestBody LinkRequest r) {
     return contas.convidar(id, Boolean.TRUE.equals(r.recuperar()), r.appointmentId());
+  }
+
+  @GetMapping("/anamnese/area-da-cliente/busca")
+  public Map<String, Object> aparecerNaBusca() {
+    return agendaDaCliente.visibilidade();
+  }
+
+  @PutMapping("/anamnese/area-da-cliente/busca")
+  public Map<String, Object> mudarAparecerNaBusca(@RequestBody Map<String, Boolean> r) {
+    return agendaDaCliente.mudarVisibilidade(r == null || !Boolean.FALSE.equals(r.get("aparecerNaBusca")));
   }
 
   @GetMapping("/anamnese/relatorios/adesao")

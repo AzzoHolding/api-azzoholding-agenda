@@ -66,6 +66,8 @@ public final class ChatDtos {
   public static class SendMessageRequest {
     @NotNull public String clientId;
     @NotBlank public String content;
+    /** Canal da conversa aberta na tela (WHATSAPP, TELEGRAM, AREA_CLIENTE). Sem ele, vale a conversa mais recente. */
+    public String channel;
   }
 
   public static class SendMessageResponse {

@@ -169,6 +169,9 @@ public class RateLimitFilter extends OncePerRequestFilter {
           // bloqueia por 15 min no 5o erro de senha.
           java.util.regex.Pattern.compile("/api/v1/public/area-da-cliente/convite/[^/]+/(conferir|criar-conta|entrar|nova-senha)"),
           new RateLimitRule("cliente-convite", bookingMax, Duration.ofMinutes(bookingWindow)),
+          // Agendar e mandar mensagem pela area: mesmo limite do agendamento online.
+          java.util.regex.Pattern.compile("/api/v1/public/area-da-cliente/(saloes-azzo/[^/]+/(agendar|conversar)|saloes/[^/]+/mensagens)"),
+          new RateLimitRule("cliente-agendar-conversar", funnelMax, Duration.ofMinutes(funnelWindow)),
           java.util.regex.Pattern.compile("/api/v1/public/area-da-cliente/entrar"),
           new RateLimitRule("cliente-entrar", loginMax, Duration.ofMinutes(loginWindow)),
           java.util.regex.Pattern.compile(
