@@ -56,6 +56,14 @@ public class ServicoExportacaoTitular {
 
   @PersistenceContext private EntityManager entityManager;
 
+  /** Anamneses, fichas, fotos e documentos assinados na exportacao ao titular. Por setter: o construtor nao muda. */
+  private br.com.phdigitalcode.azzo.agenda.pro.saude.LgpdDeSaude lgpdDeSaude;
+
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setLgpdDeSaude(br.com.phdigitalcode.azzo.agenda.pro.saude.LgpdDeSaude lgpdDeSaude) {
+    this.lgpdDeSaude = lgpdDeSaude;
+  }
+
   public ServicoExportacaoTitular(
       ContextoTenant contextoTenant,
       AuthenticatedUser authenticatedUser,
@@ -87,7 +95,8 @@ public class ServicoExportacaoTitular {
     exportacao.put("consentimentos", consentimentos(tenantId, cliente));
     exportacao.put("agendamentos", linhas(
         """
-        SELECT a.code, a.date, a.start_time, a.end_time, a.status, a.total_price, a.notes,
+        SELECT a.code, a.date, a.start_time, a.end_time, a.status,
+               (SELECT SUM(ai.total_price) FROM appointment_items ai WHERE ai.appointment_id = a.id), a.notes,
                p.name,
                (SELECT string_agg(s.name, ', ' ORDER BY s.name) FROM appointment_items ai
                   JOIN services s ON s.id = ai.service_id
@@ -106,6 +115,7 @@ public class ServicoExportacaoTitular {
         """,
         tenantId, clientId,
         "abertaEm", "fechadaEm", "situacao", "subtotal", "desconto", "gorjeta", "total"));
+    if (lgpdDeSaude != null) exportacao.put("saude", lgpdDeSaude.exportar(tenantId, clientId));
     exportacao.put("notasDeAtendimento", linhas(
         """
         SELECT created_at, service_execution_notes, client_feedback_notes, internal_followup_notes

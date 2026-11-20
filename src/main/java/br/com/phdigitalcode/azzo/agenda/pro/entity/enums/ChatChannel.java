@@ -5,7 +5,9 @@ import java.util.Locale;
 /** Espelha {@code modules/chat/domain/enums/ChatChannel.java}. */
 public enum ChatChannel {
   WHATSAPP,
-  TELEGRAM;
+  TELEGRAM,
+  /** Conversa pela area da cliente (V188): a mensagem entra e sai pelo banco, sem provedor externo. */
+  AREA_CLIENTE;
 
   public static ChatChannel from(String value) {
     if (value == null || value.isBlank()) return WHATSAPP;

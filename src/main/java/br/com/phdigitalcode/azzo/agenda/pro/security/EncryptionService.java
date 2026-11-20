@@ -27,6 +27,17 @@ public class EncryptionService {
     this.keySpec = new SecretKeySpec(keyBytes, "AES");
   }
 
+  /** HMAC-SHA256 com a mesma chave: valor fixo para buscar um dado cifrado (ex.: o CPF da conta da cliente). */
+  public String hmac(String value) {
+    try {
+      javax.crypto.Mac mac = javax.crypto.Mac.getInstance("HmacSHA256");
+      mac.init(new SecretKeySpec(keySpec.getEncoded(), "HmacSHA256"));
+      return java.util.HexFormat.of().formatHex(mac.doFinal(value.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+    } catch (java.security.GeneralSecurityException e) {
+      throw new IllegalStateException("Falha ao calcular o HMAC.", e);
+    }
+  }
+
   public String encrypt(String value) {
     if (value == null || value.isBlank()) return "";
     try {
@@ -43,6 +54,36 @@ public class EncryptionService {
       return Base64.getEncoder().encodeToString(payload);
     } catch (Exception e) {
       throw new IllegalStateException("Falha ao criptografar valor", e);
+    }
+  }
+
+  /** Bytes cifrados (IV + AES-GCM), para fotos e imagens de assinatura de clientes (anamnese e ficha). */
+  public byte[] encryptBytes(byte[] value) {
+    if (value == null || value.length == 0) throw new IllegalArgumentException("Arquivo vazio.");
+    try {
+      byte[] iv = new byte[IV_LENGTH];
+      secureRandom.nextBytes(iv);
+      Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+      cipher.init(Cipher.ENCRYPT_MODE, keySpec, new GCMParameterSpec(TAG_LENGTH, iv));
+      byte[] encrypted = cipher.doFinal(value);
+      byte[] payload = new byte[iv.length + encrypted.length];
+      System.arraycopy(iv, 0, payload, 0, iv.length);
+      System.arraycopy(encrypted, 0, payload, iv.length, encrypted.length);
+      return payload;
+    } catch (Exception e) {
+      throw new IllegalStateException("Falha ao criptografar arquivo", e);
+    }
+  }
+
+  public byte[] decryptBytes(byte[] payload) {
+    if (payload == null || payload.length <= IV_LENGTH) throw new IllegalArgumentException("Arquivo cifrado inválido");
+    try {
+      byte[] iv = Arrays.copyOfRange(payload, 0, IV_LENGTH);
+      Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+      cipher.init(Cipher.DECRYPT_MODE, keySpec, new GCMParameterSpec(TAG_LENGTH, iv));
+      return cipher.doFinal(Arrays.copyOfRange(payload, IV_LENGTH, payload.length));
+    } catch (Exception e) {
+      throw new IllegalStateException("Falha ao descriptografar arquivo", e);
     }
   }
 
