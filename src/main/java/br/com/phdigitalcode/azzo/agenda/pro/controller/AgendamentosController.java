@@ -274,7 +274,7 @@ public class AgendamentosController {
           tenantId, professionalUuid, parsedDate, effectiveDuration, safeBuffer,
           uuidOuNulo(excludeAppointmentId));
     } catch (IllegalArgumentException | DateTimeParseException | NullPointerException e) {
-      throw new ApiClientErrorException(e.getMessage(), HttpStatus.BAD_REQUEST.value());
+      throw new ApiClientErrorException(mensagemDosHorarios(professionalId, date, e), HttpStatus.BAD_REQUEST.value());
     }
   }
 
@@ -299,7 +299,7 @@ public class AgendamentosController {
           tenantId, professionalUuid, parsedDate, effectiveDuration, safeBuffer, includeConflictSlots,
           uuidOuNulo(excludeAppointmentId));
     } catch (IllegalArgumentException | DateTimeParseException | NullPointerException e) {
-      throw new ApiClientErrorException(e.getMessage(), HttpStatus.BAD_REQUEST.value());
+      throw new ApiClientErrorException(mensagemDosHorarios(professionalId, date, e), HttpStatus.BAD_REQUEST.value());
     }
   }
 
@@ -351,7 +351,8 @@ public class AgendamentosController {
         id,
         value,
         request != null ? request.paymentMethod : null,
-        request != null ? request.conclusionAction : null);
+        request != null ? request.conclusionAction : null,
+        request != null ? request.justificativaInicio : null);
   }
 
   @PostMapping("/{id}/customer-notes")
@@ -458,5 +459,20 @@ public class AgendamentosController {
     return (from != null && !from.isBlank() ? from : "inicio")
         + "-"
         + (to != null && !to.isBlank() ? to : "hoje");
+  }
+
+  /**
+   * Sem profissional ou data a rota respondia 'Cannot invoke "String.length()" because "name" is
+   * null' (analise de 15/11/2026, B1). A mensagem do servico (salao fechado, etc.) continua quando e
+   * dele; o que e defeito de parametro vira frase.
+   */
+  static String mensagemDosHorarios(String professionalId, String date, RuntimeException e) {
+    if (professionalId == null || professionalId.isBlank()) return "Informe o profissional.";
+    if (date == null || date.isBlank()) return "Informe a data.";
+    if (e instanceof DateTimeParseException) return "Data inválida. Use o formato aaaa-mm-dd.";
+    if (e instanceof NullPointerException) return "Parâmetros inválidos para buscar horários.";
+    String msg = e.getMessage();
+    if (msg == null || msg.startsWith("Invalid UUID string")) return "Identificador inválido.";
+    return msg;
   }
 }

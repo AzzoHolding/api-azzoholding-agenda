@@ -78,7 +78,7 @@ class ClienteServiceExclusaoTest {
     assertThatThrownBy(() -> service.deletar(cliente.getId()))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("pacotes comprados")
-        .hasMessageContaining("anonimizacao");
+        .hasMessageContaining("anonimização");
     verify(clienteRepository, never()).delete(any(Cliente.class));
     verify(auditService, never()).redigirDadosPessoaisDoCliente(any(), any());
     verify(rastrosDoTitular, never()).limpar(any());

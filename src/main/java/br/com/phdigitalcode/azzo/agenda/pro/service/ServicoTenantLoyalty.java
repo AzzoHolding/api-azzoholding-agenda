@@ -47,24 +47,98 @@ public class ServicoTenantLoyalty {
   @Transactional
   public TenantLoyaltyDtos.ConfigResponse atualizar(TenantLoyaltyDtos.UpdateRequest request) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    // Devolver mais do que a cliente gasta da prejuizo em toda venda (relatorio de 14/11, Medio 3).
+    java.math.BigDecimal devolucao = request.pontosPorReal.divide(request.pontosPorResgateReal, 4, java.math.RoundingMode.HALF_UP);
+    if (devolucao.compareTo(java.math.BigDecimal.ONE) > 0) {
+      throw new IllegalArgumentException("Com esses valores a cliente recebe de volta "
+          + devolucao.movePointRight(2).stripTrailingZeros().toPlainString()
+          + "% do que gasta. O máximo é 100%: aumente os pontos para R$ 1,00 ou diminua os pontos por real.");
+    }
     TenantLoyaltySettings config = findByTenantIdOrCreate(tenantId);
+    java.util.Map<String, Object> antes = resumo(config);
     config.setAtivo(request.ativo);
     config.setPontosPorReal(request.pontosPorReal);
     config.setProdutosContam(request.produtosContam);
     config.setValidadeDias(request.validadeDias);
     config.setPontosPorResgateReal(request.pontosPorResgateReal);
+    auditar(tenantId, antes, resumo(config));
     return toResponse(config);
   }
 
+  /** Mudar o programa de pontos fica na trilha, com o antes e o depois (relatorio de 14/11, Alto 5). */
+  private br.com.phdigitalcode.azzo.agenda.pro.integration.AuditService auditService;
+
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setAuditService(br.com.phdigitalcode.azzo.agenda.pro.integration.AuditService auditService) {
+    this.auditService = auditService;
+  }
+
+  private static java.util.Map<String, Object> resumo(TenantLoyaltySettings c) {
+    java.util.Map<String, Object> m = new java.util.LinkedHashMap<>();
+    m.put("ativo", c.isAtivo());
+    m.put("pontosPorReal", c.getPontosPorReal());
+    m.put("pontosPorResgateReal", c.getPontosPorResgateReal());
+    m.put("produtosContam", c.isProdutosContam());
+    m.put("validadeDias", c.getValidadeDias());
+    return m;
+  }
+
+  private void auditar(UUID tenantId, java.util.Map<String, Object> antes, java.util.Map<String, Object> depois) {
+    if (auditService == null) return;
+    var command = new br.com.phdigitalcode.azzo.agenda.pro.integration.AuditEventCommand();
+    command.tenantId = tenantId;
+    command.module = br.com.phdigitalcode.azzo.agenda.pro.integration.AuditConstants.Module.SETTINGS;
+    command.action = "LOYALTY_SETTINGS_UPDATE";
+    command.entityType = "LOYALTY_PROGRAM";
+    command.entityId = tenantId.toString();
+    command.sourceChannel = br.com.phdigitalcode.azzo.agenda.pro.integration.AuditConstants.SourceChannel.API;
+    command.before = antes;
+    command.after = depois;
+    auditService.recordSuccess(command);
+  }
+
+  /** Setter: os testes que montam o servico a mao seguem sem o historico. */
+  private br.com.phdigitalcode.azzo.agenda.pro.repository.MovimentoDePontosRepository movimentos;
+
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setMovimentos(br.com.phdigitalcode.azzo.agenda.pro.repository.MovimentoDePontosRepository movimentos) {
+    this.movimentos = movimentos;
+  }
+
+  /** Saldo, valor em reais, o que vence e o extrato (relatorio de 14/11, Critico 3). */
+  @Transactional(readOnly = true)
   public TenantLoyaltyDtos.ClientLoyaltyResponse obterSaldoCliente(UUID clientId) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
-    Cliente cliente =
-        clienteRepository
-            .findByIdAndTenantId(clientId, tenantId)
-            .orElseThrow(() -> new ApiClientErrorException("Cliente não encontrado.", 404));
-    TenantLoyaltyDtos.ClientLoyaltyResponse response =
-        new TenantLoyaltyDtos.ClientLoyaltyResponse();
-    response.saldo = cliente.getLoyaltyPoints();
+    clienteRepository
+        .findByIdAndTenantId(clientId, tenantId)
+        .orElseThrow(() -> new ApiClientErrorException("Cliente não encontrado.", 404));
+    TenantLoyaltySettings config = tenantLoyaltySettingsRepository.findByTenantId(tenantId).orElse(null);
+    TenantLoyaltyDtos.ClientLoyaltyResponse response = new TenantLoyaltyDtos.ClientLoyaltyResponse();
+    Integer saldo = clienteRepository.saldoDePontos(clientId, tenantId);
+    response.saldo = saldo == null ? 0 : saldo;
+    response.programaAtivo = config != null && config.isAtivo();
+    response.validadeDias = config == null ? null : config.getValidadeDias();
+    response.valorEmReais = ServicoDePontos.valorEmReais(response.saldo,
+        config == null ? null : config.getPontosPorResgateReal());
+    if (movimentos == null) return response;
+    for (var credito : movimentos.creditosComSaldo(tenantId, clientId)) {
+      if (credito.getExpiraEm() == null) continue;
+      TenantLoyaltyDtos.Vencimento v = new TenantLoyaltyDtos.Vencimento();
+      v.pontos = credito.getPontosRestantes();
+      v.expiraEm = credito.getExpiraEm().toString();
+      response.aVencer.add(v);
+    }
+    for (var m : movimentos.findTop50ByTenantIdAndClientIdOrderByCreatedAtDesc(tenantId, clientId)) {
+      TenantLoyaltyDtos.Movimento mov = new TenantLoyaltyDtos.Movimento();
+      mov.tipo = m.getTipo();
+      mov.pontos = m.getPontos();
+      mov.saldoApos = m.getSaldoApos();
+      mov.comandaId = m.getComandaId() == null ? null : m.getComandaId().toString();
+      mov.motivo = m.getMotivo();
+      mov.expiraEm = m.getExpiraEm() == null ? null : m.getExpiraEm().toString();
+      mov.createdAt = m.getCreatedAt().toString();
+      response.extrato.add(mov);
+    }
     return response;
   }
 

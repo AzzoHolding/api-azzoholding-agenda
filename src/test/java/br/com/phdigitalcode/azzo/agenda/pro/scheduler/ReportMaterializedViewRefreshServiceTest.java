@@ -33,7 +33,7 @@ class ReportMaterializedViewRefreshServiceTest {
 
     assertThat(atualizadas).isEqualTo(ReportMaterializedViewRefreshService.VIEWS.size());
     for (String view : ReportMaterializedViewRefreshService.VIEWS) {
-      verify(statement).execute("REFRESH MATERIALIZED VIEW CONCURRENTLY " + view);
+      verify(statement).execute("SELECT atualizar_view_de_relatorio('" + view + "')");
     }
     assertThat(ReportMaterializedViewRefreshService.VIEWS).contains("mv_dashboard_metrics_daily");
   }
@@ -48,12 +48,12 @@ class ReportMaterializedViewRefreshServiceTest {
     when(connection.createStatement()).thenReturn(statement);
     doThrow(new SQLException("sem indice unico"))
         .when(statement)
-        .execute("REFRESH MATERIALIZED VIEW CONCURRENTLY mv_revenue_daily");
+        .execute("SELECT atualizar_view_de_relatorio('mv_revenue_daily')");
 
     int atualizadas = new ReportMaterializedViewRefreshService(dataSource).refreshMaterializedViews();
 
     assertThat(atualizadas).isEqualTo(ReportMaterializedViewRefreshService.VIEWS.size() - 1);
-    verify(statement).execute("REFRESH MATERIALIZED VIEW CONCURRENTLY mv_no_show_appointments");
+    verify(statement).execute("SELECT atualizar_view_de_relatorio('mv_no_show_appointments')");
     verify(statement, org.mockito.Mockito.atLeastOnce()).execute(startsWith("INSERT INTO report_materialized_view_refresh_state"));
   }
 }

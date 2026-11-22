@@ -240,6 +240,60 @@ public class MinioStorageService {
     }
   }
 
+  /** A foto de quem trabalha no salao (FotosDaEquipe, 08/11/2026). */
+  public String salvarFotoDaEquipe(
+      byte[] arquivo, String nomeArquivo, String contentType, UUID tenantId, UUID pessoaId) {
+    if (tenantId == null || pessoaId == null) {
+      throw new IllegalArgumentException("TenantId e pessoa obrigatórios para gerar storage key.");
+    }
+    String nomeEfetivo = nomeArquivo == null || nomeArquivo.isBlank() ? "foto.webp" : nomeArquivo;
+    String storageKey = String.format(
+        Locale.ROOT,
+        "tenant/%s/team/%s/avatar/%s-%s",
+        tenantId,
+        pessoaId,
+        UUID.randomUUID(),
+        sanitizarNomeArquivo(nomeEfetivo));
+    if (!minioEnabled) return storageKey;
+
+    inicializarClienteSeNecessario();
+    if (!operacional) {
+      throw new IllegalStateException("Storage MinIO indisponível para upload da foto.");
+    }
+
+    try {
+      client.putObject(
+          PutObjectArgs.builder()
+              .bucket(bucket)
+              .object(storageKey)
+              .contentType(contentType == null || contentType.isBlank() ? resolverContentType(nomeEfetivo) : contentType)
+              .stream(new ByteArrayInputStream(arquivo), arquivo.length, -1)
+              .build());
+      return storageKey;
+    } catch (Exception exception) {
+      LOG.error("Falha ao enviar foto da equipe para o MinIO (key={}).", storageKey, exception);
+      throw new IllegalStateException("Falha ao enviar foto para o storage.", exception);
+    }
+  }
+
+  /** Best-effort: a foto antiga que ficou para tras nao derruba a troca. */
+  public void removerFotoDaEquipe(String storageKey, UUID tenantId) {
+    if (!minioEnabled || storageKey == null || storageKey.isBlank()) return;
+    validarEscopoTenant(storageKey, tenantId);
+
+    inicializarClienteSeNecessario();
+    if (!operacional) {
+      LOG.warn("Storage indisponivel para remover foto da equipe (key={}).", storageKey);
+      return;
+    }
+
+    try {
+      client.removeObject(RemoveObjectArgs.builder().bucket(bucket).object(storageKey).build());
+    } catch (Exception exception) {
+      LOG.warn("Falha ao remover foto da equipe no MinIO (key={}).", storageKey, exception);
+    }
+  }
+
   public byte[] baixarArquivo(String storageKey, UUID tenantId) {
     if (storageKey == null || storageKey.isBlank()) {
       throw new IllegalArgumentException("Storage key obrigatória para download.");

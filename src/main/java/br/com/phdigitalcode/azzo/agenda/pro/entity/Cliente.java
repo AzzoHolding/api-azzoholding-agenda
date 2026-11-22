@@ -71,7 +71,8 @@ public class Cliente {
   @Column(name = "asaas_customer_id")
   private String asaasCustomerId;
 
-  @Column(name = "loyalty_points", nullable = false)
+  /** So o ServicoDePontos muda o saldo, por instrucao direta no banco (V175): a entidade nunca grava. */
+  @Column(name = "loyalty_points", nullable = false, updatable = false)
   private int loyaltyPoints = 0;
 
   @Column(name = "client_type", nullable = false)

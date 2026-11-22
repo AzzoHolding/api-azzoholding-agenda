@@ -655,11 +655,14 @@ public class SefinNacionalProviderAdapter implements NfseProviderAdapter {
     KeyStore keyStore = KeyStore.getInstance("PKCS12");
     keyStore.load(null, null);
     char[] password = certificatePassword.toCharArray();
+    // A cadeia inteira do PFX (certificado final + ACs da ICP-Brasil): o servidor de producao do
+    // Sistema Nacional derruba a conexao quando so o certificado final e enviado — visto no ADN em
+    // 07/11/2026 (homologacao aceitava). Mandar a cadeia nao muda nada onde ela nao e exigida.
     keyStore.setKeyEntry(
         "nfse-client",
         keyMaterial.privateKey(),
         password,
-        new java.security.cert.Certificate[] { keyMaterial.certificate() });
+        keyMaterial.cadeiaParaTls());
     KeyManagerFactory kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
     kmf.init(keyStore, password);
     SSLContext sslContext = SSLContext.getInstance("TLS");

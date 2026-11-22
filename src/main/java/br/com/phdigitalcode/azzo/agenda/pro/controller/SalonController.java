@@ -106,7 +106,7 @@ public class SalonController {
    * {@code guessContentTypeFromStream} nao reconhece WEBP, e o codigo caia na extensao do nome —
    * qualquer conteudo (HTML, SVG com script) chamado {@code a.webp} era aceito como imagem.
    */
-  static String detectarContentType(byte[] bytesArquivo, String nomeArquivo) {
+  public static String detectarContentType(byte[] bytesArquivo, String nomeArquivo) {
     byte[] b = bytesArquivo == null ? new byte[0] : bytesArquivo;
     if (b.length >= 8 && (b[0] & 0xFF) == 0x89 && b[1] == 'P' && b[2] == 'N' && b[3] == 'G') return "image/png";
     if (b.length >= 3 && (b[0] & 0xFF) == 0xFF && (b[1] & 0xFF) == 0xD8 && (b[2] & 0xFF) == 0xFF) return "image/jpeg";

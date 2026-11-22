@@ -125,7 +125,7 @@ class AuthServiceImplLoginDeDesligadoTest {
     verify(refreshTokenService, never()).issueForUser(any());
     verify(jwtService, never()).gerarToken(any());
     ArgumentCaptor<AuditEventCommand> captor = ArgumentCaptor.forClass(AuditEventCommand.class);
-    verify(auditService).recordDenied(captor.capture());
+    verify(auditService).recordDeniedIsolated(captor.capture());
     assertThat(captor.getValue().action).isEqualTo("AUTH_LOGIN");
   }
 
@@ -150,7 +150,7 @@ class AuthServiceImplLoginDeDesligadoTest {
     verify(refreshTokenService, never()).issueForUser(any());
     verify(jwtService, never()).gerarToken(any());
     ArgumentCaptor<AuditEventCommand> captor = ArgumentCaptor.forClass(AuditEventCommand.class);
-    verify(auditService).recordDenied(captor.capture());
+    verify(auditService).recordDeniedIsolated(captor.capture());
     assertThat(captor.getValue().action).isEqualTo("AUTH_LOGIN");
   }
 

@@ -170,9 +170,9 @@ public class ServicoFechamentoCaixa {
       tentativa.put("differenceTotals", writeAmountMapAsStrings(difference));
       registrarTentativa(
           tenantId, "FINANCE_CASH_CLOSING_CLOSE", fechamento.getId(), tentativa,
-          "Explique a diferenca entre o esperado e o contado antes de fechar o caixa.");
+          "Explique a diferença entre o esperado e o contado antes de fechar o caixa.");
       throw new IllegalArgumentException(
-          "Explique a diferenca entre o esperado e o contado antes de fechar o caixa.");
+          "Explique a diferença entre o esperado e o contado antes de fechar o caixa.");
     }
 
     // Fechar o caixa TRAVA o dia: `TravaFinanceira.exigirDiaAberto` passa a recusar
@@ -193,7 +193,7 @@ public class ServicoFechamentoCaixa {
           "comandasAbertasIds", abertas.stream().map(c -> String.valueOf(c.getId())).toList());
       registrarTentativa(
           tenantId, "FINANCE_CASH_CLOSING_CLOSE", fechamento.getId(), tentativa,
-          "Ha comanda aberta ao fechar o caixa.");
+          "Há comanda aberta ao fechar o caixa.");
       throw new IllegalArgumentException(mensagemDeComandasAbertas(abertas));
     }
 
@@ -264,12 +264,12 @@ public class ServicoFechamentoCaixa {
             ? null
             : abertas.get(0).getOpenedAt().atZone(ZONA_BR).toLocalDate();
     String desde = maisVelha == null ? "" : ", a mais antiga de " + DIA_BR.format(maisVelha);
-    return "Ha "
+    return "Há "
         + quantas
         + desde
         + ", somando "
         + soma.setScale(2, RoundingMode.HALF_UP)
-        + ". Fechar o caixa trava o dia: elas so poderao ser fechadas amanha, e a venda vai cair no"
+        + ". Fechar o caixa trava o dia: elas só poderão ser fechadas amanhã, e a venda vai cair no"
         + " dia errado. Feche as comandas primeiro ou confirme que ficam para amanha.";
   }
 
@@ -397,13 +397,13 @@ public class ServicoFechamentoCaixa {
     }
     for (Map.Entry<String, BigDecimal> entry : rawTotals.entrySet()) {
       if (entry.getKey() == null || entry.getKey().isBlank()) {
-        throw new IllegalArgumentException("Metodo de pagamento inválido");
+        throw new IllegalArgumentException("Forma de pagamento inválida");
       }
       MetodoPagamento method;
       try {
         method = MetodoPagamento.valueOf(entry.getKey().trim().toUpperCase(Locale.ROOT));
       } catch (Exception e) {
-        throw new IllegalArgumentException("Metodo de pagamento inválido: " + entry.getKey());
+        throw new IllegalArgumentException("Forma de pagamento inválida: " + entry.getKey());
       }
       normalized.put(method, entry.getValue() != null ? entry.getValue() : BigDecimal.ZERO);
     }

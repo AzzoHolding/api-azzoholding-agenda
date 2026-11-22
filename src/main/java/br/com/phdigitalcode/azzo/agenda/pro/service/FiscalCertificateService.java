@@ -261,7 +261,17 @@ public class FiscalCertificateService {
       if (!(certificate instanceof X509Certificate x509)) {
         throw new IllegalArgumentException("Certificado do PFX não é X509");
       }
-      return new KeyMaterial(privateKey, x509);
+      // A cadeia (AC intermediaria e raiz ICP-Brasil), quando o PFX traz: o ADN de producao derruba
+      // a conexao se o cliente manda so o certificado final (07/11/2026).
+      java.security.cert.Certificate[] cadeiaDoPfx = keyStore.getCertificateChain(alias);
+      java.util.List<X509Certificate> cadeia = new java.util.ArrayList<>();
+      if (cadeiaDoPfx != null) {
+        for (java.security.cert.Certificate item : cadeiaDoPfx) {
+          if (item instanceof X509Certificate c) cadeia.add(c);
+        }
+      }
+      if (cadeia.isEmpty()) cadeia.add(x509);
+      return new KeyMaterial(privateKey, x509, cadeia.toArray(new X509Certificate[0]));
     } catch (IllegalArgumentException e) {
       if (ERR_CERTIFICATE_PASSWORD_REQUIRED.equals(e.getMessage())
           || ERR_CERTIFICATE_ACTIVE_MISSING.equals(e.getMessage())
@@ -322,5 +332,16 @@ public class FiscalCertificateService {
 
   private record CertificateInfo(String thumbprint, String subjectName, Instant validTo) {}
 
-  public record KeyMaterial(PrivateKey privateKey, X509Certificate certificate) {}
+  public record KeyMaterial(PrivateKey privateKey, X509Certificate certificate, X509Certificate[] cadeia) {
+
+    /** Sem a cadeia: so o certificado final. */
+    public KeyMaterial(PrivateKey privateKey, X509Certificate certificate) {
+      this(privateKey, certificate, new X509Certificate[] {certificate});
+    }
+
+    /** O que vai no TLS: a cadeia inteira quando houver, comecando pelo certificado final. */
+    public java.security.cert.Certificate[] cadeiaParaTls() {
+      return cadeia == null || cadeia.length == 0 ? new java.security.cert.Certificate[] {certificate} : cadeia;
+    }
+  }
 }

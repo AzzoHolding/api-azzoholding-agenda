@@ -308,6 +308,29 @@ class TenantOperationalSettingsServiceTest {
   }
 
   @Test
+  @DisplayName("getBusinessHoursFromTable em transacao so de leitura devolve o padrao sem gravar (salao novo)")
+  void getBusinessHoursFromTableSoLeituraNaoGrava() {
+    // Analise de 15/11/2026: GET /salon/profile de salao novo dava 500 (INSERT em transacao readOnly).
+    when(businessHoursRepository.findByTenantIdOrderByDayOfWeekAsc(tenantId)).thenReturn(List.of());
+    org.springframework.transaction.support.TransactionSynchronizationManager
+        .setCurrentTransactionReadOnly(true);
+    try {
+      List<SettingsDtos.BusinessHoursItemResponse> response =
+          service.getBusinessHoursFromTable(tenantId);
+
+      verify(businessHoursRepository, org.mockito.Mockito.never())
+          .save(any(TenantBusinessHours.class));
+      assertThat(response).hasSize(7);
+      assertThat(response.getFirst().dayOfWeek).isEqualTo("MONDAY");
+      assertThat(response.getFirst().openTime).isEqualTo("09:00");
+      assertThat(response.get(6).enabled).isFalse();
+    } finally {
+      org.springframework.transaction.support.TransactionSynchronizationManager
+          .setCurrentTransactionReadOnly(false);
+    }
+  }
+
+  @Test
   @DisplayName("getBusinessHoursDaTabela: a tabela que a tela grava, no formato antigo, de segunda a domingo")
   void getBusinessHoursDaTabelaUsaATabelaNoFormatoAntigo() {
     // Teste do "hoje" de 25/10/2026: o dono abriu o domingo na tela e o assistente seguia com o JSON antigo.

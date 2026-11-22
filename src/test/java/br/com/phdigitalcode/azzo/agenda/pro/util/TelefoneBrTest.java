@@ -23,6 +23,14 @@ class TelefoneBrTest {
   }
 
   @Test
+  void letrasSaoTelefoneInvalidoENaoVazio() {
+    // Analise de 15/11/2026, M3: "abc" passava como cliente sem telefone.
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> TelefoneBr.normalizarOuFalhar("abc"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage(TelefoneBr.MENSAGEM_INVALIDO);
+  }
+
+  @Test
   void recusaTrezeDigitosSemO55() {
     // O caso do teste ponta a ponta de 21/10/2026.
     assertThatThrownBy(() -> TelefoneBr.normalizarOuFalhar("2198759961399"))

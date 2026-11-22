@@ -124,6 +124,44 @@ public class ComandaController {
     return servicoComanda.registrarPagamento(id, request);
   }
 
+  /** Produtos do estoque com preco de venda (insumo nao aparece). */
+  @GetMapping("/produtos-a-venda")
+  @RequiresPermission("pos:view")
+  public java.util.List<ComandaDtos.ProdutoAVendaResponse> produtosAVenda() {
+    return servicoComanda.produtosAVenda();
+  }
+
+  @GetMapping("/{id}/fidelidade")
+  @RequiresPermission("pos:view")
+  public ComandaDtos.FidelidadeDaComandaResponse fidelidade(@PathVariable UUID id) {
+    return servicoComanda.fidelidadeDaComanda(id);
+  }
+
+  /** Cupom de desconto na comanda (item 6). */
+  @PostMapping("/{id}/cupom")
+  @RequiresPermission("pos:manage")
+  public ComandaDtos.ComandaResponse aplicarCupom(
+      @PathVariable UUID id,
+      @Valid @RequestBody br.com.phdigitalcode.azzo.agenda.pro.dto.CupomDtos.AplicarCupomRequest request) {
+    return servicoComanda.aplicarCupom(id, request.codigo);
+  }
+
+  @org.springframework.web.bind.annotation.DeleteMapping("/{id}/cupom")
+  @RequiresPermission("pos:manage")
+  public ComandaDtos.ComandaResponse removerCupom(
+      @PathVariable UUID id,
+      @org.springframework.web.bind.annotation.RequestParam(name = "cupomId", required = false) UUID cupomId) {
+    // Sem cupomId, tira todos os cupons da comanda (menos o do agendamento online).
+    return servicoComanda.removerCupom(id, cupomId);
+  }
+
+  @PostMapping("/{id}/fidelidade/desfazer")
+  @RequiresPermission("pos:manage")
+  public ComandaDtos.ComandaResponse desfazerResgate(
+      @PathVariable UUID id, @RequestBody(required = false) ComandaDtos.DesfazerResgateRequest request) {
+    return servicoComanda.desfazerResgateNoCaixa(id, request == null ? null : request.vencimentoDosPontos);
+  }
+
   @PostMapping("/{id}/fidelidade/resgatar")
   @RequiresPermission("pos:manage")
   public ComandaDtos.ComandaResponse resgatarFidelidade(

@@ -51,7 +51,13 @@ public final class AuditDtos {
     public Object metadata;
     public String eventHash;
     public String prevEventHash;
-    public boolean chainValid;
+    /** 1 (legado) ou 2 (hash completo, cadeia selada). */
+    public int hashVersion;
+    public Long chainSeq;
+    public String chainHash;
+    public String sealedAt;
+    /** {@code null}: evento novo ainda sem selo (o selador liga em segundos). */
+    public Boolean chainValid;
   }
 
   public static class AuditSearchResponse {
@@ -92,6 +98,26 @@ public final class AuditDtos {
     public String text;
     public String format;
     public List<String> columns = new ArrayList<>();
+  }
+
+  /** A ultima conferencia da cadeia do salao ({@code GET /api/v1/auditoria/integridade}). */
+  public static class AuditIntegrityResponse {
+    /** INTEGRA, INTEGRA_COM_RESSALVAS, VIOLADA ou NUNCA_CONFERIDA. */
+    public String status;
+    public long checkedEvents;
+    public long sealedEvents;
+    public long legacyEvents;
+    public long legacyForks;
+    public long redactedEvents;
+    public long pendingSeal;
+    public long failures;
+    public String firstFailureEventId;
+    public String firstFailureReason;
+    public Long lastChainSeq;
+    public String lastChainHash;
+    public String executedBy;
+    public String startedAt;
+    public String finishedAt;
   }
 
   public static class AuditExportResponse {

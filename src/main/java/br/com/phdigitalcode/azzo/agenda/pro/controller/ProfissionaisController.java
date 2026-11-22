@@ -45,6 +45,13 @@ public class ProfissionaisController {
     this.profissionalService = profissionalService;
   }
 
+  private br.com.phdigitalcode.azzo.agenda.pro.service.FotosDaEquipe fotosDaEquipe;
+
+  @org.springframework.beans.factory.annotation.Autowired
+  void setFotosDaEquipe(br.com.phdigitalcode.azzo.agenda.pro.service.FotosDaEquipe fotosDaEquipe) {
+    this.fotosDaEquipe = fotosDaEquipe;
+  }
+
   @GetMapping
   @RequiresPermission("professional:read")
   public List<ProfissionalResponse> listar(@RequestParam(name = "serviceId", required = false) String serviceId) {
@@ -128,6 +135,27 @@ public class ProfissionaisController {
   @ResponseStatus(HttpStatus.NO_CONTENT)
   public void deletar(@PathVariable UUID id) {
     profissionalService.deletar(id);
+  }
+
+  /** O dono poe a foto de quem e da equipe (tela Equipe). Multipart, campo {@code file}. */
+  @PostMapping(value = "/{id}/avatar", consumes = org.springframework.http.MediaType.MULTIPART_FORM_DATA_VALUE)
+  @RequiresPermission("professional:write")
+  public ProfissionalResponse enviarFoto(
+      @PathVariable UUID id,
+      @org.springframework.web.bind.annotation.RequestPart(name = "file", required = false)
+          org.springframework.web.multipart.MultipartFile arquivo) throws java.io.IOException {
+    if (arquivo == null) {
+      throw new br.com.phdigitalcode.azzo.agenda.pro.exception.ApiClientErrorException("Escolha uma imagem.", 400);
+    }
+    fotosDaEquipe.trocarADoProfissional(id, arquivo.getBytes(), arquivo.getOriginalFilename());
+    return profissionalService.obterPorId(id);
+  }
+
+  @DeleteMapping("/{id}/avatar")
+  @RequiresPermission("professional:write")
+  public ProfissionalResponse removerFoto(@PathVariable UUID id) {
+    fotosDaEquipe.removerADoProfissional(id);
+    return profissionalService.obterPorId(id);
   }
 
   @PostMapping("/{id}/reset-password")

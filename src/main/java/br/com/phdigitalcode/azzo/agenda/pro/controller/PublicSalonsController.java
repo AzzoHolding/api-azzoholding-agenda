@@ -87,6 +87,15 @@ public class PublicSalonsController {
     return ResponseEntity.ok(datas);
   }
 
+  /** A pagina publica confere o cupom antes de agendar (item 6). Com limite de tentativas (RateLimitFilter). */
+  @PostMapping("/{slug}/cupom/validar")
+  public br.com.phdigitalcode.azzo.agenda.pro.dto.CupomDtos.ValidarCupomPublicoResponse validarCupom(
+      @PathVariable("slug") String slug,
+      @jakarta.validation.Valid @org.springframework.web.bind.annotation.RequestBody
+          br.com.phdigitalcode.azzo.agenda.pro.dto.CupomDtos.ValidarCupomPublicoRequest request) {
+    return servicoPublicBooking.validarCupom(slug, request);
+  }
+
   @PostMapping("/{slug}/booking-funnel/events")
   public ResponseEntity<PublicBookingDtos.BookingFunnelEventResponse> registrarEventoFunil(
       @PathVariable("slug") String slug,

@@ -88,8 +88,12 @@ public class AuditRetentionPurgeService {
   }
 
   private long purgeTenantNaTransacao(UUID tenantId, Instant cutoff, int days, String executionId) {
+    // A mesma trava do selador: a cadeia nao muda enquanto o expurgo escolhe onde cortar.
+    auditEventRepository.esperarTravaDoSelador();
     Instant windowStart = auditEventRepository.findOldestCreatedAtBefore(tenantId, cutoff).orElse(cutoff);
-    long purged = auditEventRepository.purgeBeforeByTenant(tenantId, cutoff);
+    Corte corte = corteDaCadeia(tenantId, cutoff);
+    auditEventRepository.enableRetentionPurgeFlag();
+    long purged = auditEventRepository.deleteBeforeByTenantRespeitandoACadeia(tenantId, cutoff, corte.ultimaPosicao());
     if (purged <= 0) return 0;
 
     Map<String, Object> metadata = new HashMap<>();
@@ -105,9 +109,38 @@ public class AuditRetentionPurgeService {
         purged,
         "SCHEDULER",
         executionId,
-        metadata);
+        metadata,
+        corte.ancoraHash(),
+        corte.ancoraPosicao());
     return purged;
   }
+
+  /**
+   * Onde cortar sem abrir buraco na cadeia selada: remove so um PREFIXO de posicoes (todas criadas
+   * antes do corte), e guarda o elo do ultimo removido como ancora. Um evento selado mais novo que o
+   * corte trava o prefixo ali, mesmo que haja eventos antigos depois dele (eles saem no proximo
+   * expurgo). Evento sem selo nunca sai. Sem nada selado a remover, a ancora e o ultimo legado (v1)
+   * removido.
+   */
+  Corte corteDaCadeia(UUID tenantId, Instant cutoff) {
+    Long primeiraQueFica = auditEventRepository.primeiraPosicaoQueFica(tenantId, cutoff);
+    long limite = primeiraQueFica == null ? Long.MAX_VALUE : primeiraQueFica;
+    List<br.com.phdigitalcode.azzo.agenda.pro.entity.AuditEvent> ultimoSelado =
+        auditEventRepository.ultimoSeladoAExpurgar(tenantId, cutoff, limite, org.springframework.data.domain.Limit.of(1));
+    if (!ultimoSelado.isEmpty()) {
+      var evento = ultimoSelado.get(0);
+      return new Corte(evento.getChainSeq(), evento.getChainHash(), evento.getChainSeq());
+    }
+    String legado = auditEventRepository
+        .ultimoLegadoAExpurgar(tenantId, cutoff, org.springframework.data.domain.Limit.of(1))
+        .stream()
+        .findFirst()
+        .map(br.com.phdigitalcode.azzo.agenda.pro.entity.AuditEvent::getEventHash)
+        .orElse(null);
+    return new Corte(0L, legado, null);
+  }
+
+  record Corte(long ultimaPosicao, String ancoraHash, Long ancoraPosicao) {}
 
   private int resolveRetentionDays() {
     Integer fromDatabase = auditRetentionConfigRepository.findRetentionPeriodDays().orElse(null);

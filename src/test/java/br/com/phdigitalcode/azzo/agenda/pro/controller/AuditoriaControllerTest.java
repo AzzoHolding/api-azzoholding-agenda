@@ -25,7 +25,8 @@ import br.com.phdigitalcode.azzo.agenda.pro.service.AuditQueryService;
 /**
  * Espelha o contrato de {@code modules/audit/api/AuditoriaResource.java}: mesmo prefixo, mesma
  * faixa de permissao de classe ({@code OWNER}+{@code FINANCE}) e o efeito colateral de auditoria
- * de leitura (fire-and-forget, nunca bloqueia a resposta).
+ * de leitura. Desde 07/11/2026 a falha ao registrar a leitura FALHA a leitura: uma exportacao nao
+ * sai sem rastro.
  */
 class AuditoriaControllerTest {
 
@@ -41,7 +42,9 @@ class AuditoriaControllerTest {
     contextoTenant = mock(ContextoTenant.class);
     auditQueryService = mock(AuditQueryService.class);
     auditService = mock(AuditService.class);
-    controller = new AuditoriaController(contextoTenant, auditQueryService, auditService);
+    controller = new AuditoriaController(
+        contextoTenant, auditQueryService, auditService,
+        mock(br.com.phdigitalcode.azzo.agenda.pro.service.ConferenciaDaAuditoria.class));
     when(contextoTenant.obterTenantIdOuFalhar()).thenReturn(tenantId);
   }
 
@@ -110,7 +113,7 @@ class AuditoriaControllerTest {
   }
 
   @Test
-  void searchNaoQuebraQuandoAuditoriaFalha() {
+  void searchFalhaQuandoAuditoriaFalha() {
     AuditDtos.AuditSearchResponse expected = new AuditDtos.AuditSearchResponse();
     when(auditQueryService.search(
             eq(tenantId), // tenantId
@@ -132,10 +135,9 @@ class AuditoriaControllerTest {
         .thenReturn(expected);
     when(auditService.recordSuccess(any())).thenThrow(new RuntimeException("falha auditoria"));
 
-    AuditDtos.AuditSearchResponse response = controller.search(
-        null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
-
-    assertThat(response).isSameAs(expected);
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> controller.search(
+            null, null, null, null, null, null, null, null, null, null, null, null, null, null, null))
+        .hasMessage("falha auditoria");
   }
 
   @Test

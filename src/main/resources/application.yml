@@ -97,6 +97,8 @@ app:
       auth-mechanisms: ${MAIL_SMTP_AUTH_MECHANISMS:LOGIN PLAIN}
       timeout-seconds: ${MAIL_SMTP_TIMEOUT_SECONDS:20}
     from: ${MAIL_FROM:no-reply@azzoholding.com.br}
+    # Remetente de todo e-mail automatico (ninguem responde); MAIL_FROM fica como o endereco de suporte.
+    no-reply: ${MAIL_FROM_NO_REPLY:no-reply@azzoholding.com.br}
   email:
     product-name: ${EMAIL_PRODUCT_NAME:Azzo Agenda Pro}
     jobs:
@@ -155,6 +157,10 @@ app:
       sandbox-base-url: ${ASAAS_TENANT_SANDBOX_BASE_URL:https://sandbox.asaas.com}
       production-base-url: ${ASAAS_TENANT_PRODUCTION_BASE_URL:https://api.asaas.com}
   # Espelha app.storage.minio.* do application.properties do Quarkus.
+  pagamentos:
+    # Saloes liberados para os pagamentos integrados (piloto, decisao do dono de 14/11/2026): ids dos
+    # saloes separados por virgula; "*" libera todos; vazio = nenhum (a tela e o PDV ficam como antes).
+    saloes-piloto: ${PAGAMENTOS_SALOES_PILOTO:}
   storage:
     minio:
       enabled: ${MINIO_ENABLED:false}

@@ -30,6 +30,7 @@ public class UsuarioMapper {
     user.phone = usuario.getPhone();
     user.role = usuario.getRole().name();
     user.avatar = usuario.getAvatar();
+    user.avatarUrl = urlDaFoto(usuario);
     user.mfaEnabled = usuario.isMfaEnabled();
     user.createdAt = usuario.getCreatedAt() != null ? usuario.getCreatedAt().toString() : null;
     // O campo existia na resposta e nunca era preenchido: a tela Perfil mostrava "Salao: —" (25/10/2026).
@@ -42,6 +43,18 @@ public class UsuarioMapper {
       user.salonLogoUrl = urlDoLogo(tenant);
     }
     return user;
+  }
+
+  /** A foto da pessoa no menu e no Perfil. Falha aqui nao derruba o login: a tela usa as iniciais. */
+  private String urlDaFoto(Usuario usuario) {
+    String foto = usuario.getAvatar();
+    if (foto == null || foto.isBlank() || usuario.getTenantId() == null) return null;
+    if (foto.startsWith("http://") || foto.startsWith("https://")) return foto;
+    try {
+      return minioStorageService.gerarUrlAssinadaLeitura(foto, usuario.getTenantId());
+    } catch (RuntimeException e) {
+      return null;
+    }
   }
 
   /** O topo do menu mostra o logo do salao. Falha aqui nao pode derrubar o login: a tela usa a inicial. */

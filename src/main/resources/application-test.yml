@@ -1,6 +1,8 @@
 # Perfil test - usado pelos testes de integracao (Testcontainers injeta datasource dinamicamente
 # via @DynamicPropertySource / @ServiceConnection; valores abaixo sao apenas fallback).
 app:
+  pagamentos:
+    saloes-piloto: "*"
   security:
     jwt:
       private-key-location: classpath:privateKey.pem

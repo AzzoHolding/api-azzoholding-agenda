@@ -50,6 +50,14 @@ public class ServicoAnonimizacaoTitular {
   private final RastrosDoTitular rastrosDoTitular;
   private final AuditService auditService;
 
+  /** Dados de saude (anamnese, ficha, fotos, assinaturas) tambem saem na anonimizacao. Por setter: o construtor nao muda. */
+  private br.com.phdigitalcode.azzo.agenda.pro.saude.LgpdDeSaude lgpdDeSaude;
+
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setLgpdDeSaude(br.com.phdigitalcode.azzo.agenda.pro.saude.LgpdDeSaude lgpdDeSaude) {
+    this.lgpdDeSaude = lgpdDeSaude;
+  }
+
   public ServicoAnonimizacaoTitular(
       ContextoTenant contextoTenant,
       AuthenticatedUser authenticatedUser,
@@ -96,6 +104,10 @@ public class ServicoAnonimizacaoTitular {
     }
 
     Instant now = Instant.now();
+
+    // Dados de saude (anamnese e ficha): respostas, fichas, fotos e imagens de assinatura saem; da prova de
+    // consentimento ficam so tipo, data e hashes.
+    if (lgpdDeSaude != null) lgpdDeSaude.apagar(tenantId, clientId);
 
     // O dado pessoal do titular NAO mora so na ficha dele. Ate 2026-09-20 a anonimizacao parava no
     // cliente e nas notas de atendimento, e o telefone continuava no chat, nas notificacoes e na

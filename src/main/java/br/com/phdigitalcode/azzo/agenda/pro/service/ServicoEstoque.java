@@ -231,6 +231,7 @@ public class ServicoEstoque {
             request.unidadeMedida, "Unidade de medida obrigatoria."));
     item.setEstoqueMinimo(request.estoqueMinimo);
     item.setAtivo(request.ativo == null ? Boolean.TRUE : request.ativo);
+    item.setPrecoVenda(precoDeVenda(request.precoVenda));
     item.setSaldoAtual(BigDecimal.ZERO);
 
     // saveAndFlush: o id so existe depois do @PrePersist e vai no payload de auditoria montado
@@ -239,6 +240,12 @@ public class ServicoEstoque {
     ItemEstoqueResponse response = toItemResponse(persistido);
     auditarEstoque(tenantId, "STOCK_ITEM_CREATE", "STOCK_ITEM", persistido.getId(), null, response, null);
     return response;
+  }
+
+  /** 0 ou vazio = sem preco (insumo); senao, 2 casas. */
+  private static BigDecimal precoDeVenda(BigDecimal preco) {
+    if (preco == null || preco.signum() <= 0) return null;
+    return preco.setScale(2, java.math.RoundingMode.HALF_UP);
   }
 
   @Transactional
@@ -263,6 +270,7 @@ public class ServicoEstoque {
     }
     if (request.estoqueMinimo != null) item.setEstoqueMinimo(request.estoqueMinimo);
     if (request.ativo != null) item.setAtivo(request.ativo);
+    if (request.precoVenda != null) item.setPrecoVenda(precoDeVenda(request.precoVenda));
 
     ItemEstoque salvo = itemEstoqueRepository.save(item);
     ItemEstoqueResponse response = toItemResponse(salvo);
@@ -468,6 +476,10 @@ public class ServicoEstoque {
   @Transactional(readOnly = true)
   public List<ServicoInsumoResponse> listarInsumosPorServico(String serviceId) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    // Sem o servico era NullPointerException e "erro inesperado" (analise de 15/11/2026, M7).
+    if (serviceId == null || serviceId.isBlank()) {
+      throw new IllegalArgumentException("Informe o serviço para listar os insumos.");
+    }
     List<ServicoInsumo> insumos =
         servicoInsumoRepository.findByTenantAndService(tenantId, UUID.fromString(serviceId));
     Map<UUID, ItemEstoque> itens =

@@ -115,6 +115,35 @@ class ServicoPackagesTest {
     return req;
   }
 
+  /** Relatorio de 14/11, Medios 1 e 2: regras que so a tela aplicava. */
+  @Test
+  void recusaServicoRepetidoServicoInativoNomeRepetidoEIdInvalido() {
+    servicoExiste("Corte");
+    PackageDtos.PackageRequest repetido = requestComUmItem(3);
+    PackageDtos.ItemRequest mesmo = new PackageDtos.ItemRequest();
+    mesmo.serviceId = serviceId.toString();
+    mesmo.sessoes = 2;
+    repetido.itens.add(mesmo);
+    assertThatThrownBy(() -> service.criar(repetido)).hasMessageContaining("duas vezes");
+
+    when(servicePackageRepository.existeAtivoComNome(eq(tenantId), eq("Combo Corte"), eq(null))).thenReturn(true);
+    assertThatThrownBy(() -> service.criar(requestComUmItem(3))).hasMessageContaining("Já existe um pacote ativo");
+
+    PackageDtos.PackageRequest invalido = requestComUmItem(3);
+    invalido.itens.get(0).serviceId = "abc";
+    assertThatThrownBy(() -> service.criar(invalido)).hasMessage("Serviço inválido no pacote.");
+
+    Servico inativo = new Servico();
+    inativo.setId(serviceId);
+    inativo.setTenantId(tenantId);
+    inativo.setName("Escova");
+    inativo.setActive(false);
+    when(servicoRepository.findByIdAndTenantId(eq(serviceId), eq(tenantId))).thenReturn(Optional.of(inativo));
+    assertThatThrownBy(() -> service.criar(requestComUmItem(3))).hasMessageContaining("Escova está inativo");
+
+    verify(servicePackageItemRepository, never()).save(any());
+  }
+
   @Test
   void criarPersistePacoteComTenantEItensDaComposicao() {
     servicoExiste("Corte");
@@ -150,7 +179,7 @@ class ServicoPackagesTest {
 
     assertThatThrownBy(() -> service.criar(requestComUmItem(3)))
         .isInstanceOf(ApiClientErrorException.class)
-        .hasMessage("Serviço não encontrado: " + serviceId)
+        .hasMessage("Serviço não encontrado.")
         .extracting(e -> ((ApiClientErrorException) e).getStatus())
         .isEqualTo(404);
 

@@ -33,6 +33,18 @@ import br.com.phdigitalcode.azzo.agenda.pro.security.ContextoTenant;
 @Service
 public class ServicoClientMemberships {
 
+  /** Piloto dos pagamentos (14/11). Setter: os testes que montam este servico a mao seguem liberados. */
+  private LiberacaoDePagamentos liberacao;
+
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setLiberacao(LiberacaoDePagamentos liberacao) {
+    this.liberacao = liberacao;
+  }
+
+  private void exigirLiberado(UUID tenantId) {
+    if (liberacao != null) liberacao.exigir(tenantId);
+  }
+
   private static final ZoneId ZONE_BR = ZoneId.of("America/Sao_Paulo");
 
   private final ContextoTenant contextoTenant;
@@ -66,6 +78,22 @@ public class ServicoClientMemberships {
     this.asaasClient = asaasClient;
   }
 
+  /** As assinaturas do salao (as 200 mais recentes), com o nome da cliente. */
+  @Transactional(readOnly = true)
+  public List<MembershipDtos.ClientMembershipResponse> listarDoSalao() {
+    UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    List<ClientMembership> lista = clientMembershipRepository.findByTenantIdOrderByCreatedAtDesc(
+        tenantId, org.springframework.data.domain.Limit.of(200));
+    java.util.Map<UUID, String> nomes = new java.util.HashMap<>();
+    clienteRepository.findAllById(lista.stream().map(ClientMembership::getClientId).distinct().toList())
+        .forEach(c -> nomes.put(c.getId(), c.getName()));
+    return lista.stream().map(m -> {
+      MembershipDtos.ClientMembershipResponse r = toResponse(m);
+      r.clientNome = nomes.get(m.getClientId());
+      return r;
+    }).toList();
+  }
+
   @Transactional(readOnly = true)
   public List<MembershipDtos.ClientMembershipResponse> listarDoCliente(UUID clientId) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
@@ -89,11 +117,16 @@ public class ServicoClientMemberships {
             .orElseThrow(
                 () -> new ApiClientErrorException("Plano de assinatura não encontrado.", 404));
     if (!plano.isAtivo()) {
-      throw new IllegalArgumentException("Plano de assinatura não esta ativo.");
+      throw new IllegalArgumentException("Plano de assinatura não está ativo.");
     }
 
     if (request.customerCpfCnpj != null && !request.customerCpfCnpj.isBlank()) {
       cliente.setCpfCnpj(request.customerCpfCnpj.trim());
+    }
+
+    if ("CARTAO".equalsIgnoreCase(request.formaDeCobranca)) {
+      exigirLiberado(tenantId);
+      return assinarNoCartao(tenantId, clientId, cliente, plano);
     }
 
     String apiKey = tenantAsaasChargeService.resolveApiKeyAtivaOuFalhar(tenantId);
@@ -138,7 +171,81 @@ public class ServicoClientMemberships {
       clientMembershipBalanceRepository.save(saldo);
     }
 
+    auditar(tenantId, "CLUBE_ASSINATURA_CRIADA", membership);
     return toResponse(membership);
+  }
+
+  /**
+   * Cartao recorrente (Fase 7): a assinatura nasce AGUARDANDO_CARTAO, com o link da operadora. Os
+   * saldos ja sao criados, mas so valem quando a primeira mensalidade for paga (a cobertura na
+   * comanda exige assinatura ATIVA).
+   */
+  private MembershipDtos.ClientMembershipResponse assinarNoCartao(
+      UUID tenantId, UUID clientId, Cliente cliente, MembershipPlan plano) {
+    if (assinaturasNoCartao == null) {
+      throw new IllegalArgumentException("Assinatura no cartão indisponível.");
+    }
+    Instant now = Instant.now();
+    ClientMembership membership = new ClientMembership();
+    membership.setTenantId(tenantId);
+    membership.setClientId(clientId);
+    membership.setPlanId(plano.getId());
+    membership.setPlanNome(plano.getNome());
+    membership.setPrecoMensal(plano.getPrecoMensal());
+    membership.setCumulativo(plano.isCumulativo());
+    membership.setPeriodStart(now);
+    membership.setPeriodEnd(now);
+    assinaturasNoCartao.criarNaOperadora(membership, cliente, plano);
+    clientMembershipRepository.save(membership);
+    criarSaldos(tenantId, membership, plano);
+    auditar(tenantId, "CLUBE_ASSINATURA_CRIADA", membership);
+    return toResponse(membership);
+  }
+
+  private void criarSaldos(UUID tenantId, ClientMembership membership, MembershipPlan plano) {
+    for (MembershipPlanBenefit beneficio : membershipPlanBenefitRepository.findByPlanId(plano.getId())) {
+      ClientMembershipBalance saldo = new ClientMembershipBalance();
+      saldo.setTenantId(tenantId);
+      saldo.setMembershipId(membership.getId());
+      saldo.setServiceId(beneficio.getServiceId());
+      saldo.setServiceNome(servicoRepository.findById(beneficio.getServiceId()).map(Servico::getName).orElse(null));
+      saldo.setQuantidadeMensal(beneficio.getQuantidadeMensal());
+      clientMembershipBalanceRepository.save(saldo);
+    }
+  }
+
+  private br.com.phdigitalcode.azzo.agenda.pro.integration.AuditService auditService;
+
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setAuditService(br.com.phdigitalcode.azzo.agenda.pro.integration.AuditService auditService) {
+    this.auditService = auditService;
+  }
+
+  private void auditar(UUID tenantId, String acao, ClientMembership m) {
+    if (auditService == null) return;
+    var command = new br.com.phdigitalcode.azzo.agenda.pro.integration.AuditEventCommand();
+    command.tenantId = tenantId;
+    command.module = br.com.phdigitalcode.azzo.agenda.pro.integration.AuditConstants.Module.SETTINGS;
+    command.action = acao;
+    command.entityType = "CLIENT_MEMBERSHIP";
+    command.entityId = m.getId().toString();
+    command.sourceChannel = br.com.phdigitalcode.azzo.agenda.pro.integration.AuditConstants.SourceChannel.API;
+    java.util.Map<String, Object> depois = new java.util.LinkedHashMap<>();
+    depois.put("plano", m.getPlanNome());
+    depois.put("valorMensal", m.getPrecoMensal());
+    depois.put("situacao", m.getStatus());
+    depois.put("cobranca", m.getAssinaturaNaOperadora() != null ? "Cartão recorrente" : "Pix (Asaas)");
+    depois.put("cancelaAoFimDoPeriodo", m.isCancelAtPeriodEnd());
+    command.after = depois;
+    auditService.recordSuccess(command);
+  }
+
+  private br.com.phdigitalcode.azzo.agenda.pro.service.ServicoDeAssinaturasNoCartao assinaturasNoCartao;
+
+  /** Setter (e nao construtor): os testes que montam este servico a mao seguem sem o cartao. */
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setAssinaturasNoCartao(br.com.phdigitalcode.azzo.agenda.pro.service.ServicoDeAssinaturasNoCartao assinaturasNoCartao) {
+    this.assinaturasNoCartao = assinaturasNoCartao;
   }
 
   @Transactional
@@ -149,7 +256,7 @@ public class ServicoClientMemberships {
             .findByIdAndTenantId(membershipId, tenantId)
             .orElseThrow(() -> new ApiClientErrorException("Assinatura não encontrada.", 404));
     if (ClientMembership.STATUS_CANCELADA.equals(membership.getStatus())) {
-      throw new IllegalArgumentException("Assinatura já esta cancelada.");
+      throw new IllegalArgumentException("Assinatura já está cancelada.");
     }
 
     if (membership.getAsaasSubscriptionId() != null) {
@@ -161,9 +268,18 @@ public class ServicoClientMemberships {
       }
     }
 
+    if (membership.getAssinaturaNaOperadora() != null && assinaturasNoCartao != null) {
+      assinaturasNoCartao.cancelarNaOperadora(membership);
+    }
+
     // Nao revoga o periodo corrente (ja pago) -- so impede a renovacao. A transicao para
     // CANCELADA de fato acontece quando periodEnd vence (ClientMembershipCancellationScheduler).
     membership.setCancelAtPeriodEnd(true);
+    // Sem cartao cadastrado nao ha periodo pago: cancela ja.
+    if (ClientMembership.STATUS_AGUARDANDO_CARTAO.equals(membership.getStatus())) {
+      membership.setStatus(ClientMembership.STATUS_CANCELADA);
+    }
+    auditar(tenantId, "CLUBE_ASSINATURA_CANCELADA", membership);
 
     return toResponse(membership);
   }
@@ -171,6 +287,7 @@ public class ServicoClientMemberships {
   private MembershipDtos.ClientMembershipResponse toResponse(ClientMembership membership) {
     MembershipDtos.ClientMembershipResponse r = new MembershipDtos.ClientMembershipResponse();
     r.id = membership.getId().toString();
+    r.clientId = membership.getClientId() != null ? membership.getClientId().toString() : null;
     r.planId = membership.getPlanId() != null ? membership.getPlanId().toString() : null;
     r.planNome = membership.getPlanNome();
     r.precoMensal = membership.getPrecoMensal();
@@ -179,6 +296,9 @@ public class ServicoClientMemberships {
         membership.getPeriodStart() != null ? membership.getPeriodStart().toString() : null;
     r.periodEnd = membership.getPeriodEnd() != null ? membership.getPeriodEnd().toString() : null;
     r.cancelAtPeriodEnd = membership.isCancelAtPeriodEnd();
+    r.formaDeCobranca = membership.getAssinaturaNaOperadora() != null ? "CARTAO" : "PIX";
+    r.linkDoCartao = ClientMembership.STATUS_AGUARDANDO_CARTAO.equals(membership.getStatus())
+        ? membership.getLinkDoCartao() : null;
     r.saldos =
         clientMembershipBalanceRepository.findByMembershipId(membership.getId()).stream()
             .map(

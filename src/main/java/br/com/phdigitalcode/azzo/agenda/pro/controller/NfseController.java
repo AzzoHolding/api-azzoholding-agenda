@@ -69,6 +69,17 @@ public class NfseController {
   private final NfseProviderCapabilitiesService nfseProviderCapabilitiesService;
   private final NfsePdfJobService nfsePdfJobService;
   private final ContextoTenant contextoTenant;
+  private br.com.phdigitalcode.azzo.agenda.pro.service.AuditoriaFiscal auditoriaFiscal;
+
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setAuditoriaFiscal(br.com.phdigitalcode.azzo.agenda.pro.service.AuditoriaFiscal auditoriaFiscal) {
+    this.auditoriaFiscal = auditoriaFiscal;
+  }
+
+  private void auditar(String acao, String tipo, Object id, java.util.Map<String, ?> detalhes) {
+    if (auditoriaFiscal == null) return;
+    auditoriaFiscal.registrar(contextoTenant.obterTenantIdOuFalhar(), acao, tipo, id, detalhes);
+  }
 
   public NfseController(
       NfseService nfseService,
@@ -207,6 +218,12 @@ public class NfseController {
       @RequestParam(required = false) String format) {
     validarAcessoFiscalAtual();
     NfseService.AccountingExportFile export = nfseService.exportacaoContabil(from, to, status, format);
+    auditar(
+        "NFSE_ACCOUNTING_EXPORT",
+        br.com.phdigitalcode.azzo.agenda.pro.service.AuditoriaFiscal.NOTA,
+        null,
+        br.com.phdigitalcode.azzo.agenda.pro.service.AuditoriaFiscal.detalhes(
+            "de", from, "ate", to, "status", status, "formato", export.format(), "linhas", export.rowsCount()));
     return ResponseEntity.ok()
         .contentType(MediaType.parseMediaType(export.mediaType()))
         .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + export.fileName() + "\"")
@@ -262,6 +279,11 @@ public class NfseController {
   public ResponseEntity<byte[]> baixarPdf(@PathVariable String id, @PathVariable String jobId) {
     validarAcessoFiscalAtual();
     byte[] pdf = nfsePdfJobService.baixarPdf(id, jobId);
+    auditar(
+        "NFSE_PDF_DOWNLOAD",
+        br.com.phdigitalcode.azzo.agenda.pro.service.AuditoriaFiscal.NOTA,
+        id,
+        br.com.phdigitalcode.azzo.agenda.pro.service.AuditoriaFiscal.detalhes("jobId", jobId));
     return ResponseEntity.ok()
         .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"nfse-" + id + ".pdf\"")
         .body(pdf);
@@ -272,7 +294,14 @@ public class NfseController {
   public NfseDtos.CertificateUnlockStatusResponse createUnlockSession(
       @RequestBody(required = false) NfseDtos.CertificateUnlockRequest request) {
     validarAcessoFiscalAtual();
-    return nfseCertificateUnlockService.createUnlockSession(request);
+    NfseDtos.CertificateUnlockStatusResponse resposta = nfseCertificateUnlockService.createUnlockSession(request);
+    // Nunca a senha: so que houve desbloqueio, ate quando.
+    auditar(
+        "CERTIFICATE_UNLOCKED",
+        br.com.phdigitalcode.azzo.agenda.pro.service.AuditoriaFiscal.CERTIFICADO,
+        null,
+        br.com.phdigitalcode.azzo.agenda.pro.service.AuditoriaFiscal.detalhes("expiraEm", resposta == null ? null : resposta.expiresAt));
+    return resposta;
   }
 
   @GetMapping("/certificate-unlock")
@@ -286,6 +315,7 @@ public class NfseController {
   public ResponseEntity<Void> revokeUnlockSession() {
     validarAcessoFiscalAtual();
     nfseCertificateUnlockService.revokeCurrentSession();
+    auditar("CERTIFICATE_UNLOCK_REVOKED", br.com.phdigitalcode.azzo.agenda.pro.service.AuditoriaFiscal.CERTIFICADO, null, null);
     return ResponseEntity.noContent().build();
   }
 

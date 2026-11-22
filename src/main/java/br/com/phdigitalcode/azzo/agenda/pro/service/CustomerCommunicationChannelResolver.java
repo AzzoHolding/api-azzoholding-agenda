@@ -37,6 +37,16 @@ public class CustomerCommunicationChannelResolver {
         : chatConversationRepository
             .findLatestByTenantAndClient(tenantId, client.getId())
             .orElse(null);
+    if (conversation != null && conversation.getChannel() == ChatChannel.AREA_CLIENTE) {
+      // Resposta na conversa aberta da area: fica na area. Sem conversa escolhida (lembretes, confirmacoes, reativacao),
+      // a conversa da area nao serve de rota: vale a do WhatsApp ou a do Telegram, ou o telefone.
+      if (preferredConversation != null) {
+        return new ResolvedChannel(ChatChannel.AREA_CLIENTE, normalize(conversation.getExternalContactId()), conversation);
+      }
+      conversation = chatConversationRepository.findByTenantClientAndChannel(tenantId, client.getId(), ChatChannel.WHATSAPP)
+          .or(() -> chatConversationRepository.findByTenantClientAndChannel(tenantId, client.getId(), ChatChannel.TELEGRAM))
+          .orElse(null);
+    }
 
     if (conversation != null && conversation.getChannel() == ChatChannel.TELEGRAM) {
       String telegramExternalId = normalize(conversation.getExternalContactId());

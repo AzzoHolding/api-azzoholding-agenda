@@ -56,6 +56,17 @@ public class AuditRetentionEvent {
   @Column(name = "created_at", nullable = false)
   private Instant createdAt;
 
+  /**
+   * Onde a cadeia continua depois do expurgo: o elo do ultimo evento removido ({@code chain_hash}
+   * na v2, {@code event_hash} no legado) e a posicao dele (so v2). O primeiro evento que sobra aponta
+   * para este hash.
+   */
+  @Column(name = "chain_anchor_hash")
+  private String chainAnchorHash;
+
+  @Column(name = "chain_anchor_seq")
+  private Long chainAnchorSeq;
+
   @PrePersist
   void prePersist() {
     if (id == null) id = UUID.randomUUID();

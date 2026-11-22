@@ -22,6 +22,8 @@ public class ComandaItem {
   public static final String TIPO_SERVICO = "SERVICO";
   public static final String TIPO_PRODUTO = "PRODUTO";
   public static final String TIPO_PACOTE = "PACOTE";
+  /** Vale-presente vendido (V181): o vale nasce no fechamento da comanda. */
+  public static final String TIPO_VALE = "VALE";
 
   /** De onde o item veio: o agendamento trouxe, ou alguem lancou na mao no PDV. */
   public static final String ORIGEM_AGENDAMENTO = "AGENDAMENTO";
@@ -91,6 +93,16 @@ public class ComandaItem {
   /** O preco que o item tinha antes da cobertura, para voltar se ela for retirada. */
   @Column(name = "preco_antes_cobertura")
   private BigDecimal precoAntesCobertura;
+
+  /** Do vale-presente vendido (V181): para quem e, a mensagem e a validade em meses. */
+  @Column(name = "vale_destinatario")
+  private String valeDestinatario;
+
+  @Column(name = "vale_mensagem")
+  private String valeMensagem;
+
+  @Column(name = "vale_validade_meses")
+  private Integer valeValidadeMeses;
 
   @Column(name = "created_at", nullable = false)
   private Instant createdAt;

@@ -123,4 +123,45 @@ class CustomerCommunicationChannelResolverTest {
 
     org.mockito.Mockito.verifyNoInteractions(chatConversationRepository);
   }
+
+  // ─── Area da cliente (V188) ────────────────────────────────────────────────
+
+  private ChatConversationEntity conversa(ChatChannel canal, String externo) {
+    ChatConversationEntity c = new ChatConversationEntity();
+    c.setChannel(canal);
+    c.setExternalContactId(externo);
+    return c;
+  }
+
+  @Test
+  void conversaDaAreaMaisRecenteNaoViraRotaDeLembrete() {
+    Cliente cliente = client();
+    when(chatConversationRepository.findLatestByTenantAndClient(tenantId, cliente.getId()))
+        .thenReturn(Optional.of(conversa(ChatChannel.AREA_CLIENTE, UUID.randomUUID().toString())));
+    when(chatConversationRepository.findByTenantClientAndChannel(tenantId, cliente.getId(), ChatChannel.WHATSAPP))
+        .thenReturn(Optional.of(conversa(ChatChannel.WHATSAPP, "5521999990000")));
+    CustomerCommunicationChannelResolver.ResolvedChannel r = resolver.resolve(tenantId, cliente, "5521911112222");
+    assertThat(r.channel()).isEqualTo(ChatChannel.WHATSAPP);
+    assertThat(r.externalContactId()).isEqualTo("5521999990000");
+  }
+
+  @Test
+  void conversaDaAreaSemOutraConversaCaiNoTelefone() {
+    Cliente cliente = client();
+    when(chatConversationRepository.findLatestByTenantAndClient(tenantId, cliente.getId()))
+        .thenReturn(Optional.of(conversa(ChatChannel.AREA_CLIENTE, UUID.randomUUID().toString())));
+    CustomerCommunicationChannelResolver.ResolvedChannel r = resolver.resolve(tenantId, cliente, "5521911112222");
+    assertThat(r.channel()).isEqualTo(ChatChannel.WHATSAPP);
+    assertThat(r.externalContactId()).isEqualTo("5521911112222");
+  }
+
+  @Test
+  void respostaNaConversaDaAreaAbertaFicaNaArea() {
+    Cliente cliente = client();
+    String conta = UUID.randomUUID().toString();
+    CustomerCommunicationChannelResolver.ResolvedChannel r =
+        resolver.resolve(tenantId, cliente, conversa(ChatChannel.AREA_CLIENTE, conta), "5521911112222");
+    assertThat(r.channel()).isEqualTo(ChatChannel.AREA_CLIENTE);
+    assertThat(r.externalContactId()).isEqualTo(conta);
+  }
 }

@@ -28,6 +28,8 @@ import br.com.phdigitalcode.azzo.agenda.pro.entity.Cliente;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.Comanda;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.ComandaItem;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.ComandaPagamento;
+import br.com.phdigitalcode.azzo.agenda.pro.entity.Cupom;
+import br.com.phdigitalcode.azzo.agenda.pro.entity.UsoDeCupom;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.ItemEstoque;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.Profissional;
 import br.com.phdigitalcode.azzo.agenda.pro.entity.MovimentacaoEstoque;
@@ -124,6 +126,38 @@ public class ServicoComanda {
 
   private final PermissionService permissionService;
 
+  private ServicoDePagamentos servicoDePagamentos;
+  private br.com.phdigitalcode.azzo.agenda.pro.repository.CobrancaRepository cobrancaRepository;
+  private br.com.phdigitalcode.azzo.agenda.pro.repository.TerminalDePagamentoRepository terminaisDePagamento;
+
+  /** Pontos de fidelidade (V175): todo movimento de saldo passa por aqui. */
+  private ServicoDePontos servicoDePontos;
+
+  @org.springframework.beans.factory.annotation.Autowired
+  void setServicoDePontos(ServicoDePontos servicoDePontos) {
+    this.servicoDePontos = servicoDePontos;
+  }
+
+  /** Cupons de desconto e vales-presente (item 6, V180/V181). */
+  private ServicoDeCupons servicoDeCupons;
+  private ServicoDeVales servicoDeVales;
+
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setCuponsEVales(ServicoDeCupons servicoDeCupons, ServicoDeVales servicoDeVales) {
+    this.servicoDeCupons = servicoDeCupons;
+    this.servicoDeVales = servicoDeVales;
+  }
+
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setPagamentosIntegrados(
+      ServicoDePagamentos servicoDePagamentos,
+      br.com.phdigitalcode.azzo.agenda.pro.repository.CobrancaRepository cobrancaRepository,
+      br.com.phdigitalcode.azzo.agenda.pro.repository.TerminalDePagamentoRepository terminaisDePagamento) {
+    this.servicoDePagamentos = servicoDePagamentos;
+    this.cobrancaRepository = cobrancaRepository;
+    this.terminaisDePagamento = terminaisDePagamento;
+  }
+
   public ServicoComanda(
       ContextoTenant contextoTenant,
       AuthenticatedUser authenticatedUser,
@@ -196,11 +230,13 @@ public class ServicoComanda {
     // uma comanda com o id de um agendamento daqui e, ao pagar com "credito de sinal", consumia o
     // sinal que o nosso cliente pagou; ao fechar, creditava pontos de fidelidade no nosso cliente
     // (teste de isolamento de 2026-09-18).
+    UUID cupomDoAgendamento = null;
     if (appointmentId != null) {
       Agendamento agendamento =
           agendamentoRepository
               .findByIdAndTenantId(appointmentId, tenantId)
               .orElseThrow(() -> new IllegalArgumentException("Agendamento não encontrado."));
+      cupomDoAgendamento = agendamento.getCupomId();
       if (clientId == null) {
         clientId = agendamento.getClientId();
       } else if (!clientId.equals(agendamento.getClientId())) {
@@ -241,6 +277,12 @@ public class ServicoComanda {
             "Este agendamento já tem uma comanda aberta ou cobrada: continue nela.");
       }
       throw erro;
+    }
+    // O cupom do agendamento online ja esta no preco acordado dos itens: a comanda so o mostra (valor 0 aqui,
+    // para nao descontar duas vezes) e nao aceita outro cupom.
+    if (cupomDoAgendamento != null && servicoDeCupons != null
+        && servicoDeCupons.ligarUsoDoAgendamentoAComanda(tenantId, appointmentId, comanda.getId())) {
+      comanda.setCupomId(cupomDoAgendamento);
     }
 
     return toResponse(comanda, List.of(), List.of());
@@ -300,15 +342,17 @@ public class ServicoComanda {
     return response;
   }
 
-  @Transactional(readOnly = true)
+  @Transactional
   public ComandaDtos.ComandaResponse obter(UUID id) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Comanda comanda = buscarOuFalhar(id, tenantId);
     exigirComandaDoProfissional(tenantId, comanda);
+    List<ComandaPagamento> pagamentos = comandaPagamentoRepository.findByComandaIdOrderByCreatedAt(comanda.getId());
+    sincronizarPagamentosIntegrados(pagamentos);
     return toResponse(
         comanda,
         comandaItemRepository.findByComandaIdOrderByCreatedAt(comanda.getId()),
-        comandaPagamentoRepository.findByComandaIdOrderByCreatedAt(comanda.getId()));
+        pagamentos);
   }
 
   @Transactional
@@ -338,6 +382,9 @@ public class ServicoComanda {
     exigirComandaDoProfissional(tenantId, comanda);
     exigirAberta(comanda);
 
+    if (ComandaItem.TIPO_VALE.equals(request.tipo)) {
+      return adicionarVale(tenantId, comanda, request);
+    }
     if (ComandaItem.TIPO_PACOTE.equals(request.tipo) && comanda.getClientId() == null) {
       throw new IllegalArgumentException(
           "Item do tipo PACOTE exige comanda com cliente identificado.");
@@ -391,9 +438,16 @@ public class ServicoComanda {
               .findByIdAndTenantId(referenciaId, tenantId)
               .orElseThrow(
                   () -> new ApiClientErrorException("Produto não encontrado no estoque.", 404));
-      if (request.precoUnitario == null) {
+      // Com preco de venda cadastrado (V176), vale o do cadastro, como no pacote (FIN-002): o caixa
+      // nao muda o preco. Sem cadastro, segue o de antes: o caixa informa.
+      BigDecimal precoDoProduto = produto.getPrecoVenda() != null ? produto.getPrecoVenda() : request.precoUnitario;
+      if (precoDoProduto == null) {
         throw new IllegalArgumentException(
-            "Preço de venda é obrigatório para item do tipo PRODUTO.");
+            "Este produto não tem preço de venda: cadastre o preço no estoque ou informe o valor.");
+      }
+      request.precoUnitario = precoDoProduto;
+      if (Boolean.FALSE.equals(produto.getAtivo())) {
+        throw new IllegalArgumentException("Este produto está inativo no estoque e não pode ser vendido.");
       }
       // Produto por R$ 0,00 seria brinde sem registro de brinde: sai do estoque e nao entra no caixa.
       if (NumericUtil.isZeroOrNegative(request.precoUnitario)) {
@@ -421,6 +475,10 @@ public class ServicoComanda {
           servicePackageRepository
               .findByIdAndTenantId(referenciaId, tenantId)
               .orElseThrow(() -> new ApiClientErrorException("Pacote não encontrado.", 404));
+      // A tela de Pacotes promete "inativo deixa de ser vendido" (relatorio de 14/11, Alto 1).
+      if (!pacote.isAtivo()) {
+        throw new IllegalArgumentException("Este pacote está inativo e não pode ser vendido.");
+      }
       // Pacote vende por inteiro: 0,5 ou 0,001 pacote nao existe, e o saldo de sessoes sobe com
       // CEILING (criarSaldoDePacoteVendido) — 0,001 pacote por centavos entregava o pacote todo.
       if (item.getQuantidade().compareTo(BigDecimal.ONE) < 0
@@ -447,6 +505,45 @@ public class ServicoComanda {
     recalcular(comanda);
     auditar(tenantId, "POS_ITEM_ADD", comanda, null, dadosDoItem(item));
     return obter(id);
+  }
+
+  /**
+   * Vale-presente vendido (item 6): o valor e o que o caixa digitar (R$ 10 a R$ 5.000), sem catalogo,
+   * comissao, estoque nem pontos. O vale com o codigo nasce no fechamento ({@link #fechar}).
+   */
+  private ComandaDtos.ComandaResponse adicionarVale(
+      UUID tenantId, Comanda comanda, ComandaDtos.AdicionarItemRequest request) {
+    if (servicoDeVales == null) throw new IllegalStateException("Vale-presente indisponível.");
+    BigDecimal quantidade = request.quantidade == null ? BigDecimal.ONE : request.quantidade;
+    if (quantidade.compareTo(BigDecimal.ONE) != 0) {
+      throw new IllegalArgumentException("Um vale-presente por item: lance um item para cada vale.");
+    }
+    ServicoDeVales.exigirValorDeVenda(request.precoUnitario);
+    int meses = ServicoDeVales.validadeEmMeses(request.valeValidadeMeses);
+    String destinatario = request.valeDestinatario == null || request.valeDestinatario.isBlank()
+        ? null : request.valeDestinatario.trim();
+    String mensagem = request.valeMensagem == null || request.valeMensagem.isBlank() ? null : request.valeMensagem.trim();
+
+    ComandaItem item = new ComandaItem();
+    item.setTenantId(tenantId);
+    item.setComandaId(comanda.getId());
+    item.setTipo(ComandaItem.TIPO_VALE);
+    // Sem catalogo: a referencia e so um identificador do item (o vale aponta para o item pelo id).
+    item.setReferenciaId(UUID.randomUUID());
+    item.setOrigem(ComandaItem.ORIGEM_MANUAL);
+    item.setQuantidade(BigDecimal.ONE);
+    item.setDescricao(destinatario == null ? "Vale-presente" : "Vale-presente para " + destinatario);
+    item.setPrecoUnitario(request.precoUnitario.setScale(2, RoundingMode.HALF_UP));
+    item.setTotal(item.getPrecoUnitario());
+    item.setValeDestinatario(destinatario);
+    item.setValeMensagem(mensagem);
+    item.setValeValidadeMeses(meses);
+    comandaItemRepository.save(item);
+    comandaItemRepository.flush();
+
+    recalcular(comanda);
+    auditar(tenantId, "POS_ITEM_ADD", comanda, null, dadosDoItem(item));
+    return obter(comanda.getId());
   }
 
   @Transactional
@@ -486,7 +583,7 @@ public class ServicoComanda {
    */
   private void exigirQueRemoverNaoEstoureOTetoDeDesconto(
       UUID tenantId, Comanda comanda, ComandaItem removido) {
-    BigDecimal desconto = comanda.getDesconto();
+    BigDecimal desconto = descontoManual(comanda);
     if (desconto == null || desconto.signum() <= 0) return;
     if (authenticatedUser.temRole("OWNER")) return;
 
@@ -549,12 +646,13 @@ public class ServicoComanda {
       for (ClientPackageBalance saldo : clientPackageBalanceRepository.findByPurchaseId(compra.getId())) {
         int disponiveis = saldo.getSessoesTotais() - saldo.getSessoesUsadas();
         if (!item.getReferenciaId().equals(saldo.getServiceId()) || disponiveis <= 0) continue;
+        if (saldo.getExpiraEm() != null && saldo.getExpiraEm().isBefore(Instant.now())) continue;
         ComandaDtos.OpcaoDeCoberturaResponse opcao = new ComandaDtos.OpcaoDeCoberturaResponse();
         opcao.tipo = ComandaItem.COBERTURA_PACOTE;
         opcao.saldoId = saldo.getId().toString();
         opcao.nome = compra.getPackageNome();
         opcao.disponiveis = disponiveis;
-        opcao.valorDaSessao = valorDaSessaoDoPacote(compra);
+        opcao.valorDaSessao = saldo.getValorSessao() != null ? saldo.getValorSessao() : valorDaSessaoDoPacote(compra);
         opcoes.add(opcao);
       }
     }
@@ -593,14 +691,14 @@ public class ServicoComanda {
     Map<String, Object> antes = dadosDoItem(item);
 
     if (!ComandaItem.TIPO_SERVICO.equals(item.getTipo())) {
-      throw new IllegalArgumentException("So serviço pode sair de pacote ou assinatura.");
+      throw new IllegalArgumentException("Só serviço pode sair de pacote ou assinatura.");
     }
     if (comanda.getClientId() == null) {
       throw new IllegalArgumentException(
           "Comanda sem cliente não usa pacote nem assinatura: identifique o cliente primeiro.");
     }
     if (item.getCoberturaTipo() != null) {
-      throw new IllegalArgumentException("Este serviço já esta coberto. Retire a cobertura antes.");
+      throw new IllegalArgumentException("Este serviço já está coberto. Retire a cobertura antes.");
     }
 
     UUID saldoId = parseUuidOrThrow(request.saldoId, "saldoId invalido.");
@@ -652,12 +750,19 @@ public class ServicoComanda {
         .orElseThrow(() -> new ApiClientErrorException("Item não encontrado na comanda.", 404));
   }
 
+  /** "Restam 1 sessão de Corte no pacote; este item pede 4." (relatorio de 14/11, Baixo 3). */
+  static String mensagemDeSaldoDoPacote(String servico, int restam, int pede) {
+    if (restam <= 0) return "O pacote não tem mais sessões de " + servico + ".";
+    return "Restam " + restam + (restam == 1 ? " sessão" : " sessões") + " de " + servico + " no pacote; este item pede "
+        + pede + ".";
+  }
+
   /** Sessao e unidade inteira: 1,5 corte nao sai de pacote nenhum. */
   private int sessoesDoItem(ComandaItem item) {
     BigDecimal quantidade = item.getQuantidade() != null ? item.getQuantidade() : BigDecimal.ONE;
     if (quantidade.signum() <= 0 || quantidade.stripTrailingZeros().scale() > 0) {
       throw new IllegalArgumentException(
-          "So quantidade inteira de sessoes sai de pacote ou assinatura.");
+          "Só quantidade inteira de sessões sai de pacote ou assinatura.");
     }
     return quantidade.intValueExact();
   }
@@ -670,15 +775,24 @@ public class ServicoComanda {
     int sessoes = sessoesDoItem(item);
     if (ComandaItem.COBERTURA_PACOTE.equals(item.getCoberturaTipo())) {
       ClientPackageBalance saldo = saldoDePacoteDoCliente(tenantId, comanda, item);
+      if (saldo.getExpiraEm() != null && saldo.getExpiraEm().isBefore(Instant.now())) {
+        throw new IllegalArgumentException("As sessões de " + saldo.getServiceNome() + " deste pacote venceram em "
+            + java.time.format.DateTimeFormatter.ofPattern("dd/MM/yyyy").withZone(java.time.ZoneId.of("America/Sao_Paulo"))
+                .format(saldo.getExpiraEm()) + ".");
+      }
       if (saldo.getSessoesTotais() - saldo.getSessoesUsadas() < sessoes) {
         throw new IllegalArgumentException(
-            "O pacote não tem mais sessoes de " + saldo.getServiceNome() + " para este serviço.");
+            mensagemDeSaldoDoPacote(saldo.getServiceNome(), saldo.getSessoesTotais() - saldo.getSessoesUsadas(), sessoes));
       }
     } else if (ComandaItem.COBERTURA_ASSINATURA.equals(item.getCoberturaTipo())) {
       ClientMembershipBalance saldo = saldoDeAssinaturaDoCliente(tenantId, comanda, item);
-      if (saldo.getQuantidadeMensal() - saldo.getUsadasNoPeriodo() < sessoes) {
-        throw new IllegalArgumentException(
-            "A assinatura já usou todas as sessoes de " + saldo.getServiceNome() + " deste período.");
+      int restam = saldo.getQuantidadeMensal() - saldo.getUsadasNoPeriodo();
+      if (restam < sessoes) {
+        // Com sessao sobrando, dizer "usou todas" nao era verdade (teste de 14/11, mesmo caso do pacote).
+        throw new IllegalArgumentException(restam <= 0
+            ? "A assinatura já usou todas as sessões de " + saldo.getServiceNome() + " deste período."
+            : "Restam " + restam + (restam == 1 ? " sessão" : " sessões") + " de " + saldo.getServiceNome()
+                + " na assinatura neste período; este item pede " + sessoes + ".");
       }
     } else {
       throw new IllegalArgumentException("Tipo de cobertura inválido.");
@@ -719,7 +833,7 @@ public class ServicoComanda {
           "Esta assinatura não é do cliente da comanda ou não cobre este serviço.");
     }
     if (!assinaturaValeAgora(assinatura)) {
-      throw new IllegalArgumentException("A assinatura do cliente não esta valendo agora.");
+      throw new IllegalArgumentException("A assinatura do cliente não está valendo agora.");
     }
     return saldo;
   }
@@ -735,6 +849,7 @@ public class ServicoComanda {
   private BigDecimal valorDaSessaoDoSaldo(UUID tenantId, Comanda comanda, ComandaItem item) {
     if (ComandaItem.COBERTURA_PACOTE.equals(item.getCoberturaTipo())) {
       ClientPackageBalance saldo = saldoDePacoteDoCliente(tenantId, comanda, item);
+      if (saldo.getValorSessao() != null) return saldo.getValorSessao();
       return clientPackagePurchaseRepository
           .findById(saldo.getPurchaseId())
           .map(this::valorDaSessaoDoPacote)
@@ -748,6 +863,29 @@ public class ServicoComanda {
           .orElse(BigDecimal.ZERO);
     }
     throw new IllegalArgumentException("Tipo de cobertura inválido.");
+  }
+
+  /**
+   * Valor de cada sessao, proporcional ao preco de tabela de cada servico (decisao do dono, 14/11):
+   * pacote de R$ 300 com 5 cortes (R$ 80) e 2 escovas (R$ 50) = corte R$ 48,00 e escova R$ 30,00, e
+   * nao R$ 42,86 para os dois. Sem preco de tabela em algum servico, volta a divisao igual (mapa vazio).
+   */
+  static java.util.Map<UUID, BigDecimal> valorDaSessaoProporcional(
+      BigDecimal pago, List<ServicePackageItem> itens, java.util.Map<UUID, BigDecimal> precoDeTabela) {
+    java.util.Map<UUID, BigDecimal> valores = new java.util.HashMap<>();
+    if (pago == null || itens.isEmpty()) return valores;
+    BigDecimal tabela = BigDecimal.ZERO;
+    for (ServicePackageItem i : itens) {
+      BigDecimal preco = precoDeTabela.get(i.getServiceId());
+      if (preco == null || preco.signum() <= 0) return valores;
+      tabela = tabela.add(preco.multiply(BigDecimal.valueOf(i.getSessoes())));
+    }
+    if (tabela.signum() <= 0) return valores;
+    for (ServicePackageItem i : itens) {
+      valores.put(i.getServiceId(),
+          pago.multiply(precoDeTabela.get(i.getServiceId())).divide(tabela, 2, RoundingMode.HALF_UP));
+    }
+    return valores;
   }
 
   /** O que o cliente pagou pelo pacote dividido pelo total de sessoes dele. */
@@ -807,7 +945,7 @@ public class ServicoComanda {
         throw new IllegalArgumentException(
             "O cliente já usou "
                 + usadas
-                + (usadas == 1 ? " sessão" : " sessoes")
+                + (usadas == 1 ? " sessão" : " sessões")
                 + " do pacote "
                 + compra.getPackageNome()
                 + ": o estorno devolveria o valor inteiro. Estorne antes os atendimentos"
@@ -892,21 +1030,20 @@ public class ServicoComanda {
     Map<String, Object> antesDoDesconto = dadosDoDesconto(comanda);
     List<ComandaItem> itens = comandaItemRepository.findByComandaIdOrderByCreatedAt(comanda.getId());
     BigDecimal subtotal = somarItens(itens);
-    BigDecimal descontoPercentual = NumericUtil.percentOf(subtotal, request.percentual.doubleValue());
+    // Vale-presente vendido nao tem desconto (seria vender credito por menos): a base e o resto da conta.
+    BigDecimal base = baseDescontavel(itens);
+    BigDecimal descontoPercentual = NumericUtil.percentOf(base, request.percentual.doubleValue());
     // FIN-007: o desconto percentual SOMA ao resgate de fidelidade (antes o sobrescrevia, e os pontos
     // ja debitados sumiam). Se os dois juntos passam do subtotal, o resgate e desfeito e os pontos
-    // voltam ao cliente, em vez de serem gastos num desconto que nao cabe.
-    if (NumericUtil.add(descontoPercentual, comanda.getValorResgateFidelidade()).compareTo(subtotal) > 0) {
+    // voltam ao cliente, em vez de serem gastos num desconto que nao cabe. O cupom (item 6) tambem soma.
+    BigDecimal fixos = NumericUtil.add(comanda.getValorResgateFidelidade(), comanda.getValorCupom());
+    if (NumericUtil.add(descontoPercentual, fixos).compareTo(base) > 0) {
       desfazerResgateDeFidelidade(tenantId, comanda, "desconto percentual nao deixa espaco para o resgate");
     }
-    comanda.setDesconto(
-        subtotal.min(NumericUtil.add(descontoPercentual, comanda.getValorResgateFidelidade())));
-    comanda.setDescontoMotivo(
-        comanda.getPontosFidelidadeResgatados() > 0
-            ? concatenarMotivo(
-                request.motivo.trim(),
-                "Resgate de " + comanda.getPontosFidelidadeResgatados() + " pontos de fidelidade")
-            : request.motivo.trim());
+    comanda.setDesconto(base.min(NumericUtil.add(
+        descontoPercentual, NumericUtil.add(comanda.getValorResgateFidelidade(), comanda.getValorCupom()))));
+    comanda.setDescontoMotivo(motivoComCupons(
+        motivoComResgate(request.motivo.trim(), comanda.getPontosFidelidadeResgatados()), codigosDosCupons(comanda)));
     comanda.setTotal(NumericUtil.maxZero(NumericUtil.subtract(subtotal, comanda.getDesconto())));
 
     auditar(tenantId, "POS_DISCOUNT_APPLY", comanda, antesDoDesconto, dadosDoDesconto(comanda));
@@ -982,9 +1119,16 @@ public class ServicoComanda {
     pagamento.setRegistradoPor(obterUsuarioId());
 
     switch (request.meio) {
+      case ComandaPagamento.MEIO_PIX, ComandaPagamento.MEIO_CARTAO_CREDITO, ComandaPagamento.MEIO_CARTAO_DEBITO,
+          ComandaPagamento.MEIO_LINK -> {
+        registrarPagamentoIntegrado(tenantId, comanda, pagamento, request);
+        return obter(id);
+      }
       case ComandaPagamento.MEIO_PIX_ASAAS -> registrarPagamentoPix(tenantId, comanda, pagamento);
       case ComandaPagamento.MEIO_CREDITO_SINAL ->
           registrarPagamentoCreditoSinal(tenantId, comanda, pagamento);
+      case ComandaPagamento.MEIO_VALE_PRESENTE ->
+          registrarPagamentoVale(tenantId, comanda, pagamento, request);
       default -> pagamento.setStatus(ComandaPagamento.STATUS_CONFIRMADO);
     }
     if (ComandaPagamento.STATUS_CONFIRMADO.equals(pagamento.getStatus())
@@ -1030,13 +1174,16 @@ public class ServicoComanda {
 
     BigDecimal confirmado =
         comandaPagamentoRepository.findByComandaIdOrderByCreatedAt(comanda.getId()).stream()
-            .filter(p -> ComandaPagamento.STATUS_CONFIRMADO.equals(p.getStatus()))
+            // Cobranca integrada esperando a operadora tambem ocupa o saldo: sem isto, dava para mandar
+            // a comanda inteira para a maquininha duas vezes.
+            .filter(p -> ComandaPagamento.STATUS_CONFIRMADO.equals(p.getStatus())
+                || (ComandaPagamento.STATUS_PENDENTE.equals(p.getStatus()) && p.getCobrancaId() != null))
             .map(ComandaPagamento::getValor)
             .reduce(BigDecimal.ZERO, NumericUtil::add);
     BigDecimal restante = NumericUtil.maxZero(NumericUtil.subtract(totalComGorjeta, confirmado));
 
     if (restante.signum() == 0) {
-      throw new IllegalArgumentException("Esta comanda já esta paga por inteiro: feche a comanda.");
+      throw new IllegalArgumentException("Esta comanda já está paga por inteiro: feche a comanda.");
     }
     if (!ComandaPagamento.MEIO_DINHEIRO.equals(request.meio)
         && request.valor.compareTo(restante) > 0) {
@@ -1044,6 +1191,106 @@ public class ServicoComanda {
           "O valor passa do que falta pagar ("
               + String.format(java.util.Locale.of("pt", "BR"), "R$ %,.2f", restante)
               + "). Só o pagamento em dinheiro tem troco.");
+    }
+  }
+
+  /**
+   * Pagamento pela operadora conectada (Pagamentos — Fase 1). O pagamento nasce PENDENTE e so vira
+   * CONFIRMADO quando a operadora avisa (ou a consulta de reserva confirma) — ver
+   * {@link #aoMudarACobranca}. A cobranca e criada com a chave do proprio pagamento: clique duplo nao
+   * cobra duas vezes.
+   */
+  private void registrarPagamentoIntegrado(
+      UUID tenantId, Comanda comanda, ComandaPagamento pagamento, ComandaDtos.RegistrarPagamentoRequest request) {
+    if (servicoDePagamentos == null) throw new IllegalStateException("Pagamentos integrados indisponíveis.");
+    String meio = pagamento.getMeio();
+    boolean cartao = ComandaPagamento.MEIO_CARTAO_CREDITO.equals(meio) || ComandaPagamento.MEIO_CARTAO_DEBITO.equals(meio);
+    int parcelas = request.parcelas == null ? 1 : request.parcelas;
+    if (parcelas < 1 || parcelas > 12 || (parcelas > 1 && !ComandaPagamento.MEIO_CARTAO_CREDITO.equals(meio))) {
+      throw new IllegalArgumentException("Parcelas só no crédito, de 1 a 12.");
+    }
+    br.com.phdigitalcode.azzo.agenda.pro.entity.TerminalDePagamento terminal = null;
+    if (cartao) {
+      UUID terminalId = parseUuidOrNull(request.terminalId);
+      if (terminalId == null) throw new IllegalArgumentException("Escolha a maquininha.");
+      terminal = terminaisDePagamento.findByIdAndTenantIdAndAtivoTrue(terminalId, tenantId)
+          .orElseThrow(() -> new IllegalArgumentException("Maquininha não encontrada."));
+    }
+
+    pagamento.setStatus(ComandaPagamento.STATUS_PENDENTE);
+    comandaPagamentoRepository.save(pagamento);
+    comandaPagamentoRepository.flush();
+
+    br.com.phdigitalcode.azzo.agenda.pro.integration.pagamentos.ProvedorDePagamento.Pagador pagador = null;
+    if (comanda.getClientId() != null) {
+      Cliente cliente = clienteRepository.findByIdAndTenantId(comanda.getClientId(), tenantId).orElse(null);
+      if (cliente != null && cliente.getAnonymizedAt() == null) {
+        pagador = new br.com.phdigitalcode.azzo.agenda.pro.integration.pagamentos.ProvedorDePagamento.Pagador(
+            cliente.getId().toString(), cliente.getName(), cliente.getEmail(), cliente.getPhone(), cliente.getCpfCnpj());
+      }
+    }
+    String meioDaCobranca = switch (meio) {
+      case ComandaPagamento.MEIO_CARTAO_CREDITO -> "CREDITO";
+      case ComandaPagamento.MEIO_CARTAO_DEBITO -> "DEBITO";
+      default -> meio;
+    };
+    var cobranca = servicoDePagamentos.criar(tenantId, new ServicoDePagamentos.NovaCobranca(
+        "COMANDA", pagamento.getId(), meioDaCobranca, pagamento.getValor(), parcelas, "Comanda",
+        pagador, terminal == null ? null : terminal.getContaId(), terminal == null ? null : terminal.getId(),
+        terminal == null ? null : terminal.getSerial(),
+        Instant.now().plus(java.time.Duration.ofMinutes(ComandaPagamento.MEIO_LINK.equals(meio) ? 24 * 60 : 30)),
+        "comanda-pagamento:" + pagamento.getId()));
+    pagamento.setCobrancaId(UUID.fromString(cobranca.id));
+    pagamento.setPixPayload(cobranca.pixCopiaECola);
+    comandaPagamentoRepository.save(pagamento);
+
+    Map<String, Object> dados = new HashMap<>();
+    dados.put("meio", meio);
+    dados.put("valor", pagamento.getValor());
+    dados.put("status", pagamento.getStatus());
+    dados.put("cobrancaId", cobranca.id);
+    dados.put("provedor", cobranca.provedor);
+    auditar(tenantId, "POS_PAYMENT_ADD", comanda, null, dados);
+  }
+
+  /**
+   * A cobranca mudou na operadora: o pagamento da comanda acompanha. PAGA confirma; recusada,
+   * cancelada ou expirada vira RECUSADO (nao entra no caixa); estornada vira ESTORNADO.
+   * Tambem roda na leitura da comanda ({@link #sincronizarPagamentosIntegrados}), para o caso de o
+   * aviso chegar antes de a transacao que criou o pagamento terminar.
+   */
+  @org.springframework.context.event.EventListener
+  @Transactional
+  public void aoMudarACobranca(ServicoDePagamentos.CobrancaMudouDeStatus evento) {
+    if (!"COMANDA".equals(evento.origemTipo()) || evento.origemId() == null) return;
+    comandaPagamentoRepository.findById(evento.origemId())
+        .filter(p -> evento.tenantId().equals(p.getTenantId()))
+        .ifPresent(p -> aplicarStatusDaCobranca(p, evento.statusNovo()));
+  }
+
+  private boolean aplicarStatusDaCobranca(ComandaPagamento pagamento, String statusDaCobranca) {
+    String novo = switch (statusDaCobranca) {
+      case "PAGA" -> ComandaPagamento.STATUS_CONFIRMADO;
+      case "RECUSADA", "CANCELADA", "EXPIRADA" -> ComandaPagamento.STATUS_RECUSADO;
+      case "ESTORNADA" -> ComandaPagamento.STATUS_ESTORNADO;
+      default -> null;
+    };
+    if (novo == null || novo.equals(pagamento.getStatus())) return false;
+    // Ja confirmado so sai por estorno; recusado nao volta.
+    if (ComandaPagamento.STATUS_CONFIRMADO.equals(pagamento.getStatus()) && !ComandaPagamento.STATUS_ESTORNADO.equals(novo)) return false;
+    if (ComandaPagamento.STATUS_RECUSADO.equals(pagamento.getStatus())) return false;
+    pagamento.setStatus(novo);
+    if (ComandaPagamento.STATUS_CONFIRMADO.equals(novo) && pagamento.getPaidAt() == null) pagamento.setPaidAt(Instant.now());
+    comandaPagamentoRepository.save(pagamento);
+    return true;
+  }
+
+  /** Confere na tabela de cobrancas os pagamentos integrados ainda pendentes. */
+  private void sincronizarPagamentosIntegrados(List<ComandaPagamento> pagamentos) {
+    if (cobrancaRepository == null) return;
+    for (ComandaPagamento p : pagamentos) {
+      if (p.getCobrancaId() == null || !ComandaPagamento.STATUS_PENDENTE.equals(p.getStatus())) continue;
+      cobrancaRepository.findById(p.getCobrancaId()).ifPresent(c -> aplicarStatusDaCobranca(p, c.getStatus()));
     }
   }
 
@@ -1080,6 +1327,22 @@ public class ServicoComanda {
     }
     deposit.setUsedInComandaId(comanda.getId());
     pagamento.setAppointmentDepositId(deposit.getId());
+    pagamento.setStatus(ComandaPagamento.STATUS_CONFIRMADO);
+  }
+
+  /**
+   * Pagamento com vale-presente (item 6): o saldo e debitado AGORA, numa instrucao condicional (dois pagamentos
+   * ao mesmo tempo nao gastam o mesmo saldo), e o pagamento nasce confirmado. A receita disto ja entrou na venda
+   * do vale: no fechamento, esta parte nao gera receita de novo.
+   */
+  private void registrarPagamentoVale(
+      UUID tenantId, Comanda comanda, ComandaPagamento pagamento, ComandaDtos.RegistrarPagamentoRequest request) {
+    if (servicoDeVales == null) throw new IllegalStateException("Vale-presente indisponível.");
+    if (request.codigoVale == null || request.codigoVale.isBlank()) {
+      throw new IllegalArgumentException("Informe o código do vale-presente.");
+    }
+    var vale = servicoDeVales.debitar(tenantId, request.codigoVale, pagamento.getValor(), comanda.getId());
+    pagamento.setValePresenteId(vale.getId());
     pagamento.setStatus(ComandaPagamento.STATUS_CONFIRMADO);
   }
 
@@ -1143,7 +1406,7 @@ public class ServicoComanda {
     BigDecimal totalComGorjeta = NumericUtil.add(comanda.getTotal(), comanda.getGorjeta());
     if (totalConfirmado.compareTo(totalComGorjeta) < 0) {
       throw new IllegalArgumentException(
-          "Comanda não esta quitada: pago "
+          "Comanda não está quitada: pago "
               + totalConfirmado
               + ", total com gorjeta "
               + totalComGorjeta
@@ -1172,8 +1435,7 @@ public class ServicoComanda {
     UUID categoriaVendasId = resolveTransactionCategoryId(tenantId, "VENDAS");
     MetodoPagamento metodoPagamento = resolveMetodoPagamentoRepresentativo(pagamentos);
     List<AlocacaoPagamento> carteiraPagamentos = construirCarteiraPagamentos(pagamentos);
-    List<BigDecimal> valoresLiquidosPorItem =
-        ratearDesconto(itens, comanda.getSubtotal(), comanda.getTotal());
+    List<BigDecimal> valoresLiquidosPorItem = ratearDescontoComCupom(comanda, itens);
 
     // A sessao so e descontada do pacote/assinatura AGORA: conferir de novo, porque outra comanda
     // pode ter usado o saldo entre a escolha e o fechamento.
@@ -1201,24 +1463,30 @@ public class ServicoComanda {
       // fatia) — uma comanda paga em mais de um meio (ex.: metade dinheiro, metade cartao) nao
       // pode ter a venda inteira atribuida a um unico meio, senao o caixa concilia errado por meio
       // de pagamento. A primeira fatia serve apenas como chave de dedup de comissao.
-      Transacao transacao =
+      List<Transacao> transacoesDoItem =
           criarTransacoesVendaRateadas(
-                  tenantId, comanda, item, valorLiquido, categoriaVendasId, carteiraPagamentos)
-              .get(0);
+              tenantId, comanda, item, valorLiquido, categoriaVendasId, carteiraPagamentos);
+      // Item pago so com vale-presente nao gera transacao (a receita entrou na venda do vale).
+      Transacao transacao = transacoesDoItem.isEmpty() ? null : transacoesDoItem.get(0);
 
       if (ComandaItem.TIPO_PRODUTO.equals(item.getTipo())) {
         baixarEstoqueItem(item);
         if (item.getProfessionalId() != null) {
+          // A chave da comissao de produto e a transacao da venda; paga so com vale, e o proprio item
+          // (o estorno reverte pelas duas chaves).
           commissionService.registerProductCommissionIfApplicable(
               tenantId,
-              transacao.getId(),
+              transacao != null ? transacao.getId() : item.getId(),
               item.getProfessionalId(),
               item.getReferenciaId(),
               null,
               NumericUtil.toCents(valorLiquido),
               Instant.now(),
-              transacao.getDescription());
+              transacao != null ? transacao.getDescription() : "Venda comanda - " + item.getDescricao());
         }
+      } else if (ComandaItem.TIPO_VALE.equals(item.getTipo())) {
+        // O vale nasce agora, com o valor de face do item (o desconto nao se aplica a vale).
+        servicoDeVales.criarDaVenda(tenantId, comanda.getId(), comanda.getClientId(), item, item.getTotal());
       } else if (ComandaItem.TIPO_PACOTE.equals(item.getTipo())) {
         criarSaldoDePacoteVendido(tenantId, comanda, item, valorLiquido);
       } else if (ComandaItem.TIPO_SERVICO.equals(item.getTipo())) {
@@ -1228,6 +1496,7 @@ public class ServicoComanda {
     }
 
     registrarGorjetaSeAplicavel(tenantId, comanda, metodoPagamento);
+    registrarTaxasDaOperadora(tenantId, comanda, pagamentos);
     comanda.setPontosFidelidadeCreditados(
         creditarPontosFidelidadeSeAplicavel(tenantId, comanda, itens, valoresLiquidosPorItem));
 
@@ -1275,11 +1544,8 @@ public class ServicoComanda {
             .intValue();
     if (pontos <= 0) return 0;
 
-    Cliente cliente =
-        clienteRepository.findByIdAndTenantId(comanda.getClientId(), tenantId).orElse(null);
-    if (cliente != null) {
-      cliente.setLoyaltyPoints(cliente.getLoyaltyPoints() + pontos);
-    }
+    if (clienteRepository.findByIdAndTenantId(comanda.getClientId(), tenantId).isEmpty()) return 0;
+    servicoDePontos.creditarVenda(tenantId, comanda.getClientId(), comanda.getId(), pontos, config.getValidadeDias());
     return pontos;
   }
 
@@ -1299,9 +1565,23 @@ public class ServicoComanda {
     clientPackagePurchaseRepository.save(compra);
 
     int multiplicador = item.getQuantidade().setScale(0, RoundingMode.CEILING).intValue();
-    for (ServicePackageItem pacoteItem :
-        servicePackageItemRepository.findByPackageId(item.getReferenciaId())) {
+    List<ServicePackageItem> itensDoPacote = servicePackageItemRepository.findByPackageId(item.getReferenciaId());
+    java.util.Map<UUID, BigDecimal> precoDeTabela = new java.util.HashMap<>();
+    for (ServicePackageItem pacoteItem : itensDoPacote) {
+      servicoRepository.findById(pacoteItem.getServiceId())
+          .ifPresent(s -> precoDeTabela.put(pacoteItem.getServiceId(), s.getPrice()));
+    }
+    java.util.Map<UUID, BigDecimal> valorPorSessao =
+        valorDaSessaoProporcional(valorLiquido, itensDoPacote, precoDeTabela);
+    java.time.Instant vencimento = servicePackageRepository.findByIdAndTenantId(item.getReferenciaId(), tenantId)
+        .map(ServicePackage::getValidadeDias)
+        .filter(dias -> dias != null && dias > 0)
+        .map(dias -> java.time.Instant.now().plus(dias, java.time.temporal.ChronoUnit.DAYS))
+        .orElse(null);
+    for (ServicePackageItem pacoteItem : itensDoPacote) {
       ClientPackageBalance saldo = new ClientPackageBalance();
+      saldo.setValorSessao(valorPorSessao.get(pacoteItem.getServiceId()));
+      saldo.setExpiraEm(vencimento);
       saldo.setTenantId(tenantId);
       saldo.setPurchaseId(compra.getId());
       saldo.setServiceId(pacoteItem.getServiceId());
@@ -1322,16 +1602,102 @@ public class ServicoComanda {
       itens.forEach(item -> valores.add(BigDecimal.ZERO));
       return valores;
     }
-    BigDecimal fator = total.divide(subtotal, 6, RoundingMode.HALF_UP);
+    // Vale-presente vendido fica com o valor cheio (item 6): o desconto se divide so pelo resto da conta.
+    BigDecimal vales = BigDecimal.ZERO;
+    int ultimoDescontavel = -1;
+    for (int i = 0; i < itens.size(); i++) {
+      if (ComandaItem.TIPO_VALE.equals(itens.get(i).getTipo())) vales = NumericUtil.add(vales, itens.get(i).getTotal());
+      else ultimoDescontavel = i;
+    }
+    BigDecimal base = NumericUtil.subtract(subtotal, vales);
+    BigDecimal totalDescontavel = NumericUtil.maxZero(NumericUtil.subtract(total, vales));
+    BigDecimal fator = NumericUtil.isZeroOrNegative(base)
+        ? BigDecimal.ZERO : totalDescontavel.divide(base, 6, RoundingMode.HALF_UP);
     BigDecimal acumulado = BigDecimal.ZERO;
     for (int i = 0; i < itens.size(); i++) {
-      if (i == itens.size() - 1) {
-        valores.add(NumericUtil.maxZero(NumericUtil.subtract(total, acumulado)));
-        break;
+      ComandaItem item = itens.get(i);
+      if (ComandaItem.TIPO_VALE.equals(item.getTipo())) {
+        valores.add(item.getTotal());
+        continue;
       }
-      BigDecimal valor = itens.get(i).getTotal().multiply(fator).setScale(2, RoundingMode.HALF_UP);
+      if (i == ultimoDescontavel) {
+        valores.add(NumericUtil.maxZero(NumericUtil.subtract(totalDescontavel, acumulado)));
+        continue;
+      }
+      BigDecimal valor = item.getTotal().multiply(fator).setScale(2, RoundingMode.HALF_UP);
       valores.add(valor);
       acumulado = NumericUtil.add(acumulado, valor);
+    }
+    return valores;
+  }
+
+  /**
+   * O rateio do fechamento. Sem cupom de lista, e o {@link #ratearDesconto} de sempre. Com cupom de lista (V182), o
+   * valor do cupom sai so dos servicos dela (a comissao de quem fez outro servico nao cai por causa do cupom), e o
+   * resto do desconto (manual e pontos) se divide por todos, como antes.
+   */
+  List<BigDecimal> ratearDescontoComCupom(Comanda comanda, List<ComandaItem> itens) {
+    List<CupomDeLista> deLista = new ArrayList<>();
+    if (comanda.getCupomId() != null) {
+      for (CupomNaComanda c : cuponsDaComanda(comanda)) {
+        if (c.doAgendamento() || c.servicos().isEmpty()) continue;
+        BigDecimal valor = c.uso().getValorDesconto() == null ? BigDecimal.ZERO : c.uso().getValorDesconto();
+        if (valor.signum() > 0) deLista.add(new CupomDeLista(valor, c.servicos()));
+      }
+    }
+    if (deLista.isEmpty()) return ratearDesconto(itens, comanda.getSubtotal(), comanda.getTotal());
+    return ratearComCuponsDeLista(itens, comanda.getSubtotal(), comanda.getTotal(), deLista);
+  }
+
+  /** Um cupom de lista no rateio: o valor dele e os servicos de onde ele sai. */
+  record CupomDeLista(BigDecimal valor, java.util.Set<UUID> servicos) {}
+
+  /** Rateio com um cupom de lista (ver {@link #ratearComCuponsDeLista}). */
+  static List<BigDecimal> ratearComCupomDeLista(List<ComandaItem> itens, BigDecimal subtotal, BigDecimal total,
+      BigDecimal valorCupom, java.util.Set<UUID> servicosDoCupom) {
+    return ratearComCuponsDeLista(itens, subtotal, total, List.of(new CupomDeLista(valorCupom, servicosDoCupom)));
+  }
+
+  /**
+   * Rateio com cupons de lista: primeiro cada cupom so nos servicos da lista dele (na ordem do calculo), depois o
+   * resto do desconto (cupons da conta toda, manual e pontos) sobre todos.
+   */
+  static List<BigDecimal> ratearComCuponsDeLista(List<ComandaItem> itens, BigDecimal subtotal, BigDecimal total,
+      List<CupomDeLista> cupons) {
+    // 1) Cada cupom sai dos servicos da lista dele, na proporcao do que resta em cada um.
+    List<BigDecimal> depoisDoCupom = new ArrayList<>();
+    for (ComandaItem item : itens) depoisDoCupom.add(item.getTotal() == null ? BigDecimal.ZERO : item.getTotal());
+    BigDecimal tirado = BigDecimal.ZERO;
+    for (CupomDeLista c : cupons) {
+      tirado = NumericUtil.add(tirado, tirarDosServicos(itens, depoisDoCupom, c.servicos(), c.valor()));
+    }
+    // 2) O resto do desconto (manual e pontos) sobre o que sobrou, como o rateio de sempre (o vale fica cheio).
+    BigDecimal restoDoDesconto = NumericUtil.maxZero(
+        NumericUtil.subtract(NumericUtil.subtract(subtotal, total), tirado));
+    BigDecimal baseDoResto = BigDecimal.ZERO;
+    int ultimoDoResto = -1;
+    for (int i = 0; i < itens.size(); i++) {
+      if (ComandaItem.TIPO_VALE.equals(itens.get(i).getTipo())) continue;
+      if (depoisDoCupom.get(i).signum() > 0) {
+        baseDoResto = NumericUtil.add(baseDoResto, depoisDoCupom.get(i));
+        ultimoDoResto = i;
+      }
+    }
+    List<BigDecimal> valores = new ArrayList<>();
+    BigDecimal distribuido = BigDecimal.ZERO;
+    for (int i = 0; i < itens.size(); i++) {
+      BigDecimal valor = depoisDoCupom.get(i);
+      if (ComandaItem.TIPO_VALE.equals(itens.get(i).getTipo()) || restoDoDesconto.signum() <= 0
+          || baseDoResto.signum() <= 0 || valor.signum() <= 0) {
+        valores.add(valor);
+        continue;
+      }
+      BigDecimal parte = i == ultimoDoResto
+          ? NumericUtil.maxZero(NumericUtil.subtract(restoDoDesconto, distribuido))
+          : valor.multiply(restoDoDesconto).divide(baseDoResto, 2, RoundingMode.HALF_UP);
+      parte = parte.min(valor);
+      distribuido = NumericUtil.add(distribuido, parte);
+      valores.add(NumericUtil.subtract(valor, parte));
     }
     return valores;
   }
@@ -1342,11 +1708,14 @@ public class ServicoComanda {
    */
   private static final class AlocacaoPagamento {
     final MetodoPagamento metodo;
+    /** Pago com vale-presente: a fatia e consumida, mas nao gera receita nem entra no caixa (item 6). */
+    final boolean semReceita;
     BigDecimal restante;
 
-    AlocacaoPagamento(MetodoPagamento metodo, BigDecimal restante) {
+    AlocacaoPagamento(MetodoPagamento metodo, BigDecimal restante, boolean semReceita) {
       this.metodo = metodo;
       this.restante = restante;
+      this.semReceita = semReceita;
     }
   }
 
@@ -1356,7 +1725,8 @@ public class ServicoComanda {
       if (!ComandaPagamento.STATUS_CONFIRMADO.equals(pagamento.getStatus())) continue;
       if (NumericUtil.isZeroOrNegative(pagamento.getValor())) continue;
       carteira.add(
-          new AlocacaoPagamento(mapearMetodoPagamento(pagamento.getMeio()), pagamento.getValor()));
+          new AlocacaoPagamento(mapearMetodoPagamento(pagamento.getMeio()), pagamento.getValor(),
+              ComandaPagamento.MEIO_VALE_PRESENTE.equals(pagamento.getMeio())));
     }
     return carteira;
   }
@@ -1367,6 +1737,9 @@ public class ServicoComanda {
       case ComandaPagamento.MEIO_PIX_ASAAS -> MetodoPagamento.PIX;
       case ComandaPagamento.MEIO_CARTAO_CREDITO_EXTERNO -> MetodoPagamento.CREDIT_CARD;
       case ComandaPagamento.MEIO_CARTAO_DEBITO_EXTERNO -> MetodoPagamento.DEBIT_CARD;
+      case ComandaPagamento.MEIO_PIX -> MetodoPagamento.PIX;
+      case ComandaPagamento.MEIO_CARTAO_CREDITO -> MetodoPagamento.CREDIT_CARD;
+      case ComandaPagamento.MEIO_CARTAO_DEBITO -> MetodoPagamento.DEBIT_CARD;
       default -> MetodoPagamento.OTHER;
     };
   }
@@ -1394,16 +1767,19 @@ public class ServicoComanda {
       if (NumericUtil.isZeroOrNegative(alocacao.restante)) continue;
 
       BigDecimal parcela = alocacao.restante.min(restanteItem);
-      criadas.add(criarTransacaoVenda(tenantId, comanda, item, parcela, categoriaId, alocacao.metodo));
+      if (!alocacao.semReceita) {
+        criadas.add(criarTransacaoVenda(tenantId, comanda, item, parcela, categoriaId, alocacao.metodo));
+      }
       alocacao.restante = NumericUtil.subtract(alocacao.restante, parcela);
       restanteItem = NumericUtil.subtract(restanteItem, parcela);
     }
-    if (criadas.isEmpty()) {
+    // Pago inteiro com vale: nenhuma transacao, de proposito.
+    if (criadas.isEmpty() && restanteItem.signum() > 0) {
       // Guarda de seguranca: nao deveria acontecer (fechar ja exige quitacao exata antes de chegar
       // aqui), mas evita perder a receita do item se a carteira estiver vazia.
       criadas.add(
           criarTransacaoVenda(
-              tenantId, comanda, item, valorItem, categoriaId, MetodoPagamento.OTHER));
+              tenantId, comanda, item, restanteItem, categoriaId, MetodoPagamento.OTHER));
     }
     return criadas;
   }
@@ -1430,6 +1806,56 @@ public class ServicoComanda {
     transacao.setDate(Instant.now());
     transacaoRepository.save(transacao);
     return transacao;
+  }
+
+  /**
+   * Pagamentos integrados (Fase 5): a taxa da operadora vira despesa ao fechar a comanda — real
+   * quando a operadora informou, estimada pela tabela da conta quando nao. Sem taxa conhecida,
+   * nada e lancado (o Azzo nao inventa taxa). O estorno da comanda desfaz esta despesa junto com
+   * as outras transacoes dela.
+   */
+  private void registrarTaxasDaOperadora(UUID tenantId, Comanda comanda, List<ComandaPagamento> pagamentos) {
+    if (cobrancaRepository == null) return;
+    UUID categoriaId = null;
+    for (ComandaPagamento p : pagamentos) {
+      if (p.getCobrancaId() == null || !ComandaPagamento.STATUS_CONFIRMADO.equals(p.getStatus())) continue;
+      var cobranca = cobrancaRepository.findById(p.getCobrancaId()).orElse(null);
+      if (cobranca == null || cobranca.getTaxa() == null || NumericUtil.isZeroOrNegative(cobranca.getTaxa())) continue;
+      if (categoriaId == null) categoriaId = resolveTransactionCategoryId(tenantId, "TAXAS DE PAGAMENTO");
+      Transacao taxa = new Transacao();
+      taxa.setTenantId(tenantId);
+      taxa.setComandaId(comanda.getId());
+      taxa.setAppointmentId(comanda.getAppointmentId());
+      taxa.setType(TipoTransacao.EXPENSE);
+      taxa.setCategoryId(categoriaId);
+      taxa.setDescription("Taxa da operadora - " + nomeDaOperadora(cobranca.getProvedor()) + " ("
+          + rotuloDoMeioIntegrado(cobranca.getMeio(), cobranca.getParcelas()) + ")");
+      taxa.setAmount(cobranca.getTaxa());
+      taxa.setPaymentMethod(mapearMetodoPagamento(p.getMeio()));
+      taxa.setDate(Instant.now());
+      transacaoRepository.save(taxa);
+    }
+  }
+
+  private static String nomeDaOperadora(String provedor) {
+    if (provedor == null) return "operadora";
+    return switch (provedor) {
+      case "MERCADO_PAGO" -> "Mercado Pago";
+      case "PAGARME" -> "Stone / Pagar.me";
+      case "PAGBANK" -> "PagBank";
+      case "CIELO" -> "Cielo";
+      case "REDE" -> "Rede";
+      case "GETNET" -> "Getnet";
+      case "ASAAS" -> "Asaas";
+      default -> provedor;
+    };
+  }
+
+  private static String rotuloDoMeioIntegrado(String meio, int parcelas) {
+    if ("CREDITO".equals(meio)) return parcelas > 1 ? "crédito " + parcelas + "x" : "crédito";
+    if ("DEBITO".equals(meio)) return "débito";
+    if ("LINK".equals(meio)) return "link";
+    return "Pix";
   }
 
   /**
@@ -1496,6 +1922,7 @@ public class ServicoComanda {
   private MetodoPagamento resolveMetodoPagamentoRepresentativo(List<ComandaPagamento> pagamentos) {
     return pagamentos.stream()
         .filter(p -> ComandaPagamento.STATUS_CONFIRMADO.equals(p.getStatus()))
+        .filter(p -> !ComandaPagamento.MEIO_VALE_PRESENTE.equals(p.getMeio()))
         .findFirst()
         .map(p -> mapearMetodoPagamento(p.getMeio()))
         .orElse(MetodoPagamento.OTHER);
@@ -1513,6 +1940,9 @@ public class ServicoComanda {
     }
     exigirComandaDoProfissional(tenantId, comanda);
     exigirAberta(comanda);
+    // Antes de mexer em cobranca: escolher "vencimento novo" sem permissao e recusado aqui.
+    ServicoDePontos.VencimentoDaDevolucao vencimentoDosPontos = comanda.getPontosFidelidadeResgatados() > 0
+        ? vencimentoEscolhido(request.vencimentoDosPontos) : ServicoDePontos.VencimentoDaDevolucao.ORIGINAL;
 
     List<ComandaPagamento> pagamentos =
         comandaPagamentoRepository.findByComandaIdOrderByCreatedAt(comanda.getId());
@@ -1523,6 +1953,8 @@ public class ServicoComanda {
                 p ->
                     ComandaPagamento.STATUS_CONFIRMADO.equals(p.getStatus())
                         && !ComandaPagamento.MEIO_CREDITO_SINAL.equals(p.getMeio())
+                        // O vale-presente volta ao proprio vale, logo abaixo: nao e dinheiro a devolver nem a reter.
+                        && !ComandaPagamento.MEIO_VALE_PRESENTE.equals(p.getMeio())
                         && !NumericUtil.isZeroOrNegative(p.getValor()))
             .toList();
     if (!recebidos.isEmpty() && request.estornarPagamento == null) {
@@ -1530,6 +1962,9 @@ public class ServicoComanda {
     }
     if (!recebidos.isEmpty()) {
       if (request.estornarPagamento) {
+        // O que entrou pela operadora volta pela operadora; o resto (dinheiro, maquininha avulsa)
+        // o caixa devolve na mao, como antes.
+        estornarNaOperadora(recebidos);
         recebidos.forEach(p -> p.setStatus(ComandaPagamento.STATUS_ESTORNADO));
       } else {
         travaFinanceira.exigirDiaAberto(
@@ -1544,6 +1979,9 @@ public class ServicoComanda {
           && pagamento.getAsaasPaymentId() != null) {
         cancelarCobrancaPixMelhorEsforco(tenantId, pagamento);
       }
+      if (pagamento.getCobrancaId() != null && ComandaPagamento.STATUS_PENDENTE.equals(pagamento.getStatus())) {
+        cancelarCobrancaIntegradaMelhorEsforco(pagamento);
+      }
       if (ComandaPagamento.MEIO_CREDITO_SINAL.equals(pagamento.getMeio())
           && pagamento.getAppointmentDepositId() != null) {
         appointmentDepositRepository
@@ -1552,8 +1990,10 @@ public class ServicoComanda {
             .ifPresent(deposit -> deposit.setUsedInComandaId(null));
       }
     }
+    devolverPagamentosComVale(tenantId, comanda, pagamentos, "Cancelamento da comanda");
+    if (servicoDeCupons != null) servicoDeCupons.liberarDaComanda(tenantId, comanda.getId());
 
-    devolverPontosResgatados(tenantId, comanda, "cancelamento da comanda");
+    devolverPontosResgatados(tenantId, comanda, "cancelamento da comanda", vencimentoDosPontos);
 
     comanda.setStatus(Comanda.STATUS_CANCELADA);
     comanda.setCancelMotivo(request.motivo.trim());
@@ -1566,6 +2006,30 @@ public class ServicoComanda {
         comanda,
         comandaItemRepository.findByComandaIdOrderByCreatedAt(comanda.getId()),
         pagamentos);
+  }
+
+  /**
+   * Devolve na operadora os pagamentos integrados confirmados. Se a operadora recusar, nada muda
+   * aqui (a excecao desfaz a transacao): estornar a venda e manter o dinheiro com o salao nao pode
+   * acontecer em silencio.
+   */
+  private void estornarNaOperadora(List<ComandaPagamento> pagamentos) {
+    for (ComandaPagamento p : pagamentos) {
+      if (p.getCobrancaId() == null || !ComandaPagamento.STATUS_CONFIRMADO.equals(p.getStatus())) continue;
+      if (servicoDePagamentos == null) throw new IllegalStateException("Pagamentos integrados indisponíveis.");
+      servicoDePagamentos.estornar(p.getCobrancaId(), null);
+    }
+  }
+
+  /** Cobranca integrada que ainda esperava a operadora: cancela la (se ja passou, a consulta acerta). */
+  private void cancelarCobrancaIntegradaMelhorEsforco(ComandaPagamento pagamento) {
+    try {
+      if (servicoDePagamentos != null) servicoDePagamentos.cancelar(pagamento.getCobrancaId());
+    } catch (RuntimeException e) {
+      org.slf4j.LoggerFactory.getLogger(ServicoComanda.class)
+          .warn("pos_cancelar_cobranca_integrada_falhou pagamento_id={}", pagamento.getId(), e);
+    }
+    pagamento.setStatus(ComandaPagamento.STATUS_RECUSADO);
   }
 
   /**
@@ -1628,6 +2092,31 @@ public class ServicoComanda {
         comanda.getId().toString(), Map.of("motivo", request.motivo == null ? "" : request.motivo));
     String motivo = request.motivo.trim();
 
+    // Pontos que esta venda gerou e a cliente ja usou (relatorio de 14/11, Alto 4): o dono decide.
+    // Conferido ANTES da operadora, porque o estorno na operadora nao volta atras.
+    boolean aceitarSaldoNegativo = Boolean.TRUE.equals(request.aceitarSaldoNegativo);
+    ServicoDePontos.VencimentoDaDevolucao vencimentoDosPontos = comanda.getPontosFidelidadeResgatados() > 0
+        ? vencimentoEscolhido(request.vencimentoDosPontos) : ServicoDePontos.VencimentoDaDevolucao.ORIGINAL;
+    if (comanda.getPontosFidelidadeCreditados() > 0 && comanda.getClientId() != null) {
+      int usados = servicoDePontos.pontosJaUsadosDaVenda(
+          tenantId, comanda.getClientId(), comanda.getId(), comanda.getPontosFidelidadeCreditados());
+      if (usados > 0 && !aceitarSaldoNegativo) {
+        throw new ApiClientErrorException("A cliente já usou " + usados + " dos " + comanda.getPontosFidelidadeCreditados()
+            + " pontos que esta venda gerou. Para estornar mesmo assim, confirme: o saldo dela fica negativo em "
+            + usados + " pontos, que saem dos próximos pontos que ela ganhar.", 409);
+      }
+    }
+
+    // Vale-presente vendido nesta comanda e ja usado: a venda nao volta (item 6). Conferido ANTES da operadora.
+    if (servicoDeVales != null) servicoDeVales.cancelarDaVenda(tenantId, comanda.getId(), motivo);
+
+    // Primeiro a operadora: se ela recusar o estorno, nada do financeiro e mexido.
+    List<ComandaPagamento> pagamentosDaComanda = comandaPagamentoRepository.findByComandaIdOrderByCreatedAt(comanda.getId());
+    estornarNaOperadora(pagamentosDaComanda);
+    pagamentosDaComanda.stream()
+        .filter(p -> p.getCobrancaId() != null && ComandaPagamento.STATUS_CONFIRMADO.equals(p.getStatus()))
+        .forEach(p -> p.setStatus(ComandaPagamento.STATUS_ESTORNADO));
+
     List<ComandaItem> itens = comandaItemRepository.findByComandaIdOrderByCreatedAt(comanda.getId());
     List<Transacao> transacoesAtivas =
         transacaoRepository.listarAtivasPorComanda(tenantId, comanda.getId());
@@ -1646,6 +2135,8 @@ public class ServicoComanda {
     for (ComandaItem item : itens) {
       if (ComandaItem.TIPO_PRODUTO.equals(item.getTipo())) {
         devolverEstoqueProduto(item, motivo);
+        // Produto pago so com vale-presente: a comissao foi registrada com o proprio item como chave.
+        commissionService.reverseEntryForOrigin(tenantId, "PRODUCT", item.getId(), motivo);
       } else if (ComandaItem.TIPO_SERVICO.equals(item.getTipo())) {
         if (item.getCoberturaTipo() != null) devolverCobertura(item);
         // Comissao de SERVICO usa o proprio item da comanda como chave de origem (ver fechar()).
@@ -1667,20 +2158,19 @@ public class ServicoComanda {
             .ifPresent(deposito -> deposito.setUsedInComandaId(null));
       }
     }
+    devolverPagamentosComVale(
+        tenantId, comanda, comandaPagamentoRepository.findByComandaIdOrderByCreatedAt(comanda.getId()),
+        "Estorno da comanda: " + motivo);
+    if (servicoDeCupons != null) servicoDeCupons.liberarDaComanda(tenantId, comanda.getId());
 
     if (comanda.getPontosFidelidadeCreditados() > 0 && comanda.getClientId() != null) {
-      clienteRepository
-          .findByIdAndTenantId(comanda.getClientId(), tenantId)
-          .ifPresent(
-              cliente ->
-                  cliente.setLoyaltyPoints(
-                      Math.max(
-                          0,
-                          cliente.getLoyaltyPoints() - comanda.getPontosFidelidadeCreditados())));
+      servicoDePontos.estornarCreditoDaVenda(tenantId, comanda.getClientId(), comanda.getId(),
+          comanda.getPontosFidelidadeCreditados(),
+          aceitarSaldoNegativo ? ServicoDePontos.ModoDeEstorno.SALDO_NEGATIVO : ServicoDePontos.ModoDeEstorno.ATE_ZERO);
     }
 
     // FIN-007: o estorno revertia so os pontos CREDITADOS pela venda; os RESGATADOS nela se perdiam.
-    devolverPontosResgatados(tenantId, comanda, "estorno da comanda");
+    devolverPontosResgatados(tenantId, comanda, "estorno da comanda", vencimentoDosPontos);
 
     List<ClientPackagePurchase> comprasPacote =
         clientPackagePurchaseRepository.findByTenantIdAndComandaId(tenantId, comanda.getId());
@@ -1747,47 +2237,120 @@ public class ServicoComanda {
     TenantLoyaltySettings config =
         tenantLoyaltySettingsRepository.findByTenantId(tenantId).orElse(null);
     if (config == null || !config.isAtivo()) {
-      throw new IllegalArgumentException("Programa de fidelidade não esta ativo.");
+      throw new IllegalArgumentException("Programa de fidelidade não está ativo.");
     }
-    Cliente cliente =
-        clienteRepository
-            .findByIdAndTenantId(comanda.getClientId(), tenantId)
-            .orElseThrow(() -> new ApiClientErrorException("Cliente não encontrado.", 404));
-    if (cliente.getLoyaltyPoints() < request.pontos) {
-      throw new IllegalArgumentException(
-          "Cliente não possui pontos suficientes (saldo: " + cliente.getLoyaltyPoints() + ").");
+    clienteRepository
+        .findByIdAndTenantId(comanda.getClientId(), tenantId)
+        .orElseThrow(() -> new ApiClientErrorException("Cliente não encontrado.", 404));
+    int pontos = pontosInteiros(request.pontos);
+    // Conferencia antecipada so para a mensagem certa; quem garante o saldo e o debito condicional abaixo.
+    int saldo = servicoDePontos.saldo(tenantId, comanda.getClientId());
+    if (saldo < pontos) {
+      throw new IllegalArgumentException("Cliente não possui pontos suficientes (saldo: " + saldo + ").");
     }
 
-    BigDecimal valorResgate =
-        BigDecimal.valueOf(request.pontos)
-            .divide(config.getPontosPorResgateReal(), 2, RoundingMode.HALF_UP);
+    // O valor vale para o TOTAL de pontos resgatados na comanda, sempre arredondado para baixo:
+    // resgatar de pouco em pouco nao rende mais que resgatar tudo de uma vez (relatorio de 14/11, Alto 2).
+    BigDecimal ppr = config.getPontosPorResgateReal();
+    int totalDePontos = comanda.getPontosFidelidadeResgatados() + pontos;
+    BigDecimal valorAtual = comanda.getValorResgateFidelidade();
+    BigDecimal valorNovo = ServicoDePontos.valorEmReais(totalDePontos, ppr);
+    BigDecimal valorResgate = valorNovo.subtract(valorAtual);
+    if (valorResgate.signum() <= 0) {
+      int minimo = ServicoDePontos.menorTotalQueValeMais(valorAtual, ppr) - comanda.getPontosFidelidadeResgatados();
+      throw new IllegalArgumentException(
+          pontos + " pontos valem menos de R$ 0,01. Resgate pelo menos " + minimo + " pontos.");
+    }
     List<ComandaItem> itens = comandaItemRepository.findByComandaIdOrderByCreatedAt(comanda.getId());
     BigDecimal subtotal = somarItens(itens);
     // FIN-007: o excedente acima do total era descartado e os pontos debitados mesmo assim.
-    BigDecimal restante = NumericUtil.maxZero(NumericUtil.subtract(subtotal, comanda.getDesconto()));
+    BigDecimal restante = NumericUtil.maxZero(NumericUtil.subtract(baseDescontavel(itens), comanda.getDesconto()));
     if (valorResgate.compareTo(restante) > 0) {
-      int maximo =
-          restante.multiply(config.getPontosPorResgateReal()).setScale(0, RoundingMode.DOWN).intValue();
+      int maximo = ServicoDePontos.maiorTotalAte(valorAtual.add(restante), ppr) - comanda.getPontosFidelidadeResgatados();
       throw new IllegalArgumentException(
           "O resgate (R$ " + valorResgate + ") passa do que falta pagar na comanda (R$ " + restante
-              + "). Use no máximo " + maximo + " pontos.");
+              + "). Use no máximo " + Math.max(0, maximo) + " pontos.");
     }
+    // Desconta no banco so se houver saldo: dois resgates ao mesmo tempo nao gastam os mesmos pontos
+    // (relatorio de 14/11, Critico 1). Falhando, nada da comanda mudou.
+    servicoDePontos.debitarResgate(tenantId, comanda.getClientId(), comanda.getId(), pontos);
+
     comanda.setDesconto(NumericUtil.add(comanda.getDesconto(), valorResgate));
-    comanda.setPontosFidelidadeResgatados(comanda.getPontosFidelidadeResgatados() + request.pontos);
-    comanda.setValorResgateFidelidade(NumericUtil.add(comanda.getValorResgateFidelidade(), valorResgate));
-    comanda.setDescontoMotivo(
-        concatenarMotivo(
-            comanda.getDescontoMotivo(),
-            "Resgate de " + request.pontos + " pontos de fidelidade"));
+    comanda.setPontosFidelidadeResgatados(totalDePontos);
+    comanda.setValorResgateFidelidade(valorNovo);
+    comanda.setDescontoMotivo(motivoComResgate(comanda.getDescontoMotivo(), totalDePontos));
     comanda.setTotal(NumericUtil.maxZero(NumericUtil.subtract(subtotal, comanda.getDesconto())));
 
-    cliente.setLoyaltyPoints(cliente.getLoyaltyPoints() - request.pontos);
-
     Map<String, Object> resgate = new HashMap<>();
-    resgate.put("pontos", request.pontos);
+    resgate.put("pontos", pontos);
+    resgate.put("totalNaComanda", totalDePontos);
     resgate.put("valorResgate", valorResgate);
     resgate.put("clientId", comanda.getClientId().toString());
     auditar(tenantId, "POS_LOYALTY_REDEEM", comanda, null, resgate);
+    return obter(id);
+  }
+
+  /** Produtos ativos do estoque com preco de venda, por nome (o insumo, sem preco, nao aparece). */
+  @Transactional(readOnly = true)
+  public List<ComandaDtos.ProdutoAVendaResponse> produtosAVenda() {
+    UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    return itemEstoqueRepository.findByTenantId(tenantId).stream()
+        .filter(p -> !Boolean.FALSE.equals(p.getAtivo()) && p.getPrecoVenda() != null && p.getPrecoVenda().signum() > 0)
+        .sorted(java.util.Comparator.comparing(p -> p.getNome() == null ? "" : p.getNome().toLowerCase()))
+        .map(p -> {
+          ComandaDtos.ProdutoAVendaResponse r = new ComandaDtos.ProdutoAVendaResponse();
+          r.id = p.getId().toString();
+          r.nome = p.getNome();
+          r.precoVenda = p.getPrecoVenda();
+          r.saldoAtual = p.getSaldoAtual();
+          r.unidadeMedida = p.getUnidadeMedida();
+          return r;
+        })
+        .toList();
+  }
+
+  /** Saldo da cliente e o resgate desta comanda, para o bloco "Fidelidade" do PDV. */
+  @Transactional(readOnly = true)
+  public ComandaDtos.FidelidadeDaComandaResponse fidelidadeDaComanda(UUID id) {
+    UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    Comanda comanda = buscarOuFalhar(id, tenantId);
+    exigirComandaDoProfissional(tenantId, comanda);
+    TenantLoyaltySettings config = tenantLoyaltySettingsRepository.findByTenantId(tenantId).orElse(null);
+    ComandaDtos.FidelidadeDaComandaResponse r = new ComandaDtos.FidelidadeDaComandaResponse();
+    r.programaAtivo = config != null && config.isAtivo();
+    r.temCliente = comanda.getClientId() != null;
+    r.pontosPorResgateReal = config == null ? null : config.getPontosPorResgateReal();
+    r.resgatadosNaComanda = comanda.getPontosFidelidadeResgatados();
+    r.valorResgatado = comanda.getValorResgateFidelidade();
+    if (r.temCliente) {
+      r.saldo = servicoDePontos.saldo(tenantId, comanda.getClientId());
+      r.valorDoSaldo = ServicoDePontos.valorEmReais(r.saldo, r.pontosPorResgateReal);
+    } else {
+      r.valorDoSaldo = BigDecimal.ZERO.setScale(2);
+    }
+    return r;
+  }
+
+  /** O caixa desfaz o resgate da comanda aberta: pontos de volta e o desconto do resgate sai. */
+  @Transactional
+  public ComandaDtos.ComandaResponse desfazerResgateNoCaixa(UUID id) {
+    return desfazerResgateNoCaixa(id, null);
+  }
+
+  @Transactional
+  public ComandaDtos.ComandaResponse desfazerResgateNoCaixa(UUID id, String vencimentoDosPontos) {
+    UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    Comanda comanda = buscarOuFalhar(id, tenantId);
+    exigirComandaDoProfissional(tenantId, comanda);
+    exigirAberta(comanda);
+    if (comanda.getPontosFidelidadeResgatados() <= 0) {
+      throw new IllegalArgumentException("Esta comanda não tem resgate de pontos para desfazer.");
+    }
+    Map<String, Object> antes = dadosDoDesconto(comanda);
+    desfazerResgateDeFidelidade(tenantId, comanda, "resgate desfeito no caixa", vencimentoEscolhido(vencimentoDosPontos));
+    List<ComandaItem> itens = comandaItemRepository.findByComandaIdOrderByCreatedAt(comanda.getId());
+    comanda.setTotal(NumericUtil.maxZero(NumericUtil.subtract(somarItens(itens), comanda.getDesconto())));
+    auditar(tenantId, "POS_LOYALTY_UNDO", comanda, antes, dadosDoDesconto(comanda));
     return obter(id);
   }
 
@@ -1795,12 +2358,14 @@ public class ServicoComanda {
    * FIN-007: devolve ao cliente os pontos resgatados nesta comanda. Usado quando a comanda deixa de
    * existir como venda (cancelamento e estorno sao estados finais, entao nao ha devolucao dupla).
    */
-  private void devolverPontosResgatados(UUID tenantId, Comanda comanda, String motivo) {
+  private void devolverPontosResgatados(UUID tenantId, Comanda comanda, String motivo,
+      ServicoDePontos.VencimentoDaDevolucao vencimento) {
     int pontos = comanda.getPontosFidelidadeResgatados();
     if (pontos <= 0 || comanda.getClientId() == null) return;
-    clienteRepository
-        .findByIdAndTenantId(comanda.getClientId(), tenantId)
-        .ifPresent(cliente -> cliente.setLoyaltyPoints(cliente.getLoyaltyPoints() + pontos));
+    if (clienteRepository.findByIdAndTenantId(comanda.getClientId(), tenantId).isEmpty()) return;
+    Integer validade = tenantLoyaltySettingsRepository.findByTenantId(tenantId)
+        .map(TenantLoyaltySettings::getValidadeDias).orElse(null);
+    servicoDePontos.devolverResgate(tenantId, comanda.getClientId(), comanda.getId(), pontos, validade, motivo, vencimento);
     Map<String, Object> devolucao = new HashMap<>();
     devolucao.put("pontos", pontos);
     devolucao.put("valorResgate", comanda.getValorResgateFidelidade());
@@ -1814,17 +2379,61 @@ public class ServicoComanda {
    * resgate sai do desconto.
    */
   private void desfazerResgateDeFidelidade(UUID tenantId, Comanda comanda, String motivo) {
+    desfazerResgateDeFidelidade(tenantId, comanda, motivo, ServicoDePontos.VencimentoDaDevolucao.ORIGINAL);
+  }
+
+  /** Permissao do perfil para escolher vencimento novo nos pontos devolvidos (V178). */
+  private static final String ESCOLHER_VENCIMENTO = "pos:points-expiry";
+
+  /**
+   * Sem escolha, os pontos voltam com o vencimento original. "NOVO" e do dono ou de quem tem a opcao
+   * no perfil de acesso (decisao do dono, 14/11/2026).
+   */
+  ServicoDePontos.VencimentoDaDevolucao vencimentoEscolhido(String pedido) {
+    String p = pedido == null ? "" : pedido.trim().toUpperCase();
+    if (p.isEmpty() || p.equals("ORIGINAL")) return ServicoDePontos.VencimentoDaDevolucao.ORIGINAL;
+    if (!p.equals("NOVO")) throw new IllegalArgumentException("Vencimento dos pontos: use ORIGINAL ou NOVO.");
+    if (!authenticatedUser.temRole("OWNER") && !permissionService.possuiPermissao(ESCOLHER_VENCIMENTO)) {
+      throw new ApiClientErrorException(
+          "Seu perfil de acesso não permite devolver os pontos com vencimento novo. Peça ao dono do salão.", 403);
+    }
+    return ServicoDePontos.VencimentoDaDevolucao.NOVO;
+  }
+
+  private void desfazerResgateDeFidelidade(UUID tenantId, Comanda comanda, String motivo,
+      ServicoDePontos.VencimentoDaDevolucao vencimento) {
     if (comanda.getPontosFidelidadeResgatados() <= 0) return;
-    devolverPontosResgatados(tenantId, comanda, motivo);
+    devolverPontosResgatados(tenantId, comanda, motivo, vencimento);
     comanda.setDesconto(
         NumericUtil.maxZero(NumericUtil.subtract(comanda.getDesconto(), comanda.getValorResgateFidelidade())));
     comanda.setPontosFidelidadeResgatados(0);
     comanda.setValorResgateFidelidade(BigDecimal.ZERO);
+    comanda.setDescontoMotivo(motivoComResgate(comanda.getDescontoMotivo(), 0));
   }
 
-  private String concatenarMotivo(String motivoAtual, String novoMotivo) {
-    if (motivoAtual == null || motivoAtual.isBlank()) return novoMotivo;
-    return motivoAtual + "; " + novoMotivo;
+  private static final java.util.regex.Pattern TEXTO_DO_RESGATE =
+      java.util.regex.Pattern.compile("\\s*;?\\s*Resgate de \\d+ pontos de fidelidade");
+
+  /**
+   * O motivo do desconto com UM texto de resgate, com o total atual da comanda (Medio 5: resgatar,
+   * desfazer e resgatar de novo deixava o texto repetido). {@code pontos} 0 tira o texto.
+   */
+  static String motivoComResgate(String motivo, int pontos) {
+    String semResgate = motivo == null ? "" : TEXTO_DO_RESGATE.matcher(motivo).replaceAll("").trim();
+    if (semResgate.startsWith(";")) semResgate = semResgate.substring(1).trim();
+    if (pontos <= 0) return semResgate.isEmpty() ? null : semResgate;
+    String resgate = "Resgate de " + pontos + " pontos de fidelidade";
+    return semResgate.isEmpty() ? resgate : semResgate + "; " + resgate;
+  }
+
+  /** Pontos sao inteiros: 1,5 ponto e recusado, e nao arredondado em silencio (Baixo 2). */
+  static int pontosInteiros(BigDecimal pontos) {
+    if (pontos == null) throw new IllegalArgumentException("Informe quantos pontos resgatar.");
+    BigDecimal p = pontos.stripTrailingZeros();
+    if (p.scale() > 0) throw new IllegalArgumentException("Pontos são inteiros: informe um número sem vírgula.");
+    if (p.signum() <= 0) throw new IllegalArgumentException("Informe quantos pontos resgatar.");
+    if (p.compareTo(BigDecimal.valueOf(100_000_000)) > 0) throw new IllegalArgumentException("Quantidade de pontos inválida.");
+    return p.intValueExact();
   }
 
   Comanda buscarOuFalhar(UUID id, UUID tenantId) {
@@ -1835,7 +2444,7 @@ public class ServicoComanda {
 
   void exigirAberta(Comanda comanda) {
     if (!Comanda.STATUS_ABERTA.equals(comanda.getStatus())) {
-      throw new IllegalArgumentException("Comanda não esta aberta.");
+      throw new IllegalArgumentException("Comanda não está aberta.");
     }
   }
 
@@ -1947,7 +2556,7 @@ public class ServicoComanda {
 
   void exigirFechada(Comanda comanda) {
     if (!Comanda.STATUS_FECHADA.equals(comanda.getStatus())) {
-      throw new IllegalArgumentException("Comanda não esta fechada.");
+      throw new IllegalArgumentException("Comanda não está fechada.");
     }
   }
 
@@ -1955,17 +2564,269 @@ public class ServicoComanda {
     List<ComandaItem> itens = comandaItemRepository.findByComandaIdOrderByCreatedAt(comanda.getId());
     BigDecimal subtotal = somarItens(itens);
     comanda.setSubtotal(subtotal);
+    // O vale-presente vendido nao tem desconto: a base e o resto da conta (item 6).
+    BigDecimal base = baseDescontavel(itens);
+    BigDecimal manual = descontoManual(comanda);
+    // Cupons (item 6): o de % acompanha a conta; abaixo do valor minimo ou sem servico da lista, sai sozinho e o
+    // uso volta ao cupom.
+    if (comanda.getCupomId() != null && servicoDeCupons != null) {
+      recalcularCupons(comanda, itens, base);
+    }
     // FIN-007: tirar itens ate o resgate passar do subtotal desfaz o resgate (pontos de volta), em
     // vez de cortar o desconto e deixar os pontos gastos. O caixa pode resgatar de novo o que couber.
-    if (comanda.getValorResgateFidelidade().compareTo(subtotal) > 0) {
+    // O cupom vem antes dos pontos.
+    if (NumericUtil.add(comanda.getValorResgateFidelidade(), comanda.getValorCupom()).compareTo(base) > 0) {
       desfazerResgateDeFidelidade(comanda.getTenantId(), comanda, "itens retirados, resgate passou do total");
     }
-    // Reaplica o desconto ja registrado (em valor, nao percentual) sobre o novo subtotal, mas nunca
-    // deixa o desconto exceder o subtotal apos a mudanca de itens.
-    if (comanda.getDesconto().compareTo(subtotal) > 0) {
-      comanda.setDesconto(subtotal);
-    }
+    // Reaplica o desconto manual ja registrado (em valor, nao percentual), somado a cupom e pontos, sem
+    // nunca passar do que pode ter desconto.
+    comanda.setDesconto(base.min(NumericUtil.add(manual,
+        NumericUtil.add(comanda.getValorResgateFidelidade(), comanda.getValorCupom()))));
     comanda.setTotal(NumericUtil.maxZero(NumericUtil.subtract(subtotal, comanda.getDesconto())));
+  }
+
+  /** Quanto cada servico soma na conta (para o cupom de lista, V182). Servico coberto por pacote soma 0. */
+  static Map<UUID, BigDecimal> valorPorServico(List<ComandaItem> itens) {
+    Map<UUID, BigDecimal> mapa = new HashMap<>();
+    for (ComandaItem item : itens) {
+      if (!ComandaItem.TIPO_SERVICO.equals(item.getTipo()) || item.getReferenciaId() == null) continue;
+      mapa.merge(item.getReferenciaId(), item.getTotal() == null ? BigDecimal.ZERO : item.getTotal(), NumericUtil::add);
+    }
+    return mapa;
+  }
+
+  /** Soma dos itens que aceitam desconto: tudo menos o vale-presente vendido. */
+  BigDecimal baseDescontavel(List<ComandaItem> itens) {
+    return somarItens(itens.stream().filter(i -> !ComandaItem.TIPO_VALE.equals(i.getTipo())).toList());
+  }
+
+  /** O desconto dado pela equipe: o total menos pontos e cupom (esses nao contam no teto). */
+  static BigDecimal descontoManual(Comanda comanda) {
+    return NumericUtil.maxZero(NumericUtil.subtract(comanda.getDesconto(),
+        NumericUtil.add(comanda.getValorResgateFidelidade(), comanda.getValorCupom())));
+  }
+
+  // ─── Cupom de desconto (item 6) ────────────────────────────────────────────
+
+  /**
+   * Aplica um cupom na comanda aberta. O uso e reservado agora (o limite nao estoura com duas comandas ao mesmo
+   * tempo). O cupom soma com o desconto manual e os pontos, e vem primeiro: nunca passa do que pode ter desconto.
+   * Nao entra no teto de desconto da equipe (quem cria o cupom e o dono).
+   */
+  @Transactional
+  public ComandaDtos.ComandaResponse aplicarCupom(UUID id, String codigo) {
+    UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    // Com trava: dois cupons ao mesmo tempo na mesma comanda nao passam a regra de "um so" juntos.
+    Comanda comanda = comandaRepository.findByIdAndTenantParaAtualizacao(id, tenantId)
+        .orElseThrow(() -> new ApiClientErrorException("Comanda não encontrada.", 404));
+    exigirComandaDoProfissional(tenantId, comanda);
+    exigirAberta(comanda);
+    if (servicoDeCupons == null) throw new IllegalStateException("Cupons indisponíveis.");
+    List<CupomNaComanda> atuais = cuponsDaComanda(comanda);
+    if (!atuais.isEmpty() && !servicoDeCupons.permiteVariosPorComanda(tenantId)) {
+      throw new IllegalArgumentException(atuais.stream().anyMatch(CupomNaComanda::doAgendamento)
+          ? "Esta comanda já tem o cupom do agendamento online."
+          : "Esta comanda já tem um cupom. Remova o cupom atual para usar outro.");
+    }
+    List<ComandaItem> itens = comandaItemRepository.findByComandaIdOrderByCreatedAt(comanda.getId());
+    BigDecimal base = baseDescontavel(itens);
+    if (base.signum() <= 0) throw new IllegalArgumentException("Lance os serviços ou produtos antes do cupom.");
+    var cupom = servicoDeCupons.buscarPorCodigo(tenantId, codigo);
+    if (atuais.stream().anyMatch(c -> cupom.getId().equals(c.uso().getCupomId()))) {
+      throw new IllegalArgumentException("Este cupom já está nesta comanda.");
+    }
+    Map<String, Object> antes = dadosDoDesconto(comanda);
+    UsoDeCupom uso = servicoDeCupons.reservar(
+        tenantId, cupom.getId(), comanda.getId(), null, comanda.getClientId(), base, valorPorServico(itens));
+    if (comanda.getCupomId() == null) comanda.setCupomId(cupom.getId());
+    recalcular(comanda);
+
+    // Com varios cupons, o novo nao pode ficar sem desconto nem tirar outro da comanda: entao ele nao cabe.
+    java.util.Set<UUID> depoisDoCalculo = new java.util.HashSet<>();
+    cuponsDaComanda(comanda).forEach(c -> depoisDoCalculo.add(c.uso().getId()));
+    boolean ficaramTodos = depoisDoCalculo.contains(uso.getId())
+        && atuais.stream().allMatch(c -> depoisDoCalculo.contains(c.uso().getId()));
+    if (!ficaramTodos) {
+      throw new IllegalArgumentException(
+          "Este cupom não cabe: os serviços dele já estão com todo o desconto que podem ter.");
+    }
+
+    Map<String, Object> depois = dadosDoDesconto(comanda);
+    depois.put("cupom", cupom.getCodigo());
+    depois.put("valorCupom", uso.getValorDesconto());
+    depois.put("valorDosCupons", comanda.getValorCupom());
+    auditar(tenantId, "POS_COUPON_APPLY", comanda, antes, depois);
+    return obter(id);
+  }
+
+  /** Tira todos os cupons da comanda aberta (menos o do agendamento online). */
+  @Transactional
+  public ComandaDtos.ComandaResponse removerCupom(UUID id) {
+    return removerCupom(id, null);
+  }
+
+  /**
+   * Tira um cupom da comanda aberta ({@code cupomId}), ou todos quando nulo: o desconto dele sai e o uso volta ao
+   * cupom. O do agendamento online fica: ja esta no preco dos servicos.
+   */
+  @Transactional
+  public ComandaDtos.ComandaResponse removerCupom(UUID id, UUID cupomId) {
+    UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    Comanda comanda = buscarOuFalhar(id, tenantId);
+    exigirComandaDoProfissional(tenantId, comanda);
+    exigirAberta(comanda);
+    List<CupomNaComanda> atuais = comanda.getCupomId() == null ? List.of() : cuponsDaComanda(comanda);
+    if (atuais.isEmpty()) throw new IllegalArgumentException("Esta comanda não tem cupom.");
+    List<CupomNaComanda> alvo = atuais.stream()
+        .filter(c -> cupomId == null || cupomId.equals(c.uso().getCupomId())).toList();
+    if (alvo.isEmpty()) throw new IllegalArgumentException("Este cupom não está nesta comanda.");
+    if (alvo.stream().allMatch(CupomNaComanda::doAgendamento)) {
+      throw new IllegalArgumentException("O cupom veio do agendamento online e já está no preço dos serviços.");
+    }
+    Map<String, Object> antes = dadosDoDesconto(comanda);
+    for (CupomNaComanda c : alvo) {
+      if (!c.doAgendamento()) servicoDeCupons.liberarUso(c.uso());
+    }
+    recalcular(comanda);
+    auditar(tenantId, "POS_COUPON_REMOVE", comanda, antes, dadosDoDesconto(comanda));
+    return obter(id);
+  }
+
+  /** Um cupom ativo na comanda: o uso, o cupom e os servicos dele (vazio = a conta toda). */
+  record CupomNaComanda(UsoDeCupom uso, Cupom cupom, java.util.Set<UUID> servicos, boolean doAgendamento) {}
+
+  /**
+   * Os cupons ativos da comanda, na ordem do calculo: primeiro os de lista (descontam so dos servicos deles),
+   * depois os da conta toda; cada grupo na ordem em que entrou.
+   */
+  List<CupomNaComanda> cuponsDaComanda(Comanda comanda) {
+    if (servicoDeCupons == null || comanda.getId() == null) return List.of();
+    List<CupomNaComanda> lista = new ArrayList<>();
+    for (UsoDeCupom uso : servicoDeCupons.usosAtivosDaComanda(comanda.getTenantId(), comanda.getId())) {
+      Cupom cupom = servicoDeCupons.porId(comanda.getTenantId(), uso.getCupomId()).orElse(null);
+      java.util.Set<UUID> servicos = cupom == null ? java.util.Set.of() : servicoDeCupons.servicosDoCupom(cupom);
+      lista.add(new CupomNaComanda(uso, cupom, servicos, uso.getAppointmentId() != null));
+    }
+    lista.sort(java.util.Comparator.comparing(c -> c.servicos().isEmpty()));
+    return lista;
+  }
+
+  /**
+   * Recalcula os cupons da comanda. Cada cupom calcula sobre o valor cheio (o de lista, sobre os servicos dele); os
+   * de lista vem primeiro, e a soma nunca passa do que pode ter desconto. O cupom que nao vale mais (abaixo do
+   * minimo, sem servico da lista ou sem espaco) sai sozinho e o uso volta a ele. O do agendamento online vale 0
+   * aqui: o desconto dele ja esta no preco dos itens.
+   */
+  private void recalcularCupons(Comanda comanda, List<ComandaItem> itens, BigDecimal base) {
+    List<BigDecimal> restantes = new ArrayList<>();
+    for (ComandaItem item : itens) {
+      restantes.add(ComandaItem.TIPO_VALE.equals(item.getTipo()) || item.getTotal() == null
+          ? BigDecimal.ZERO : item.getTotal());
+    }
+    Map<UUID, BigDecimal> porServico = valorPorServico(itens);
+    BigDecimal livre = base;
+    BigDecimal soma = BigDecimal.ZERO;
+    UUID doAgendamento = null;
+    UUID primeiro = null;
+    List<String> codigos = new ArrayList<>();
+    for (CupomNaComanda c : cuponsDaComanda(comanda)) {
+      if (c.doAgendamento()) {
+        doAgendamento = c.uso().getCupomId();
+        continue;
+      }
+      Cupom cupom = c.cupom();
+      BigDecimal valor = BigDecimal.ZERO;
+      if (cupom != null && (cupom.getValorMinimo() == null || base.compareTo(cupom.getValorMinimo()) >= 0)) {
+        BigDecimal elegivel = ServicoDeCupons.baseElegivel(c.servicos(), base, porServico);
+        BigDecimal cheio = elegivel.signum() > 0 ? ServicoDeCupons.desconto(cupom, elegivel).min(livre) : BigDecimal.ZERO;
+        valor = c.servicos().isEmpty() ? cheio : tirarDosServicos(itens, restantes, c.servicos(), cheio);
+      }
+      if (valor.signum() <= 0) {
+        servicoDeCupons.liberarUso(c.uso());
+        continue;
+      }
+      servicoDeCupons.atualizarValorDoUso(c.uso(), valor);
+      livre = NumericUtil.maxZero(NumericUtil.subtract(livre, valor));
+      soma = NumericUtil.add(soma, valor);
+      if (primeiro == null) primeiro = cupom.getId();
+      codigos.add(cupom.getCodigo());
+    }
+    comanda.setCupomId(doAgendamento != null ? doAgendamento : primeiro);
+    comanda.setValorCupom(soma);
+    comanda.setDescontoMotivo(motivoComCupons(comanda.getDescontoMotivo(), codigos));
+  }
+
+  /**
+   * Tira {@code valor} dos itens de servico da lista, na proporcao do que resta em cada um, sem passar do que
+   * resta. Muda {@code restantes} e devolve quanto tirou.
+   */
+  static BigDecimal tirarDosServicos(List<ComandaItem> itens, List<BigDecimal> restantes,
+      java.util.Set<UUID> servicos, BigDecimal valor) {
+    BigDecimal base = BigDecimal.ZERO;
+    int ultimo = -1;
+    for (int i = 0; i < itens.size(); i++) {
+      if (daLista(itens.get(i), servicos) && restantes.get(i).signum() > 0) {
+        base = NumericUtil.add(base, restantes.get(i));
+        ultimo = i;
+      }
+    }
+    BigDecimal alvo = valor == null ? BigDecimal.ZERO : valor.min(base);
+    if (alvo.signum() <= 0) return BigDecimal.ZERO;
+    BigDecimal tirado = BigDecimal.ZERO;
+    for (int i = 0; i < itens.size(); i++) {
+      BigDecimal resta = restantes.get(i);
+      if (!daLista(itens.get(i), servicos) || resta.signum() <= 0) continue;
+      BigDecimal parte = i == ultimo
+          ? NumericUtil.maxZero(NumericUtil.subtract(alvo, tirado))
+          : resta.multiply(alvo).divide(base, 2, RoundingMode.HALF_UP);
+      parte = parte.min(resta);
+      restantes.set(i, NumericUtil.subtract(resta, parte));
+      tirado = NumericUtil.add(tirado, parte);
+    }
+    return tirado;
+  }
+
+  private static boolean daLista(ComandaItem item, java.util.Set<UUID> servicos) {
+    return ComandaItem.TIPO_SERVICO.equals(item.getTipo()) && servicos.contains(item.getReferenciaId());
+  }
+
+  /** Os codigos dos cupons da comanda que descontam aqui (o do agendamento online fica de fora). */
+  private List<String> codigosDosCupons(Comanda comanda) {
+    if (comanda.getCupomId() == null) return List.of();
+    return cuponsDaComanda(comanda).stream()
+        .filter(c -> !c.doAgendamento() && c.cupom() != null)
+        .map(c -> c.cupom().getCodigo())
+        .toList();
+  }
+
+  private static final java.util.regex.Pattern TEXTO_DO_CUPOM =
+      java.util.regex.Pattern.compile("\\s*;?\\s*Cupo(?:m|ns) [A-Z0-9-]+(?:, [A-Z0-9-]+)*");
+
+  /** O motivo do desconto com UM texto de cupom. {@code codigo} nulo tira o texto. */
+  static String motivoComCupom(String motivo, String codigo) {
+    return motivoComCupons(motivo, codigo == null ? List.of() : List.of(codigo));
+  }
+
+  /** O motivo do desconto com o texto dos cupons ("Cupom X" ou "Cupons X, Y"). Lista vazia tira o texto. */
+  static String motivoComCupons(String motivo, List<String> codigos) {
+    String semCupom = motivo == null ? "" : TEXTO_DO_CUPOM.matcher(motivo).replaceAll("").trim();
+    if (semCupom.startsWith(";")) semCupom = semCupom.substring(1).trim();
+    if (codigos == null || codigos.isEmpty()) return semCupom.isEmpty() ? null : semCupom;
+    String texto = (codigos.size() == 1 ? "Cupom " : "Cupons ") + String.join(", ", codigos);
+    return semCupom.isEmpty() ? texto : semCupom + "; " + texto;
+  }
+
+  /** Pagamentos com vale-presente voltam ao vale (cancelamento e estorno da comanda). */
+  private void devolverPagamentosComVale(
+      UUID tenantId, Comanda comanda, List<ComandaPagamento> pagamentos, String motivo) {
+    if (servicoDeVales == null) return;
+    for (ComandaPagamento pagamento : pagamentos) {
+      if (!ComandaPagamento.MEIO_VALE_PRESENTE.equals(pagamento.getMeio())
+          || !ComandaPagamento.STATUS_CONFIRMADO.equals(pagamento.getStatus())) continue;
+      servicoDeVales.devolver(tenantId, pagamento.getValePresenteId(), pagamento.getValor(), comanda.getId(), motivo);
+      pagamento.setStatus(ComandaPagamento.STATUS_ESTORNADO);
+      comandaPagamentoRepository.save(pagamento);
+    }
   }
 
   private BigDecimal somarItens(List<ComandaItem> itens) {
@@ -2000,6 +2861,46 @@ public class ServicoComanda {
     r.closedAt = comanda.getClosedAt() != null ? comanda.getClosedAt().toString() : null;
     r.itens = itens.stream().map(this::toItemResponse).toList();
     r.pagamentos = pagamentos.stream().map(this::toPagamentoResponse).toList();
+    r.pontosCreditados = comanda.getPontosFidelidadeCreditados();
+    r.pontosResgatados = comanda.getPontosFidelidadeResgatados();
+    if (Comanda.STATUS_FECHADA.equals(comanda.getStatus()) && comanda.getPontosFidelidadeCreditados() > 0
+        && comanda.getClientId() != null && servicoDePontos != null) {
+      r.pontosJaUsadosDaVenda = servicoDePontos.pontosJaUsadosDaVenda(
+          comanda.getTenantId(), comanda.getClientId(), comanda.getId(), comanda.getPontosFidelidadeCreditados());
+    }
+    if (comanda.getCupomId() != null && servicoDeCupons != null) {
+      // V183: pode haver mais de um. O do agendamento online aparece primeiro e vale 0 aqui.
+      List<CupomNaComanda> cupons = new ArrayList<>(cuponsDaComanda(comanda));
+      cupons.sort(java.util.Comparator.comparing(c -> !c.doAgendamento()));
+      for (CupomNaComanda c : cupons) {
+        if (c.cupom() == null) continue;
+        br.com.phdigitalcode.azzo.agenda.pro.dto.CupomDtos.CupomDaComandaResponse cupom =
+            new br.com.phdigitalcode.azzo.agenda.pro.dto.CupomDtos.CupomDaComandaResponse();
+        cupom.cupomId = c.cupom().getId().toString();
+        cupom.codigo = c.cupom().getCodigo();
+        cupom.valor = c.doAgendamento() || c.uso().getValorDesconto() == null
+            ? BigDecimal.ZERO : c.uso().getValorDesconto();
+        cupom.tipo = c.cupom().getTipo();
+        cupom.percentualOuValor = c.cupom().getValor();
+        cupom.doAgendamento = c.doAgendamento();
+        r.cupons.add(cupom);
+      }
+      if (!r.cupons.isEmpty()) r.cupom = r.cupons.get(0);
+    }
+    r.aceitaMaisCupons = Comanda.STATUS_ABERTA.equals(comanda.getStatus()) && servicoDeCupons != null
+        && (r.cupons.isEmpty() || servicoDeCupons.permiteVariosPorComanda(comanda.getTenantId()));
+    if (servicoDeVales != null && itens.stream().anyMatch(i -> ComandaItem.TIPO_VALE.equals(i.getTipo()))) {
+      for (var vale : servicoDeVales.daVenda(comanda.getTenantId(), comanda.getId())) {
+        ComandaDtos.ValeVendidoResponse v = new ComandaDtos.ValeVendidoResponse();
+        v.id = vale.getId().toString();
+        v.codigo = vale.getCodigo();
+        v.valor = vale.getValorInicial();
+        v.expiraEm = vale.getExpiraEm() == null ? null : vale.getExpiraEm().toString();
+        v.destinatarioNome = vale.getDestinatarioNome();
+        v.mensagem = vale.getMensagem();
+        r.valesVendidos.add(v);
+      }
+    }
     return r;
   }
 
@@ -2029,6 +2930,28 @@ public class ServicoComanda {
     r.status = pagamento.getStatus();
     r.pixPayload = pagamento.getPixPayload();
     r.paidAt = pagamento.getPaidAt() != null ? pagamento.getPaidAt().toString() : null;
+    if (pagamento.getValePresenteId() != null && servicoDeVales != null) {
+      r.valeCodigo = servicoDeVales.codigoDoVale(pagamento.getValePresenteId());
+    }
+    if (pagamento.getCobrancaId() != null) {
+      r.cobrancaId = pagamento.getCobrancaId().toString();
+      if (cobrancaRepository != null) {
+        cobrancaRepository.findById(pagamento.getCobrancaId()).ifPresent(c -> {
+          r.linkDePagamento = c.getLinkDePagamento();
+          r.nsu = c.getNsu();
+          r.bandeira = c.getBandeira();
+          r.parcelas = c.getParcelas();
+          r.motivoRecusa = c.getMotivoRecusa();
+          r.comprovante = c.getComprovanteCliente();
+          r.confirmacaoManual = "PIX_CHAVE".equals(c.getProvedor());
+          if (r.pixPayload == null) r.pixPayload = c.getPixCopiaECola();
+        });
+      }
+    }
+    // O QR so enquanto espera: pago ou recusado, ninguem mais precisa ler.
+    if (r.pixPayload != null && ComandaPagamento.STATUS_PENDENTE.equals(r.status)) {
+      r.pixQrCode = br.com.phdigitalcode.azzo.agenda.pro.integration.pagamentos.QrCodeDoPix.dataUri(r.pixPayload);
+    }
     return r;
   }
 

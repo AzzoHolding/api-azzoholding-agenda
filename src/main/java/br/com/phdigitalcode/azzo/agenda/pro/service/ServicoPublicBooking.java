@@ -76,6 +76,75 @@ public class ServicoPublicBooking {
   private final ProfissionalWorkingHourRepository profissionalWorkingHourRepository;
   private final AgendamentoQueryRepository agendamentoQueryRepository;
 
+  private FotosDaEquipe fotos;
+
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setFotosDaEquipe(FotosDaEquipe fotos) {
+    this.fotos = fotos;
+  }
+
+  /** Cupom de desconto no link publico (item 6). Por setter: o construtor nao muda. */
+  private ServicoDeCupons servicoDeCupons;
+
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setServicoDeCupons(ServicoDeCupons servicoDeCupons) {
+    this.servicoDeCupons = servicoDeCupons;
+  }
+
+  /**
+   * A pagina publica confere o cupom antes de agendar: diz se vale e quanto desconta. Nao reserva nada (quem reserva
+   * e o pedido do horario). Codigo que nao existe e codigo que nao vale para este pedido dao a mesma resposta.
+   */
+  // Sem @Transactional de proposito: a recusa do cupom (IllegalArgumentException) vem de uma transacao do
+  // ServicoDeCupons e a marcaria para desfazer; aqui ela vira resposta, e a transacao de fora quebraria com 500.
+  public br.com.phdigitalcode.azzo.agenda.pro.dto.CupomDtos.ValidarCupomPublicoResponse validarCupom(
+      String slug, br.com.phdigitalcode.azzo.agenda.pro.dto.CupomDtos.ValidarCupomPublicoRequest request) {
+    Tenant tenant = obterTenantPorSlug(slug);
+    var r = new br.com.phdigitalcode.azzo.agenda.pro.dto.CupomDtos.ValidarCupomPublicoResponse();
+    String ids = request.serviceIds == null || request.serviceIds.isEmpty() ? null : String.join(",", request.serviceIds);
+    BigDecimal base = BigDecimal.ZERO;
+    java.util.Map<UUID, BigDecimal> valorPorServico = new java.util.HashMap<>();
+    for (Servico s : resolveSelectedServices(tenant.getId(), request.serviceId, ids)) {
+      base = NumericUtil.add(base, s.getPrice());
+      valorPorServico.merge(s.getId(), s.getPrice(), BigDecimal::add);
+    }
+    if (servicoDeCupons == null || base.signum() <= 0) {
+      r.valido = false;
+      r.mensagem = "Escolha o serviço antes de usar o cupom.";
+      return r;
+    }
+    UUID clienteId = clientePeloTelefone(tenant.getId(), request.telefone);
+    try {
+      BigDecimal desconto = servicoDeCupons.simularPublico(tenant.getId(), request.codigo, clienteId, base, valorPorServico);
+      r.valido = true;
+      r.desconto = desconto;
+      r.totalComDesconto = NumericUtil.maxZero(NumericUtil.subtract(base, desconto));
+      r.mensagem = "Cupom aplicado.";
+    } catch (IllegalArgumentException e) {
+      r.valido = false;
+      r.mensagem = e.getMessage();
+    }
+    return r;
+  }
+
+  private UUID clientePeloTelefone(UUID tenantId, String telefone) {
+    String normalizado = normalizePhone(telefone);
+    if (normalizado == null) return null;
+    return clienteRepository.findByTenantIdOrderByName(tenantId).stream()
+        .filter(c -> Objects.equals(normalizePhone(c.getPhone()), normalizado))
+        .map(Cliente::getId)
+        .findFirst()
+        .orElse(null);
+  }
+
+  /** Link para preencher a anamnese e assinar os termos depois de agendar. Por setter: o construtor nao muda. */
+  private br.com.phdigitalcode.azzo.agenda.pro.saude.ContasDaCliente contasDaCliente;
+
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setContasDaCliente(br.com.phdigitalcode.azzo.agenda.pro.saude.ContasDaCliente contasDaCliente) {
+    this.contasDaCliente = contasDaCliente;
+  }
+
   public ServicoPublicBooking(
       TenantRepository tenantRepository,
       ServicoRepository servicoRepository,
@@ -281,8 +350,25 @@ public class ServicoPublicBooking {
       throw new IllegalArgumentException("O profissional não atende neste horário");
     }
 
-    // O sinal exige CPF/CNPJ — conferido ANTES de gravar qualquer coisa.
-    BigDecimal depositAmount = calcularValorSinal(selectedItems);
+    // Cupom (item 6): conferido antes de gravar; o uso e reservado depois que o agendamento existe.
+    BigDecimal valorDosServicos = BigDecimal.ZERO;
+    java.util.Map<UUID, BigDecimal> valorPorServico = new java.util.HashMap<>();
+    for (ResolvedPublicItem item : selectedItems) {
+      BigDecimal valorDoItem = NumericUtil.multiply(item.service().getPrice(), item.quantity());
+      valorDosServicos = NumericUtil.add(valorDosServicos, valorDoItem);
+      valorPorServico.merge(item.service().getId(), valorDoItem, BigDecimal::add);
+    }
+    var cupom = request.cupom == null || request.cupom.isBlank() || servicoDeCupons == null
+        ? null : servicoDeCupons.buscarPorCodigoPublico(tenant.getId(), request.cupom);
+    // Cupom de lista (V182): o desconto so cai nos servicos dela.
+    java.util.Set<UUID> servicosDoCupom = cupom == null ? java.util.Set.of() : servicoDeCupons.servicosDoCupom(cupom);
+    BigDecimal descontoDoCupom = cupom == null ? BigDecimal.ZERO
+        : ServicoDeCupons.desconto(cupom, ServicoDeCupons.baseElegivel(servicosDoCupom, valorDosServicos, valorPorServico));
+    List<BigDecimal> descontoPorItem = descontoPorItem(selectedItems, descontoDoCupom, servicosDoCupom);
+
+    // O sinal exige CPF/CNPJ — conferido ANTES de gravar qualquer coisa. Com cupom, o sinal de cada servico
+    // acompanha o desconto dele.
+    BigDecimal depositAmount = sinalComDescontos(selectedItems, descontoPorItem);
     String cpfCnpjInformado =
         request.customerCpfCnpj != null && !request.customerCpfCnpj.isBlank()
             ? request.customerCpfCnpj.trim()
@@ -361,7 +447,16 @@ public class ServicoPublicBooking {
     agendamento.setEndTime(endTime.format(TIME_FMT));
     agendamento.setStatus(StatusAgendamento.PENDING);
     agendamento = agendamentoRepository.save(agendamento);
-    persistItems(agendamento, selectedItems);
+    if (cupom != null) {
+      // Reserva o uso agora: o limite total e o limite por cliente valem para o link tambem.
+      var uso = servicoDeCupons.reservar(tenant.getId(), cupom.getId(), null, agendamento.getId(), cliente.getId(),
+          valorDosServicos, valorPorServico);
+      descontoDoCupom = uso.getValorDesconto();
+      descontoPorItem = descontoPorItem(selectedItems, descontoDoCupom, servicosDoCupom);
+      agendamento.setCupomId(cupom.getId());
+      agendamento = agendamentoRepository.save(agendamento);
+    }
+    persistItems(agendamento, selectedItems, descontoPorItem);
     notificationService.registrarCriacaoAgendamento(
         tenant.getId(), agendamento.getId(), cliente.getId(), "APPOINTMENT_CREATED");
 
@@ -369,6 +464,14 @@ public class ServicoPublicBooking {
     resp.appointmentId = agendamento.getId().toString();
     resp.status = agendamento.getStatus().name();
     resp.message = "Agendamento criado com sucesso.";
+    if (cupom != null) resp.discountValue = descontoDoCupom;
+    if (contasDaCliente != null) {
+      try {
+        resp.linkDocumentos = contasDaCliente.linkParaAgendamentoOnline(tenant.getId(), cliente.getId(), agendamento.getId());
+      } catch (Exception e) {
+        // O link e uma ajuda: falhar aqui nao desfaz o agendamento.
+      }
+    }
 
     if (NumericUtil.isPositive(depositAmount)) {
       // O CPF ja foi conferido antes de gravar: e o do cadastro, ou o informado para quem nao tinha.
@@ -383,6 +486,69 @@ public class ServicoPublicBooking {
     }
 
     return resp;
+  }
+
+  /** O sinal na mesma proporcao do desconto do cupom: 20% de desconto, 20% a menos de sinal. */
+  static BigDecimal sinalComDesconto(BigDecimal sinal, BigDecimal valorDosServicos, BigDecimal desconto) {
+    if (!NumericUtil.isPositive(sinal) || !NumericUtil.isPositive(desconto) || !NumericUtil.isPositive(valorDosServicos)) {
+      return sinal;
+    }
+    BigDecimal fator = NumericUtil.maxZero(NumericUtil.subtract(valorDosServicos, desconto))
+        .divide(valorDosServicos, 6, java.math.RoundingMode.HALF_UP);
+    return sinal.multiply(fator).setScale(2, java.math.RoundingMode.HALF_UP);
+  }
+
+  /**
+   * O desconto do cupom repartido pelos itens, na proporcao do valor de cada um. Cupom de lista (V182): so entre os
+   * itens dos servicos dela. O ultimo item que recebe absorve o arredondamento; nenhum passa do proprio valor.
+   */
+  static List<BigDecimal> descontoPorItem(
+      List<ResolvedPublicItem> items, BigDecimal desconto, java.util.Set<UUID> servicosDoCupom) {
+    List<BigDecimal> resultado = new ArrayList<>();
+    List<BigDecimal> brutos = new ArrayList<>();
+    List<Boolean> recebe = new ArrayList<>();
+    BigDecimal base = BigDecimal.ZERO;
+    int ultimo = -1;
+    for (int i = 0; i < items.size(); i++) {
+      ResolvedPublicItem item = items.get(i);
+      BigDecimal bruto = NumericUtil.multiply(item.service().getPrice(), item.quantity());
+      boolean elegivel = servicosDoCupom == null || servicosDoCupom.isEmpty()
+          || servicosDoCupom.contains(item.service().getId());
+      brutos.add(bruto);
+      recebe.add(elegivel);
+      if (elegivel && NumericUtil.isPositive(bruto)) {
+        base = NumericUtil.add(base, bruto);
+        ultimo = i;
+      }
+    }
+    BigDecimal total = desconto == null ? BigDecimal.ZERO : desconto.min(base);
+    BigDecimal distribuido = BigDecimal.ZERO;
+    for (int i = 0; i < items.size(); i++) {
+      BigDecimal d;
+      if (!recebe.get(i) || !NumericUtil.isPositive(total) || !NumericUtil.isPositive(base)) {
+        d = NumericUtil.zero();
+      } else if (i == ultimo) {
+        d = NumericUtil.maxZero(NumericUtil.subtract(total, distribuido));
+      } else {
+        d = brutos.get(i).multiply(total).divide(base, 2, java.math.RoundingMode.HALF_UP);
+      }
+      // CHECK de appointment_items: desconto <= bruto.
+      d = d.min(brutos.get(i));
+      distribuido = NumericUtil.add(distribuido, d);
+      resultado.add(d);
+    }
+    return resultado;
+  }
+
+  /** O sinal de cada servico na mesma proporcao do desconto que ele recebeu. */
+  private BigDecimal sinalComDescontos(List<ResolvedPublicItem> items, List<BigDecimal> descontos) {
+    BigDecimal total = BigDecimal.ZERO;
+    for (int i = 0; i < items.size(); i++) {
+      BigDecimal sinal = calcularValorSinal(List.of(items.get(i)));
+      BigDecimal bruto = NumericUtil.multiply(items.get(i).service().getPrice(), items.get(i).quantity());
+      total = NumericUtil.add(total, sinalComDesconto(sinal, bruto, descontos.get(i)));
+    }
+    return total;
   }
 
   private BigDecimal calcularValorSinal(List<ResolvedPublicItem> items) {
@@ -460,13 +626,18 @@ public class ServicoPublicBooking {
         .orElseThrow(() -> new IllegalArgumentException("Salão não encontrado"));
   }
 
-  private void persistItems(Agendamento appointment, List<ResolvedPublicItem> items) {
+  /**
+   * Grava os itens com o desconto do cupom repartido pelo valor de cada um (o ultimo absorve o arredondamento).
+   * A comanda do atendimento recebe o preco ja com desconto (precoAcordadoPorUnidade).
+   */
+  private void persistItems(Agendamento appointment, List<ResolvedPublicItem> items, List<BigDecimal> descontos) {
     if (appointment == null || appointment.getId() == null || items == null || items.isEmpty()) return;
     boolean exists = agendamentoItemRepository.existsByAppointmentId(appointment.getId());
     if (exists) return;
 
     List<AgendamentoItem> persistedItems = new ArrayList<>();
-    for (ResolvedPublicItem resolvedItem : items) {
+    for (int indice = 0; indice < items.size(); indice++) {
+      ResolvedPublicItem resolvedItem = items.get(indice);
       AgendamentoItem item = new AgendamentoItem();
       item.setTenantId(appointment.getTenantId());
       item.setAppointmentId(appointment.getId());
@@ -475,8 +646,10 @@ public class ServicoPublicBooking {
       item.setQuantity(resolvedItem.quantity());
       item.setUnitPrice(resolvedItem.service().getPrice());
       item.setGrossAmount(NumericUtil.multiply(resolvedItem.service().getPrice(), resolvedItem.quantity()));
-      item.setDiscountAmount(NumericUtil.zero());
-      item.setTotalPrice(item.getGrossAmount());
+      // CHECK de appointment_items: desconto <= bruto e total = bruto - desconto.
+      BigDecimal descontoDoItem = descontos == null ? NumericUtil.zero() : descontos.get(indice).min(item.getGrossAmount());
+      item.setDiscountAmount(descontoDoItem);
+      item.setTotalPrice(NumericUtil.subtract(item.getGrossAmount(), descontoDoItem));
       item = agendamentoItemRepository.save(item);
       persistedItems.add(item);
     }
@@ -627,7 +800,10 @@ public class ServicoPublicBooking {
     PublicBookingDtos.PublicProfessional r = new PublicBookingDtos.PublicProfessional();
     r.id = p.getId().toString();
     r.name = p.getName();
-    r.avatar = p.getAvatar();
+    // So URL: a chave do storage no <img> era foto quebrada. Sem o servico (teste), so a URL de fora.
+    r.avatar = fotos != null
+        ? fotos.url(p.getTenantId(), p.getAvatar())
+        : (p.getAvatar() != null && p.getAvatar().startsWith("http") ? p.getAvatar() : null);
     if (p.getSpecialties() != null) {
       r.specialties = p.getSpecialties().stream().map(Specialty::getName).sorted().toList();
     }

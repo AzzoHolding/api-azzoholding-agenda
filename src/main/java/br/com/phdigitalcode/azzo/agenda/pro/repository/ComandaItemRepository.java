@@ -16,4 +16,16 @@ public interface ComandaItemRepository extends JpaRepository<ComandaItem, UUID> 
   List<ComandaItem> findByComandaIdOrderByCreatedAt(UUID comandaId);
 
   Optional<ComandaItem> findByIdAndComandaId(UUID id, UUID comandaId);
+
+  /** O pacote esta em alguma comanda (aberta ou fechada)? */
+  boolean existsByTenantIdAndTipoAndReferenciaId(UUID tenantId, String tipo, UUID referenciaId);
+
+  /** Atendimentos cobertos por estes saldos de pacote, em comandas fechadas: [item, data do fechamento]. */
+  @org.springframework.data.jpa.repository.Query(
+      "select i, c.closedAt from ComandaItem i, Comanda c where c.id = i.comandaId and c.tenantId = :tenantId"
+          + " and i.coberturaTipo = 'PACOTE' and i.coberturaSaldoId in :saldos and c.status = 'FECHADA'"
+          + " order by c.closedAt desc")
+  List<Object[]> usosDePacote(
+      @org.springframework.data.repository.query.Param("tenantId") UUID tenantId,
+      @org.springframework.data.repository.query.Param("saldos") java.util.Collection<UUID> saldos);
 }

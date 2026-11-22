@@ -131,7 +131,7 @@ class GlobalExceptionHandlerTest {
     IllegalStateException ex = new IllegalStateException("Falha: Authorization: Bearer abc.def.ghi invalido");
     ResponseEntity<ErrorResponse> response = handler.handleGeneric(ex);
 
-    assertThat(response.getBody().message).isEqualTo("Erro na requisicao");
+    assertThat(response.getBody().message).isEqualTo("Erro na requisição");
   }
 
   @Test
@@ -142,7 +142,7 @@ class GlobalExceptionHandlerTest {
         .isEqualTo("Senha inválida. Requisitos: mínimo de 8 caracteres.");
 
     ApiClientErrorException comValor = new ApiClientErrorException("falhou com token=abc123", 400);
-    assertThat(handler.handleApiClientError(comValor).getBody().message).isEqualTo("Erro na requisicao");
+    assertThat(handler.handleApiClientError(comValor).getBody().message).isEqualTo("Erro na requisição");
   }
 
   @Test

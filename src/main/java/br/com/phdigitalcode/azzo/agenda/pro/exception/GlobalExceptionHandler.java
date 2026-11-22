@@ -122,16 +122,16 @@ public class GlobalExceptionHandler {
   @ExceptionHandler(ConstraintViolationException.class)
   public ResponseEntity<ErrorResponse> handleConstraintViolation(ConstraintViolationException ex) {
     List<String> details = ex.getConstraintViolations().stream().map(this::formatViolation).toList();
-    ErrorResponse payload = new ErrorResponse("VALIDATION_ERROR", "Falha de validacao", details, resolvePath());
+    ErrorResponse payload = new ErrorResponse("VALIDATION_ERROR", "Falha de validação", details, resolvePath());
     return buildErrorResponse(HttpStatus.BAD_REQUEST.value(), payload, ex);
   }
 
   @ExceptionHandler(MethodArgumentNotValidException.class)
   public ResponseEntity<ErrorResponse> handleMethodArgumentNotValid(MethodArgumentNotValidException ex) {
     List<String> details = ex.getBindingResult().getFieldErrors().stream()
-        .map(fieldError -> fieldError.getField() + ": " + safeMessage(fieldError.getDefaultMessage(), "invalido"))
+        .map(fieldError -> fieldError.getField() + ": " + safeMessage(fieldError.getDefaultMessage(), "inválido"))
         .toList();
-    ErrorResponse payload = new ErrorResponse("VALIDATION_ERROR", "Falha de validacao", details, resolvePath());
+    ErrorResponse payload = new ErrorResponse("VALIDATION_ERROR", "Falha de validação", details, resolvePath());
     return buildErrorResponse(HttpStatus.BAD_REQUEST.value(), payload, ex);
   }
 
@@ -139,8 +139,37 @@ public class GlobalExceptionHandler {
   @ExceptionHandler(HttpMessageNotReadableException.class)
   public ResponseEntity<ErrorResponse> handleHttpMessageNotReadable(HttpMessageNotReadableException ex) {
     ErrorResponse payload =
-        new ErrorResponse("INVALID_REQUEST_BODY", "Corpo da requisicao invalido", List.of(), resolvePath());
+        new ErrorResponse("INVALID_REQUEST_BODY", "Corpo da requisição inválido", List.of(), resolvePath());
     return buildErrorResponse(HttpStatus.BAD_REQUEST.value(), payload, ex);
+  }
+
+  /**
+   * Parametro obrigatorio ausente saia como 400 sem mensagem (analise de 15/11/2026, B3:
+   * /reports/heatmap, /reports/commissions, /reports/daily).
+   */
+  @ExceptionHandler(org.springframework.web.bind.MissingServletRequestParameterException.class)
+  public ResponseEntity<ErrorResponse> handleParametroAusente(
+      org.springframework.web.bind.MissingServletRequestParameterException ex) {
+    ErrorResponse payload = new ErrorResponse(
+        resolveCode(400), "Parâmetro obrigatório ausente: " + ex.getParameterName() + ".", null, resolvePath());
+    return buildErrorResponse(HttpStatus.BAD_REQUEST.value(), payload, ex);
+  }
+
+  /** Parametro com tipo errado (texto onde se espera numero, etc.). */
+  @ExceptionHandler(org.springframework.web.method.annotation.MethodArgumentTypeMismatchException.class)
+  public ResponseEntity<ErrorResponse> handleParametroInvalido(
+      org.springframework.web.method.annotation.MethodArgumentTypeMismatchException ex) {
+    ErrorResponse payload = new ErrorResponse(
+        resolveCode(400), "Parâmetro inválido: " + ex.getName() + ".", null, resolvePath());
+    return buildErrorResponse(HttpStatus.BAD_REQUEST.value(), payload, ex);
+  }
+
+  /** Rota que nao existe: 404 com mensagem, e nao corpo vazio (analise de 15/11/2026, B7). */
+  @ExceptionHandler(org.springframework.web.servlet.resource.NoResourceFoundException.class)
+  public ResponseEntity<ErrorResponse> handleRotaInexistente(
+      org.springframework.web.servlet.resource.NoResourceFoundException ex) {
+    ErrorResponse payload = new ErrorResponse(resolveCode(404), "Rota não encontrada.", null, resolvePath());
+    return buildErrorResponse(HttpStatus.NOT_FOUND.value(), payload, ex);
   }
 
   @ExceptionHandler(AsaasException.class)
@@ -191,7 +220,7 @@ public class GlobalExceptionHandler {
     int status = ex.getStatus();
     String message = status == 429
         ? "Muitas tentativas em pouco tempo. Aguarde alguns minutos e tente novamente."
-        : safeMessage(ex.getMessage(), "Erro na requisicao");
+        : safeMessage(ex.getMessage(), "Erro na requisição");
     ErrorResponse payload = new ErrorResponse(resolveCode(status), message, null, resolvePath());
     return buildErrorResponse(status, payload, ex);
   }
@@ -214,8 +243,18 @@ public class GlobalExceptionHandler {
     // Pentest 14/10/2026 (SEG-013): falha inesperada (NPE, banco fora, bug) saia como 400 e era
     // logada so como WARN, sem a pilha — parecia erro do cliente e escondia defeito do servidor.
     if (isUnexpected) status = 500;
+    // Dois cadastros ao mesmo tempo com o mesmo telefone passam pela conferencia do ClienteService e o
+    // banco recusa o segundo; sai como conflito com mensagem clara, e nao como 500 (analise de 15/11, A2).
+    if (isUnexpected && root.getMessage() != null && root.getMessage().contains("uq_clients_tenant_phone")) {
+      status = 409;
+      msg = "Já existe um cliente com este telefone. Procure o cadastro dele na lista de clientes.";
+    }
 
     if (root instanceof IllegalArgumentException) {
+      // Id malformado (na URL ou no corpo) chegava como "Invalid UUID string: abc" (relatorio de 14/11, Baixo 1).
+      if (root.getMessage() != null && root.getMessage().startsWith("Invalid UUID string")) {
+        msg = "Identificador inválido.";
+      }
       if (isFunctionalCode(msg)) {
         functionalCode = msg.trim().toUpperCase(Locale.ROOT);
         msg = resolveFunctionalMessage(functionalCode);
@@ -278,14 +317,14 @@ public class GlobalExceptionHandler {
   }
 
   private String appendCorrectiveAction(String message, String actionHint) {
-    String normalized = safeMessage(message, "Erro na requisicao");
+    String normalized = safeMessage(message, "Erro na requisição");
     if (normalized.toLowerCase(Locale.ROOT).contains(actionHint.toLowerCase(Locale.ROOT))) return normalized;
     return normalized + " " + actionHint;
   }
 
   private String formatViolation(ConstraintViolation<?> violation) {
     String path = violation.getPropertyPath() == null ? "" : violation.getPropertyPath().toString();
-    String msg = safeMessage(violation.getMessage(), "invalido");
+    String msg = safeMessage(violation.getMessage(), "inválido");
     if (path.isBlank()) return msg;
     return path + ": " + msg;
   }
@@ -309,7 +348,7 @@ public class GlobalExceptionHandler {
         || lower.contains("authorization")
         || lower.contains("bearer ")
         || VALOR_SENSIVEL.matcher(lower).find()) {
-      return "Erro na requisicao";
+      return "Erro na requisição";
     }
     return input;
   }
@@ -317,7 +356,7 @@ public class GlobalExceptionHandler {
   /**
    * "senha"/"password"/"token" so escondem a mensagem quando trazem um VALOR ("token=abc",
    * "senha: 123"). A palavra sozinha escondia ate a politica de senha ("Senha invalida. Requisitos:
-   * ...") e "a atual nao confere": a pessoa via "Erro na requisicao" sem saber o que errou (teste de
+   * ...") e "a atual nao confere": a pessoa via "Erro na requisição" sem saber o que errou (teste de
    * telas, 25/10/2026).
    */
   private static final java.util.regex.Pattern VALOR_SENSIVEL =

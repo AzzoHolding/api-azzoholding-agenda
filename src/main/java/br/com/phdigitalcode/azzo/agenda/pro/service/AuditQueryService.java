@@ -384,6 +384,10 @@ public class AuditQueryService {
     detail.metadata = parseJson(event.getMetadataJson());
     detail.eventHash = event.getEventHash();
     detail.prevEventHash = event.getPrevEventHash();
+    detail.hashVersion = event.getHashVersion();
+    detail.chainSeq = event.getChainSeq();
+    detail.chainHash = event.getChainHash();
+    detail.sealedAt = event.getSealedAt() == null ? null : event.getSealedAt().toString();
     return detail;
   }
 
@@ -413,20 +417,49 @@ public class AuditQueryService {
         .toList();
   }
 
-  private boolean isChainValidForEvent(UUID tenantId, AuditEvent event) {
+  /**
+   * O evento confere sozinho? Na v2: o conteudo bate com o {@code event_hash} (e os JSON com os
+   * digests, sem redacao), o elo bate, e o anterior e a posicao de antes (ou a ancora do expurgo).
+   * Sem selo ainda: {@code null}. Na v1: o hash com os nanossegundos perdidos e o elo para um evento
+   * que existe. A cadeia inteira e a conferencia ({@code /auditoria/integridade}).
+   */
+  private Boolean isChainValidForEvent(UUID tenantId, AuditEvent event) {
     if (event == null) return false;
-    if (event.getPrevEventHash() == null || event.getPrevEventHash().isBlank()) return true;
-    Specification<AuditEvent> spec = (root, query, cb) -> cb.and(
-        cb.equal(root.get("tenantId"), tenantId),
-        cb.lessThanOrEqualTo(root.get("createdAt"), event.getCreatedAt()),
-        cb.notEqual(root.get("id"), event.getId()));
-    List<AuditEvent> prevCandidates = auditEventRepository.findAll(
-        spec,
-        PageRequest.of(0, 1, Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id")))).getContent();
-    if (prevCandidates.isEmpty()) {
-      return auditRetentionEventRepository.existsPurgeBoundaryBefore(tenantId, event.getCreatedAt());
+    if (event.getHashVersion() == br.com.phdigitalcode.azzo.agenda.pro.integration.HashesDaAuditoria.V2) {
+      return eventoV2Confere(tenantId, event);
     }
-    return event.getPrevEventHash().equals(prevCandidates.get(0).getEventHash());
+    if (event.getRedactedAt() == null && !ConferenciaDaAuditoria.confereV1(event)) return false;
+    if (event.getPrevEventHash() == null || event.getPrevEventHash().isBlank()) return true;
+    Specification<AuditEvent> anterior = (root, query, cb) -> cb.and(
+        cb.equal(root.get("tenantId"), tenantId),
+        cb.equal(root.get("eventHash"), event.getPrevEventHash()));
+    if (auditEventRepository.count(anterior) > 0) return true;
+    return auditRetentionEventRepository.existsPurgeBoundaryBefore(tenantId, event.getCreatedAt());
+  }
+
+  private Boolean eventoV2Confere(UUID tenantId, AuditEvent event) {
+    if (event.getChainSeq() == null) return null;
+    if (!br.com.phdigitalcode.azzo.agenda.pro.integration.HashesDaAuditoria.hashDoConteudoV2(event)
+        .equals(event.getEventHash())) return false;
+    if (event.getRedactedAt() == null
+        && !br.com.phdigitalcode.azzo.agenda.pro.integration.HashesDaAuditoria
+            .digestsDosJson(event.getBeforeJson(), event.getAfterJson(), event.getMetadataJson())
+            .equals(event.getPayloadDigests())) return false;
+    if (!br.com.phdigitalcode.azzo.agenda.pro.integration.HashesDaAuditoria.hashDoElo(event)
+        .equals(event.getChainHash())) return false;
+    long posicao = event.getChainSeq();
+    if (posicao > 1) {
+      var anterior = auditEventRepository.naPosicao(tenantId, posicao - 1);
+      if (anterior.isPresent()) return java.util.Objects.equals(anterior.get().getChainHash(), event.getPrevEventHash());
+      return auditRetentionEventRepository.hashesDeAncora(tenantId).contains(event.getPrevEventHash());
+    }
+    // Posicao 1: continua o ultimo evento legado (ou a ancora, se o legado foi expurgado).
+    if (event.getPrevEventHash() == null) return true;
+    Specification<AuditEvent> legado = (root, query, cb) -> cb.and(
+        cb.equal(root.get("tenantId"), tenantId),
+        cb.equal(root.get("eventHash"), event.getPrevEventHash()));
+    return auditEventRepository.count(legado) > 0
+        || auditRetentionEventRepository.hashesDeAncora(tenantId).contains(event.getPrevEventHash());
   }
 
   private List<String> parseStringList(String json) {

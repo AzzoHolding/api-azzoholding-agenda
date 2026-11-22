@@ -73,6 +73,43 @@ public class EmailTemplateRendererService {
     return render(EmailTemplateType.EMAIL_VERIFICATION, variables);
   }
 
+  /**
+   * E-mail da area da cliente: titulo, texto e um botao. Nao tem modelo editavel; o remetente e o mesmo do e-mail de
+   * confirmacao. Tudo o que vem de fora entra escapado.
+   */
+  public RenderedTemplate renderAvisoDaCliente(String nome, String titulo, String texto, String botao, String url) {
+    Map<String, String> v = new LinkedHashMap<>();
+    v.put("nome", normalize(nome, "cliente"));
+    v.put("titulo", normalize(titulo, productName));
+    v.put("texto", normalize(texto, ""));
+    v.put("botao", normalize(botao, "Abrir"));
+    v.put("url", normalize(url, "#"));
+    v.put("productName", productName);
+    Map<String, String> e = escaparValores(v);
+    String paragrafos = String.join("", java.util.Arrays.stream(e.get("texto").split("\n"))
+        .map(p -> "<p style=\"margin:0 0 14px 0;font-size:16px;line-height:1.6;\">" + p + "</p>").toList());
+    String html = """
+        <div style="margin:0;padding:24px;background:#f4f4f5;font-family:Arial,Helvetica,sans-serif;color:#18181b;">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #e4e4e7;border-radius:12px;">
+            <tr><td style="padding:28px 32px;">
+              <div style="font-size:12px;letter-spacing:0.12em;text-transform:uppercase;color:#71717a;">Minha área · {{productName}}</div>
+              <h1 style="margin:10px 0 18px 0;font-size:22px;line-height:1.3;">{{titulo}}</h1>
+              <p style="margin:0 0 14px 0;font-size:16px;line-height:1.6;">Olá, {{nome}}.</p>
+              {{paragrafos}}
+              <p style="margin:22px 0;"><a href="{{url}}" style="display:inline-block;background:#18181b;color:#ffffff;text-decoration:none;padding:12px 22px;border-radius:999px;font-size:15px;font-weight:bold;">{{botao}}</a></p>
+              <p style="margin:0;font-size:13px;line-height:1.6;color:#71717a;word-break:break-all;">Se o botão não abrir, copie este endereço: {{url}}</p>
+              <p style="margin:18px 0 0 0;font-size:13px;line-height:1.6;color:#71717a;">Se não foi você, ignore este e-mail.</p>
+            </td></tr>
+          </table>
+        </div>"""
+        .replace("{{productName}}", e.get("productName")).replace("{{titulo}}", e.get("titulo")).replace("{{nome}}", e.get("nome"))
+        .replace("{{botao}}", e.get("botao")).replace("{{url}}", e.get("url")).replace("{{paragrafos}}", paragrafos);
+    EmailTemplateConfig config = emailTemplateConfigRepository.findActiveGlobalByType(EmailTemplateType.EMAIL_VERIFICATION).orElse(null);
+    return new RenderedTemplate(EmailTemplateType.EMAIL_VERIFICATION, "Área da cliente", v.get("titulo") + " - " + productName, html,
+        config == null ? null : normalize(config.getFromEmail(), null), config == null ? productName : normalize(config.getFromName(), productName),
+        config == null ? null : normalize(config.getReplyTo(), null), List.of(), v);
+  }
+
   public RenderedTemplate preview(EmailTemplateType type, TemplateInput input) {
     TemplateDefinition definition = definition(type);
     Map<String, String> variables = sampleVariables();
@@ -123,7 +160,9 @@ public class EmailTemplateRendererService {
     String htmlTemplate =
         sanitizeHtml(normalize(input.htmlTemplate(), definition.defaultHtmlTemplate()));
     String renderedSubject = applyVariables(subjectTemplate, variables);
-    String renderedHtml = applyVariables(htmlTemplate, variables);
+    // Os valores entram ESCAPADOS no HTML: um nome digitado como "<script>..." virava codigo no corpo
+    // do e-mail (analise de 15/11/2026, B4). O assunto e texto puro e fica como veio.
+    String renderedHtml = applyVariables(htmlTemplate, escaparValores(variables));
     String resolvedFromEmail = normalize(input.fromEmail(), null);
     String resolvedFromName = normalize(input.fromName(), productName);
     String resolvedReplyTo = normalize(input.replyTo(), null);
@@ -145,6 +184,22 @@ public class EmailTemplateRendererService {
       result = result.replace("{{" + entry.getKey() + "}}", normalize(entry.getValue(), ""));
     }
     return result;
+  }
+
+  static Map<String, String> escaparValores(Map<String, String> variables) {
+    Map<String, String> escapados = new java.util.LinkedHashMap<>();
+    variables.forEach((chave, valor) -> escapados.put(chave, escaparHtml(valor)));
+    return escapados;
+  }
+
+  static String escaparHtml(String valor) {
+    if (valor == null) return null;
+    return valor
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("\"", "&quot;")
+        .replace("'", "&#39;");
   }
 
   private String normalize(String value, String fallback) {

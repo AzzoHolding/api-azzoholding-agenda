@@ -119,6 +119,21 @@ public class EmailJobProcessor {
           "EMAIL_VERIFICATION_LINK");
     }
 
+    if (job.emailType() == EmailJobType.CLIENTE_AVISO) {
+      br.com.phdigitalcode.azzo.agenda.pro.integration.AvisoDaClienteEmailPayload payload =
+          readPayload(job.payloadJson(), br.com.phdigitalcode.azzo.agenda.pro.integration.AvisoDaClienteEmailPayload.class);
+      EmailTemplateRendererService.RenderedTemplate rendered =
+          emailTemplateRendererService.renderAvisoDaCliente(job.recipientName(), payload.titulo(), payload.texto(), payload.botao(), payload.url());
+      return credentialsEmailService.sendHtmlEmail(
+          job.recipientEmail(),
+          rendered.subject(),
+          rendered.html(),
+          rendered.fromEmail(),
+          rendered.fromName(),
+          rendered.replyTo(),
+          "CLIENT_AREA_NOTICE");
+    }
+
     throw new IllegalStateException("Tipo de email não suportado: " + job.emailType());
   }
 

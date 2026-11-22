@@ -7,7 +7,8 @@ import jakarta.validation.constraints.NotNull;
 
 /** Porte verbatim de {@code modules/finance/api/dto/FechamentoCaixaRequest.java}. */
 public class FechamentoCaixaRequest {
-  @NotNull public Map<String, BigDecimal> countedTotals;
+  @NotNull(message = "Informe o valor contado de cada forma de pagamento.")
+  public Map<String, BigDecimal> countedTotals;
   public String notes;
 
   /**

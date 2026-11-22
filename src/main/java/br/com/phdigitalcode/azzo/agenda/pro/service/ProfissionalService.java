@@ -131,6 +131,13 @@ public class ProfissionalService {
     this.agendamentoRepository = agendamentoRepository;
   }
 
+  private FotosDaEquipe fotos;
+
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setFotosDaEquipe(FotosDaEquipe fotos) {
+    this.fotos = fotos;
+  }
+
   /** A equipe: todos os ativos, inclusive quem nao recebe agendamento. */
   @Transactional(readOnly = true)
   public List<ProfissionalResponse> listar(String serviceId) {
@@ -410,7 +417,8 @@ public class ProfissionalService {
     p.setName(req.name);
     p.setEmail(req.email != null ? req.email.trim().toLowerCase(Locale.ROOT) : null);
     p.setPhone(br.com.phdigitalcode.azzo.agenda.pro.util.TelefoneBr.normalizarSeMudou(req.phone, p.getPhone()));
-    p.setAvatar(req.avatar);
+    // A foto NAO vem deste formulario: so pelo envio proprio (FotosDaEquipe). Com o set aqui, salvar
+    // a ficha (que manda avatar nulo) apagava a foto.
     // A colecao e do Hibernate: troca-la por outra (Set.of() era imutavel) quebrava o merge com
     // UnsupportedOperationException e toda edicao de profissional sem especialidade dava 500
     // (teste ponta a ponta de 23/10/2026). Atualiza no lugar.
@@ -509,7 +517,6 @@ public class ProfissionalService {
     user.setName(req.name);
     user.setEmail(req.email.trim().toLowerCase(Locale.ROOT));
     user.setPhone(req.phone);
-    user.setAvatar(req.avatar);
     user.setRole(PapelUsuario.PROFESSIONAL);
     validarCriacaoUsuarioPorRole(user.getRole());
     user.setPasswordHash(BCrypt.withDefaults().hashToString(12, effectivePassword.toCharArray()));
@@ -570,7 +577,6 @@ public class ProfissionalService {
     if (!preservePrimaryRole) {
       user.setName(req.name);
       user.setPhone(req.phone);
-      user.setAvatar(req.avatar);
     }
   }
 
@@ -732,6 +738,7 @@ public class ProfissionalService {
     r.email = p.getEmail();
     r.phone = p.getPhone();
     r.avatar = p.getAvatar();
+    r.avatarUrl = fotos == null ? null : fotos.url(p.getTenantId(), p.getAvatar());
     r.specialties = p.getSpecialties().stream().map(Specialty::getName).sorted().toList();
     r.specialtiesDetailed = p.getSpecialties().stream()
         .sorted(Comparator.comparing(Specialty::getName))

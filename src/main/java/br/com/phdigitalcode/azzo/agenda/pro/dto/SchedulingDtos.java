@@ -236,6 +236,9 @@ public final class SchedulingDtos {
   public static class AppointmentStatusUpdateRequest {
     public String paymentMethod;
 
+    /** Ao iniciar, quando uma exigencia do servico bloqueia (anamnese ou termo pendente): por que inicia assim. */
+    public String justificativaInicio;
+
     /**
      * Relevante apenas ao concluir (status=COMPLETED): "ADD_TO_COMANDA" (padrao - so vincula o
      * servico a comanda, sem lancar no caixa agora) ou "PAY_NOW" (cobra e fecha a comanda

@@ -11,6 +11,8 @@ spring:
     show-sql: false
 
 app:
+  pagamentos:
+    saloes-piloto: "*"
   security:
     jwt:
       private-key-location: classpath:privateKey.pem

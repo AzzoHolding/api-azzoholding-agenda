@@ -42,6 +42,14 @@ public class ClientPackageBalance {
   @Column(name = "sessoes_usadas", nullable = false)
   private int sessoesUsadas = 0;
 
+  /** Valor de cada sessao, gravado na venda (V177). Vazio nas compras antigas: divisao igual. */
+  @jakarta.persistence.Column(name = "valor_sessao", precision = 12, scale = 2)
+  private java.math.BigDecimal valorSessao;
+
+  /** Quando as sessoes vencem (V177); vazio = nao vencem. */
+  @jakarta.persistence.Column(name = "expira_em")
+  private java.time.Instant expiraEm;
+
   @PrePersist
   void prePersist() {
     if (id == null) id = UUID.randomUUID();

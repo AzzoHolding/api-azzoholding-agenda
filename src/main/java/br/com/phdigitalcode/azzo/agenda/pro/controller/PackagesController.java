@@ -50,4 +50,12 @@ public class PackagesController {
       @PathVariable UUID id, @Valid @RequestBody PackageDtos.PackageRequest request) {
     return servicoPackages.atualizar(id, request);
   }
+
+  /** So pacote nunca vendido nem lancado em comanda; o vendido se inativa. */
+  @org.springframework.web.bind.annotation.DeleteMapping("/{id}")
+  @PreAuthorize("hasRole('OWNER')")
+  @org.springframework.web.bind.annotation.ResponseStatus(org.springframework.http.HttpStatus.NO_CONTENT)
+  public void excluir(@PathVariable UUID id) {
+    servicoPackages.excluir(id);
+  }
 }

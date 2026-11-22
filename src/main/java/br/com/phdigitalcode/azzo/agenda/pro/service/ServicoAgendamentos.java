@@ -130,6 +130,30 @@ public class ServicoAgendamentos {
 
   private static final Logger LOG = LoggerFactory.getLogger(ServicoAgendamentos.class);
 
+  /** Cupom do agendamento online (item 6). Por setter: o construtor nao muda. */
+  private ServicoDeCupons servicoDeCupons;
+
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setServicoDeCupons(ServicoDeCupons servicoDeCupons) {
+    this.servicoDeCupons = servicoDeCupons;
+  }
+
+  /** Ficha de atendimento (anamnese e ficha). Por setter: o construtor nao muda (licao de 20/10). */
+  private br.com.phdigitalcode.azzo.agenda.pro.saude.FichaDeAtendimento fichaDeAtendimento;
+
+  /** Quem ve as notas do atendimento (mesma regra da ficha). */
+  private br.com.phdigitalcode.azzo.agenda.pro.saude.AcessoDeSaude acessoDeSaude;
+
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setFichaDeAtendimento(br.com.phdigitalcode.azzo.agenda.pro.saude.FichaDeAtendimento fichaDeAtendimento) {
+    this.fichaDeAtendimento = fichaDeAtendimento;
+  }
+
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setAcessoDeSaude(br.com.phdigitalcode.azzo.agenda.pro.saude.AcessoDeSaude acessoDeSaude) {
+    this.acessoDeSaude = acessoDeSaude;
+  }
+
   private static final ZoneId ZONE_BR = ZoneId.of("America/Sao_Paulo");
   private static final DateTimeFormatter TIME_FMT = DateTimeFormatter.ofPattern("HH:mm");
   /** Profissional desligado de "aceita agendamento": continua na equipe, sem marcacao nova. */
@@ -176,6 +200,13 @@ public class ServicoAgendamentos {
   private VinculosDeExclusao vinculosDeExclusao;
 
   private final PermissionService permissionService;
+
+  private FotosDaEquipe fotos;
+
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setFotosDaEquipe(FotosDaEquipe fotos) {
+    this.fotos = fotos;
+  }
 
   public ServicoAgendamentos(
       AgendamentoRepository agendamentoRepository,
@@ -288,12 +319,15 @@ public class ServicoAgendamentos {
               response.comandaId = comanda.getId().toString();
               response.comandaStatus = comanda.getStatus();
             });
+    // As notas do atendimento podem ter dado de saude: so quem ve a ficha (recepcao sem a opcao nao ve).
     response.careNotes =
-        appointmentCustomerNoteRepository
-            .findByTenantIdAndAppointmentIdOrderByCreatedAtDesc(tenantId, id)
-            .stream()
-            .map(this::toCustomerNoteResponse)
-            .toList();
+        acessoDeSaude != null && !acessoDeSaude.podeVerFicha(tenantId, appointment.getProfessionalId())
+            ? List.of()
+            : appointmentCustomerNoteRepository
+                .findByTenantIdAndAppointmentIdOrderByCreatedAtDesc(tenantId, id)
+                .stream()
+                .map(this::toCustomerNoteResponse)
+                .toList();
     response.timeline = montarTimelineAgendamento(tenantId, id);
     return response;
   }
@@ -394,6 +428,13 @@ public class ServicoAgendamentos {
   @Transactional
   public AgendamentoResponse atualizarStatus(
       UUID id, String status, String paymentMethod, String conclusionAction) {
+    return atualizarStatus(id, status, paymentMethod, conclusionAction, null);
+  }
+
+  /** Com a justificativa para iniciar quando uma exigencia do servico bloqueia (anamnese e ficha). */
+  @Transactional
+  public AgendamentoResponse atualizarStatus(
+      UUID id, String status, String paymentMethod, String conclusionAction, String justificativaInicio) {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     // AGD-006: serializa por agendamento ANTES de ler. Sem isto, dois "Concluir" simultaneos liam o
     // mesmo status e registravam receita, comissao e baixa de insumo duas vezes.
@@ -410,7 +451,17 @@ public class ServicoAgendamentos {
     StatusAgendamento.validarTransicao(statusAnterior, novoStatus);
     validarNoShowPermitido(a, novoStatus);
     validarAtendimentoNoDia(a, statusAnterior, novoStatus);
-    validarNotaOperacionalObrigatoria(tenantId, a, novoStatus);
+    if (fichaDeAtendimento != null) {
+      if (novoStatus == StatusAgendamento.COMPLETED && statusAnterior != StatusAgendamento.COMPLETED) {
+        fichaDeAtendimento.exigirParaConcluir(tenantId, a.getId());
+      }
+    } else {
+      validarNotaOperacionalObrigatoria(tenantId, a, novoStatus);
+    }
+    if (fichaDeAtendimento != null && novoStatus == StatusAgendamento.IN_PROGRESS
+        && statusAnterior != StatusAgendamento.IN_PROGRESS) {
+      fichaDeAtendimento.aoIniciar(tenantId, a.getId(), justificativaInicio);
+    }
     if (statusAnterior == StatusAgendamento.COMPLETED && novoStatus != StatusAgendamento.COMPLETED) {
       validarComandaNaoFechadaParaSairDeCompleted(tenantId, a);
     }
@@ -451,8 +502,20 @@ public class ServicoAgendamentos {
         && novoStatus == StatusAgendamento.IN_PROGRESS) {
       comandaAbertaId = abrirComandaAutomaticaSeNecessario(tenantId, a);
     }
+    if (fichaDeAtendimento != null && novoStatus == StatusAgendamento.COMPLETED
+        && statusAnterior != StatusAgendamento.COMPLETED) {
+      fichaDeAtendimento.aoConcluir(tenantId, a.getId(), authenticatedUser.idOuNulo());
+    }
     if (novoStatus == StatusAgendamento.CANCELLED || novoStatus == StatusAgendamento.NO_SHOW) {
+      if (fichaDeAtendimento != null) {
+        fichaDeAtendimento.aoCancelar(tenantId, a.getId(),
+            novoStatus == StatusAgendamento.NO_SHOW ? "cliente faltou" : "agendamento cancelado");
+      }
       cancelarComandaAbertaSeNecessario(tenantId, a);
+      // O cupom usado no link volta a valer: a cliente nao foi atendida (item 6).
+      if (servicoDeCupons != null && a.getCupomId() != null) {
+        servicoDeCupons.liberarDoAgendamento(tenantId, a.getId());
+      }
     }
     if (novoStatus == StatusAgendamento.CANCELLED) {
       try {
@@ -769,6 +832,8 @@ public class ServicoAgendamentos {
               + " e não pode ser excluído. Cancele o agendamento.");
     }
 
+    // A ficha vazia sai junto; com conteudo, o agendamento se cancela (anamnese e ficha).
+    if (fichaDeAtendimento != null) fichaDeAtendimento.aoExcluir(tenantId, id);
     Map<String, Object> snapshot = snapshotAgendamento(before);
     agendamentoRepository.excluirPorIdETenant(id, tenantId);
     auditarAgendamento(tenantId, "APPOINTMENT_DELETE", snapshot, null, id);
@@ -1706,6 +1771,10 @@ public class ServicoAgendamentos {
     }
   }
 
+  private static int tamanho(String texto) {
+    return texto == null ? 0 : texto.length();
+  }
+
   private Map<String, Object> snapshotCustomerNote(AppointmentCustomerNote note) {
     if (note == null) return null;
     Map<String, Object> snapshot = new HashMap<>();
@@ -1716,9 +1785,10 @@ public class ServicoAgendamentos {
     snapshot.put(
         "recordedByUserId",
         note.getRecordedByUserId() != null ? note.getRecordedByUserId().toString() : null);
-    snapshot.put("serviceExecutionNotes", note.getServiceExecutionNotes());
-    snapshot.put("clientFeedbackNotes", note.getClientFeedbackNotes());
-    snapshot.put("internalFollowupNotes", note.getInternalFollowupNotes());
+    // O texto pode ter dado de saude e a auditoria nao e apagada na anonimizacao: so o tamanho de cada campo.
+    snapshot.put("serviceExecutionNotesLength", tamanho(note.getServiceExecutionNotes()));
+    snapshot.put("clientFeedbackNotesLength", tamanho(note.getClientFeedbackNotes()));
+    snapshot.put("internalFollowupNotesLength", tamanho(note.getInternalFollowupNotes()));
     snapshot.put("createdAt", note.getCreatedAt() != null ? note.getCreatedAt().toString() : null);
     snapshot.put("updatedAt", note.getUpdatedAt() != null ? note.getUpdatedAt().toString() : null);
     return snapshot;
@@ -1741,6 +1811,7 @@ public class ServicoAgendamentos {
     }
     a.setDate(DataUtil.parseDataISO(req.date));
     if (a.getDate() == null) throw new IllegalArgumentException("Data inválida");
+    exigirDataDentroDaJanela(a.getDate());
     if (tenantOperationalSettingsService.isClosedOnSpecialDate(tenantId, a.getDate())) {
       throw new IllegalArgumentException("Salão fechado na data informada");
     }
@@ -1797,6 +1868,23 @@ public class ServicoAgendamentos {
       a.setStatus(inicial);
     }
     return items;
+  }
+
+  /** Quantos dias para tras a agenda aceita lancar um atendimento que ja aconteceu. */
+  static final int DIAS_DE_LANCAMENTO_RETROATIVO = 7;
+
+  /**
+   * A agenda interna aceitava qualquer data: um agendamento em 2020 era gravado (analise de
+   * 15/11/2026, M1) e ficava pendente para sempre. O lancamento retroativo continua possivel (o
+   * atendimento que aconteceu e ninguem marcou), ate {@value #DIAS_DE_LANCAMENTO_RETROATIVO} dias.
+   */
+  static void exigirDataDentroDaJanela(LocalDate data) {
+    LocalDate hoje = LocalDate.now(ZONE_BR);
+    if (data.isBefore(hoje.minusDays(DIAS_DE_LANCAMENTO_RETROATIVO))) {
+      throw new IllegalArgumentException(
+          "Data muito antiga: a agenda aceita lançar atendimentos de até "
+              + DIAS_DE_LANCAMENTO_RETROATIVO + " dias atrás.");
+    }
   }
 
   private AgendamentoRequest buildRequestForItems(AppointmentUpdateRequest req, Agendamento a) {
@@ -2638,6 +2726,7 @@ public class ServicoAgendamentos {
       pr.email = p.getEmail();
       pr.phone = p.getPhone();
       pr.avatar = p.getAvatar();
+      pr.avatarUrl = fotos == null ? null : fotos.url(p.getTenantId(), p.getAvatar());
       pr.commissionRate = p.getCommissionRate();
       pr.isActive = p.isActive();
       pr.createdAt = p.getCreatedAt() != null ? p.getCreatedAt().toString() : null;

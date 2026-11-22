@@ -27,7 +27,9 @@ class ApuracaoMensalDaNfseTest {
 
   private final UUID tenantId = UUID.randomUUID();
   private final NfseInvoiceRepository repositorio = mock(NfseInvoiceRepository.class);
-  private final ApuracaoMensalDaNfse apuracao = new ApuracaoMensalDaNfse(repositorio);
+  private final br.com.phdigitalcode.azzo.agenda.pro.repository.NfseDocumentoDaReceitaRepository notasDaReceita =
+      org.mockito.Mockito.mock(br.com.phdigitalcode.azzo.agenda.pro.repository.NfseDocumentoDaReceitaRepository.class);
+  private final ApuracaoMensalDaNfse apuracao = new ApuracaoMensalDaNfse(repositorio, notasDaReceita);
 
   @Test
   void somaServicosEIssDasNotasDeProducaoDoMesPelaCompetencia() {
@@ -85,6 +87,39 @@ class ApuracaoMensalDaNfseTest {
     assertThat(ano.totalServicos).isEqualTo(12000);
     assertThat(ano.totalImpostos).isEqualTo(600);
     assertThat(ano.totalDocumentos).isEqualTo(12);
+  }
+
+  /** Nota emitida fora do Azzo entra no mes; a que tambem e do Azzo (mesma chave) nao conta duas vezes. */
+  @Test
+  void notasEmitidasForaDoAzzoEntramSemDuplicar() {
+    NfseInvoiceEntity doAzzo = nota(NfseAmbiente.PRODUCAO, "100.00", "5.00", false);
+    doAzzo.setChaveAcessoNfse("CHAVE-AZZO");
+    when(repositorio.listForAccountingExport(eq(tenantId), any(), any(), any())).thenReturn(List.of(doAzzo));
+    when(notasDaReceita.emitidasPeloSalaoNaCompetencia(eq(tenantId), any(), any()))
+        .thenReturn(List.of(externa("CHAVE-AZZO", "100.00", "5.00", false), externa("CHAVE-PORTAL", "80.00", "4.00", false)));
+
+    FiscalDtos.ApuracaoMensal mes = apuracao.doMes(tenantId, 2026, 11);
+
+    assertThat(mes.totalServicos).isEqualTo(18000);
+    assertThat(mes.totalImpostos).isEqualTo(900);
+    assertThat(mes.totalDocumentos).isEqualTo(2);
+    assertThat(mes.documentos.get(1).status).isEqualTo("EXTERNA");
+    assertThat(mes.documentos.get(1).accessKey).isEqualTo("CHAVE-PORTAL");
+  }
+
+  private br.com.phdigitalcode.azzo.agenda.pro.entity.NfseDocumentoDaReceitaEntity externa(
+      String chave, String servicos, String iss, boolean retido) {
+    br.com.phdigitalcode.azzo.agenda.pro.entity.NfseDocumentoDaReceitaEntity nota =
+        new br.com.phdigitalcode.azzo.agenda.pro.entity.NfseDocumentoDaReceitaEntity();
+    nota.setId(UUID.randomUUID());
+    nota.setChaveAcesso(chave);
+    nota.setNumeroNfse("5");
+    nota.setCompetencia(LocalDate.of(2026, 11, 3));
+    nota.setValorServicos(new BigDecimal(servicos));
+    nota.setValorIss(new BigDecimal(iss));
+    nota.setIssRetido(retido);
+    nota.setTomadorNome("Cliente do portal");
+    return nota;
   }
 
   @Test

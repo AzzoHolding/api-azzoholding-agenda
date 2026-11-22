@@ -1,5 +1,7 @@
 package br.com.phdigitalcode.azzo.agenda.pro.service;
 
+import br.com.phdigitalcode.azzo.agenda.pro.exception.ApiClientErrorException;
+
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -148,6 +150,15 @@ public class ClienteService {
     return authenticatedUser.isProfessional() && !permissionService.possuiPermissao("client:full");
   }
 
+  /** Pontos e pacotes sao da ficha completa: a cliente existe neste salao e quem pede ve a ficha. */
+  @Transactional(readOnly = true)
+  public void exigirFichaCompletaDe(UUID id) {
+    exigirFichaCompleta();
+    UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
+    clienteRepository.findByIdAndTenantId(id, tenantId)
+        .orElseThrow(() -> new br.com.phdigitalcode.azzo.agenda.pro.exception.ApiClientErrorException("Cliente não encontrado.", 404));
+  }
+
   private void exigirFichaCompleta() {
     if (soNomeETelefone()) throw new AccessDeniedException("Acesso negado");
   }
@@ -166,6 +177,7 @@ public class ClienteService {
     cliente.totalVisits = 0;
     cliente.totalSpent = null;
     cliente.lastVisit = null;
+    cliente.loyaltyPoints = null;
     if (cliente instanceof ClienteDetailResponse detalhe) {
       detalhe.stats = null;
       detalhe.recentAppointments = List.of();
@@ -207,6 +219,7 @@ public class ClienteService {
     UUID tenantId = contextoTenant.obterTenantIdOuFalhar();
     Cliente c = new Cliente();
     c.setTenantId(tenantId);
+    recusarTelefoneRepetido(tenantId, req, c);
     aplicar(req, c);
     clienteRepository.save(c);
 
@@ -231,6 +244,7 @@ public class ClienteService {
 
     ClienteStats beforeStats = clienteStatsRepository.findStatsByTenantAndClient(tenantId, c.getId());
     Map<String, Object> before = resumoCliente(c, beforeStats);
+    recusarTelefoneRepetido(tenantId, req, c);
     aplicar(req, c);
     clienteRepository.save(c);
 
@@ -242,6 +256,26 @@ public class ClienteService {
             "tenantId", tenantId, "clientId", c.getId(), "email", c.getEmail(),
             "phone", c.getPhone(), "clientType", c.getClientType()));
     return toListResponse(c, afterStats, List.of());
+  }
+
+  /**
+   * O telefone e unico por salao ({@code uq_clients_tenant_phone}). Sem esta conferencia o banco recusava
+   * e a tela mostrava "erro inesperado" (500) — analise de 15/11/2026, defeito A2. Confere antes de
+   * {@code aplicar}, com o telefone ja normalizado, porque depois a consulta descarregaria a alteracao
+   * no banco e o erro voltaria.
+   */
+  private void recusarTelefoneRepetido(UUID tenantId, ClienteRequest req, Cliente c) {
+    String telefone =
+        br.com.phdigitalcode.azzo.agenda.pro.util.TelefoneBr.normalizarSeMudou(req.phone, c.getPhone());
+    if (telefone == null || telefone.isBlank()) return;
+    clienteRepository.findFirstByTenantIdAndPhone(tenantId, telefone)
+        .filter(outro -> !outro.getId().equals(c.getId()))
+        .ifPresent(outro -> {
+          throw new ApiClientErrorException(
+              "Já existe um cliente com este telefone: " + outro.getName()
+                  + ". Procure o cadastro dele na lista de clientes.",
+              409);
+        });
   }
 
   @Transactional
@@ -262,7 +296,7 @@ public class ClienteService {
           "tenantId", tenantId, "clientId", id, "vinculos", vinculos));
       throw new IllegalArgumentException(
           "Este cliente tem " + String.join(", ", vinculos)
-              + " e não pode ser excluído. Para remover os dados pessoais, use a anonimizacao"
+              + " e não pode ser excluído. Para remover os dados pessoais, use a anonimização"
               + " (LGPD).");
     }
 
@@ -459,6 +493,7 @@ public class ClienteService {
     r.totalSpent = stats.totalSpent();
     r.lastVisit = stats.lastVisit() != null ? stats.lastVisit().toString() : null;
     r.createdAt = c.getCreatedAt() != null ? c.getCreatedAt().toString() : null;
+    r.loyaltyPoints = c.getLoyaltyPoints();
     return r;
   }
 
@@ -482,6 +517,7 @@ public class ClienteService {
     response.totalSpent = base.totalSpent;
     response.lastVisit = base.lastVisit;
     response.createdAt = base.createdAt;
+    response.loyaltyPoints = base.loyaltyPoints;
 
     response.stats = new ClienteStatsDto();
     response.stats.totalVisits = stats.totalVisits();

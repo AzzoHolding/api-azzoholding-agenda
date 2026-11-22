@@ -81,6 +81,24 @@ public class EmailJobService {
     emailJobRepository.save(job);
   }
 
+  /**
+   * Conta da cliente (area da cliente): nao e um usuario do salao, entao vai sem user_id. O tenant e o de um salao em
+   * que ela e cliente (email_jobs exige tenant); os modelos de e-mail sao os mesmos do login do salao.
+   */
+  @Transactional
+  public void enqueueParaContaDaCliente(UUID tenantId, UUID relacionado, String email, String nome, AvisoDaClienteEmailPayload aviso) {
+    EmailJob job = new EmailJob();
+    job.setTenantId(tenantId);
+    job.setRelatedEntityType("CONTA_DA_CLIENTE");
+    job.setRelatedEntityId(relacionado);
+    job.setEmailType(EmailJobType.CLIENTE_AVISO);
+    job.setRecipientEmail(email);
+    job.setRecipientName(nome);
+    job.setPayloadJson(toJson(aviso));
+    job.setStatus(EmailJobStatus.NEW);
+    emailJobRepository.save(job);
+  }
+
   @Transactional
   public int processPendingJobsAsync(Runnable onComplete) {
     List<EmailJob> jobs = emailJobRepository.findNextNewBatch(Math.max(batchSize, 1));

@@ -36,6 +36,21 @@ public class CredentialsEmailService {
   private final String from;
   private final boolean consoleFallbackEnabled;
 
+  /**
+   * Remetente de TODO e-mail automatico (decisao do dono de 14/11/2026): ninguem deve responder a
+   * acesso, senha, confirmacao ou aviso. {@code MAIL_FROM} ({@code from}) continua sendo o endereco
+   * de suporte, que aparece no texto e, quando faz sentido responder, no Reply-To. Setter (e nao
+   * construtor): os testes que montam o servico a mao ficam com o padrao.
+   */
+  private String noReply = "no-reply@azzoholding.com.br";
+
+  private static final String NOME_DO_REMETENTE = "Azzo Agenda Pro";
+
+  @Value("${app.mail.no-reply:no-reply@azzoholding.com.br}")
+  void setNoReply(String noReply) {
+    if (noReply != null && !noReply.isBlank()) this.noReply = noReply.trim();
+  }
+
   public CredentialsEmailService(
       JavaMailSender mailSender,
       @Value("${app.mail.credentials.enabled:false}") boolean enabled,
@@ -62,10 +77,13 @@ public class CredentialsEmailService {
         Senha: %s
 
         Recomendamos alterar sua senha no primeiro acesso.
+
+        %s
         """.formatted(
         professionalName == null || professionalName.isBlank() ? "profissional" : professionalName.trim(),
         loginEmail == null ? "" : loginEmail.trim(),
-        rawPassword == null ? "" : rawPassword);
+        rawPassword == null ? "" : rawPassword,
+        rodapeNaoResponda());
     sendWithFallback(toEmail, subject, body, "PROFISSIONAL");
   }
 
@@ -80,10 +98,13 @@ public class CredentialsEmailService {
         Senha temporaria: %s
 
         Altere a senha apos entrar no sistema.
+
+        %s
         """.formatted(
         professionalName == null || professionalName.isBlank() ? "profissional" : professionalName.trim(),
         loginEmail == null ? "" : loginEmail.trim(),
-        rawPassword == null ? "" : rawPassword);
+        rawPassword == null ? "" : rawPassword,
+        rodapeNaoResponda());
     sendWithFallback(toEmail, subject, body, "RESET");
   }
 
@@ -98,9 +119,12 @@ public class CredentialsEmailService {
         %s
 
         Se voce nao solicitou esta alteracao, ignore este email.
+
+        %s
         """.formatted(
         userName == null || userName.isBlank() ? "usuario" : userName.trim(),
-        resetUrl == null ? "" : resetUrl.trim());
+        resetUrl == null ? "" : resetUrl.trim(),
+        rodapeNaoResponda());
     return sendGenericWithFallback(toEmail, subject, body, "PASSWORD_RESET_LINK");
   }
 
@@ -129,7 +153,7 @@ public class CredentialsEmailService {
     }
 
     try {
-      sendViaSmtp(toEmail.trim(), subject, body, from);
+      sendViaSmtp(toEmail.trim(), subject, body, noReply);
     } catch (RuntimeException e) {
       if (consoleFallbackEnabled) {
         LOG.warn(
@@ -160,10 +184,13 @@ public class CredentialsEmailService {
       String overrideFromName,
       String replyTo,
       String logPrefix) {
-    String effectiveFrom = resolveEffectiveFrom();
+    // MAIL_FROM mal configurado continua sendo erro de configuracao (sinal de .env incompleto).
+    String configurado = resolveEffectiveFrom();
+    String effectiveFrom = isFallbackFrom(configurado) ? configurado : noReply;
     if (overrideFromEmail != null && !overrideFromEmail.isBlank()) {
       effectiveFrom = overrideFromEmail.trim();
     }
+    if (overrideFromName == null || overrideFromName.isBlank()) overrideFromName = NOME_DO_REMETENTE;
     if (!enabled) {
       if (consoleFallbackEnabled) {
         LOG.warn("{} (fallback console)", logPrefix);
@@ -200,6 +227,15 @@ public class CredentialsEmailService {
       }
       throw e;
     }
+  }
+
+  /** O endereco de suporte (MAIL_FROM): para o texto e para o Reply-To de quem pode responder. */
+  public String enderecoDeSuporte() {
+    return resolveEffectiveFrom();
+  }
+
+  private String rodapeNaoResponda() {
+    return "Este e-mail e automatico: nao responda. Duvidas: " + resolveEffectiveFrom();
   }
 
   private String resolveEffectiveFrom() {
